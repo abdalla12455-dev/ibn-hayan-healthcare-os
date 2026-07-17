@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediFlow · Clinic Portal</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="assets/css/main.css" />
+</head>
+<body class="min-h-screen">
+
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside class="mf-sidebar w-64 flex-shrink-0 flex flex-col">
+      <div class="p-5 border-b" style="border-color: var(--mf-border);">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white" id="clinicIconWrap">
+            <span class="ms ms-lg" id="clinicIcon">local_hospital</span>
+          </div>
+          <div class="min-w-0">
+            <h1 class="font-bold text-lg leading-tight truncate" id="clinicNameHeader">Clinic</h1>
+            <p class="text-xs" style="color: var(--mf-text-soft);" id="clinicTypeHeader">—</p>
+          </div>
+        </div>
+      </div>
+
+      <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+        <div class="mf-nav-item active" data-view="view-dashboard">
+          <span class="ms ms-md">dashboard</span><span data-i18n="dashboard">Dashboard</span>
+        </div>
+        <div class="mf-nav-item" data-view="view-patients">
+          <span class="ms ms-md">groups</span><span data-i18n="patients">Patients</span>
+        </div>
+        <div class="mf-nav-item" data-view="view-doctors">
+          <span class="ms ms-md">medical_services</span><span data-i18n="doctors">Doctors</span>
+        </div>
+        <div class="mf-nav-item" data-view="view-employees">
+          <span class="ms ms-md">badge</span><span data-i18n="employees">Employees</span>
+        </div>
+        <div class="mf-nav-item" data-view="view-financials">
+          <span class="ms ms-md">payments</span><span data-i18n="financials">Financials</span>
+        </div>
+        <!-- Clinic-specific nav items are injected here by applyClinicLayout() -->
+        <div id="clinicExtraNav"></div>
+        <div class="mf-nav-item" data-view="view-settings">
+          <span class="ms ms-md">settings</span><span data-i18n="settings">Settings</span>
+        </div>
+      </nav>
+
+      <div class="p-3 border-t" style="border-color: var(--mf-border);">
+        <a href="index.html" class="mf-nav-item">
+          <span class="ms ms-md">arrow_back</span><span data-i18n="backToAdmin">Back to Super Admin</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- ===================== MAIN ===================== -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+      <header class="mf-header h-16 flex items-center justify-between px-6 flex-shrink-0">
+        <div>
+          <h2 class="font-semibold text-lg" id="pageTitle" data-i18n="dashboard">Dashboard</h2>
+          <p class="text-xs" style="color: var(--mf-text-soft);" id="pageSubtitle" data-i18n="appTagline">Clinic Management SaaS</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <button id="langToggle" class="btn btn-ghost btn-sm" title="Language">
+            <span class="ms ms-sm">language</span><span id="langLabel">عربي</span>
+          </button>
+          <button id="themeToggle" class="btn btn-ghost btn-sm" title="Theme">
+            <span class="ms ms-sm" data-theme-icon>dark_mode</span>
+          </button>
+          <button id="notifBtn" class="btn btn-ghost btn-sm relative" title="Notifications">
+            <span class="ms ms-sm">notifications</span>
+            <span id="notifBadge" class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center hidden">0</span>
+          </button>
+          <div class="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm" id="managerAvatar">CA</div>
+        </div>
+      </header>
+
+      <!-- CONTENT CANVAS -->
+      <main id="content-canvas" class="flex-1 overflow-y-auto p-6">
+
+        <!-- ===== Dashboard ===== -->
+        <section id="view-dashboard" class="space-y-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="mf-card p-5 flex items-center gap-4">
+              <div class="stat-icon indigo"><span class="ms ms-lg">groups</span></div>
+              <div>
+                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="patientsToday">Patients Today</p>
+                <p class="text-2xl font-bold" id="statPatientsToday">0</p>
+              </div>
+            </div>
+            <div class="mf-card p-5 flex items-center gap-4">
+              <div class="stat-icon emerald"><span class="ms ms-lg">medical_services</span></div>
+              <div>
+                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="doctors">Doctors</p>
+                <p class="text-2xl font-bold" id="statDoctorsCount">0</p>
+              </div>
+            </div>
+            <div class="mf-card p-5 flex items-center gap-4">
+              <div class="stat-icon blue"><span class="ms ms-lg">payments</span></div>
+              <div>
+                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="todayRevenue">Today Revenue</p>
+                <p class="text-2xl font-bold" id="statTodayRevenue">$0</p>
+              </div>
+            </div>
+            <div class="mf-card p-5 flex items-center gap-4">
+              <div class="stat-icon amber"><span class="ms ms-lg">hourglass_empty</span></div>
+              <div>
+                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="st_waiting">Waiting</p>
+                <p class="text-2xl font-bold" id="statWaiting">0</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="mf-card overflow-hidden">
+            <div class="px-5 py-4 border-b flex items-center justify-between" style="border-color: var(--mf-border);">
+              <h3 class="font-semibold" data-i18n="patients">Patients</h3>
+              <button class="btn btn-primary" onclick="MediFlow.ClinicCore.openPatientModal()">
+                <span class="ms ms-sm">person_add</span><span data-i18n="addPatient">Add Patient</span>
+              </button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="mf-table">
+                <thead>
+                  <tr id="patientTableHead">
+                    <th data-i18n="patientName">Patient Name</th>
+                    <th data-i18n="phone">Phone</th>
+                    <th data-i18n="assignDoctor">Doctor</th>
+                    <th data-i18n="status">Status</th>
+                    <th data-i18n="arrivedAt">Arrived At</th>
+                    <th data-i18n="waitTime">Wait Time</th>
+                    <th data-i18n="invoiceAmount">Invoice</th>
+                    <th data-i18n="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="patientsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Patients ===== -->
+        <section id="view-patients" class="hidden space-y-6">
+          <div class="flex items-center justify-between flex-wrap gap-3">
+            <h3 class="text-lg font-semibold" data-i18n="patients">Patients</h3>
+            <div class="flex gap-2">
+              <input class="input !w-64" id="patientSearch" placeholder="Search..." data-i18n-ph="search" />
+              <select class="input !w-40" id="patientStatusFilter">
+                <option value="">All Status</option>
+                <option value="arrived" data-i18n="st_arrived">Arrived</option>
+                <option value="waiting" data-i18n="st_waiting">Waiting</option>
+                <option value="withDoctor" data-i18n="st_withDoctor">With Doctor</option>
+                <option value="completed" data-i18n="st_completed">Completed</option>
+                <option value="cancelled" data-i18n="st_cancelled">Cancelled</option>
+              </select>
+              <button class="btn btn-primary" onclick="MediFlow.ClinicCore.openPatientModal()">
+                <span class="ms ms-sm">person_add</span><span data-i18n="addPatient">Add Patient</span>
+              </button>
+            </div>
+          </div>
+          <div class="mf-card overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="mf-table">
+                <thead><tr id="patientFullTableHead">
+                  <th data-i18n="patientName">Patient Name</th>
+                  <th data-i18n="phone">Phone</th>
+                  <th data-i18n="age">Age</th>
+                  <th data-i18n="assignDoctor">Doctor</th>
+                  <th data-i18n="status">Status</th>
+                  <th data-i18n="invoiceAmount">Invoice</th>
+                  <th data-i18n="actions">Actions</th>
+                </tr></thead>
+                <tbody id="patientsFullTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Doctors ===== -->
+        <section id="view-doctors" class="hidden space-y-6">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold" data-i18n="doctors">Doctors</h3>
+            <button class="btn btn-primary" onclick="MediFlow.ClinicCore.openDoctorModal()">
+              <span class="ms ms-sm">person_add</span><span data-i18n="addDoctor">Add Doctor</span>
+            </button>
+          </div>
+          <div id="doctorsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </section>
+
+        <!-- ===== Employees ===== -->
+        <section id="view-employees" class="hidden space-y-6">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold" data-i18n="employees">Employees</h3>
+            <button class="btn btn-primary" onclick="MediFlow.ClinicCore.openEmployeeModal()">
+              <span class="ms ms-sm">person_add</span>Add Employee
+            </button>
+          </div>
+          <div class="mf-card overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="mf-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Salary</th>
+                    <th>Status</th>
+                    <th data-i18n="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="employeesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Financials ===== -->
+        <section id="view-financials" class="hidden space-y-6">
+          <h3 class="text-lg font-semibold" data-i18n="financials">Financials</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="mf-card p-5">
+              <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="todayRevenue">Today Revenue</p>
+              <p class="text-2xl font-bold text-emerald-600" id="finTodayRev">$0</p>
+            </div>
+            <div class="mf-card p-5">
+              <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="monthRevenue">Month Revenue</p>
+              <p class="text-2xl font-bold text-indigo-600" id="finMonthRev">$0</p>
+            </div>
+            <div class="mf-card p-5">
+              <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="salaryPayouts">Salary Payouts</p>
+              <p class="text-2xl font-bold text-amber-600" id="finSalaries">$0</p>
+            </div>
+          </div>
+          <div class="mf-card overflow-hidden">
+            <div class="px-5 py-4 border-b" style="border-color: var(--mf-border);">
+              <h4 class="font-semibold" data-i18n="salaryPayouts">Salary Payouts</h4>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="mf-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="doctorName">Doctor Name</th>
+                    <th data-i18n="fixedSalary">Fixed Salary</th>
+                    <th data-i18n="incentiveRate">Incentive Rate %</th>
+                    <th data-i18n="patientsToday">Patients Today</th>
+                    <th data-i18n="earnedToday">Earned Today</th>
+                    <th data-i18n="actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="salaryTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Clinic-specific views (injected by applyClinicLayout) ===== -->
+        <div id="clinicExtraViews"></div>
+
+        <!-- ===== Settings ===== -->
+        <section id="view-settings" class="hidden space-y-6 max-w-2xl">
+          <h3 class="text-lg font-semibold" data-i18n="settings">Settings</h3>
+          <div class="mf-card p-6 space-y-5">
+            <div>
+              <label class="label" data-i18n="clinicInfo">Clinic Info</label>
+              <div class="grid grid-cols-2 gap-3 mt-1">
+                <input class="input" id="settingsClinicName" placeholder="Clinic name" />
+                <input class="input" id="settingsClinicManager" placeholder="Manager name" />
+              </div>
+              <button class="btn btn-primary mt-2" onclick="MediFlow.ClinicCore.saveClinicInfo()" data-i18n="save">Save</button>
+            </div>
+            <div>
+              <label class="label" data-i18n="darkMode">Dark Mode</label>
+              <button id="settingsThemeToggle" class="btn btn-ghost">
+                <span class="ms ms-sm" data-theme-toggle-icon>toggle_off</span><span data-theme-label>Off</span>
+              </button>
+            </div>
+            <div>
+              <label class="label" data-i18n="language">Language</label>
+              <div class="flex gap-2">
+                <button class="btn btn-ghost lang-btn" data-lang="en">English</button>
+                <button class="btn btn-ghost lang-btn" data-lang="ar">العربية</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ===================== NOTIFICATION PANEL ===================== -->
+  <div class="notif-panel" id="notifPanel">
+    <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--mf-border);">
+      <h4 class="font-semibold" data-i18n="notifications">Notifications</h4>
+      <button onclick="document.getElementById('notifPanel').classList.remove('active')" style="color: var(--mf-text-soft);">
+        <span class="ms ms-md">close</span>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-3 space-y-2" id="notifList"></div>
+  </div>
+
+  <!-- ===================== MODAL: PATIENT ===================== -->
+  <div class="modal-overlay" id="patientModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="font-semibold text-lg" id="patientModalTitle" data-i18n="addPatient">Add Patient</h3>
+        <button onclick="MediFlow.UI.closeModal('patientModal')" style="color: var(--mf-text-soft);">
+          <span class="ms ms-md">close</span>
+        </button>
+      </div>
+      <div class="modal-body space-y-4">
+        <input type="hidden" id="patientEditId" />
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label" data-i18n="patientName">Patient Name</label><input class="input" id="patientNameInput" /></div>
+          <div><label class="label" data-i18n="phone">Phone</label><input class="input" id="patientPhoneInput" /></div>
+          <div><label class="label" data-i18n="age">Age</label><input class="input" type="number" id="patientAgeInput" /></div>
+          <div>
+            <label class="label" data-i18n="gender">Gender</label>
+            <select class="input" id="patientGenderInput">
+              <option value="male" data-i18n="male">Male</option>
+              <option value="female" data-i18n="female">Female</option>
+            </select>
+          </div>
+          <div><label class="label" data-i18n="assignDoctor">Doctor</label><select class="input" id="patientDoctorInput"></select></div>
+          <div><label class="label" data-i18n="invoiceAmount">Invoice Amount</label><input class="input" type="number" id="patientInvoiceInput" value="0" /></div>
+        </div>
+        <!-- Clinic-specific fields injected by ClinicModule.renderFormFields() -->
+        <div id="clinicSpecificFields" class="grid grid-cols-2 gap-4 border-t pt-4" style="border-color: var(--mf-border);"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('patientModal')" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-primary" onclick="MediFlow.ClinicCore.savePatient()" data-i18n="save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: DOCTOR ===================== -->
+  <div class="modal-overlay" id="doctorModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="font-semibold text-lg" id="doctorModalTitle" data-i18n="addDoctor">Add Doctor</h3>
+        <button onclick="MediFlow.UI.closeModal('doctorModal')" style="color: var(--mf-text-soft);">
+          <span class="ms ms-md">close</span>
+        </button>
+      </div>
+      <div class="modal-body space-y-4">
+        <input type="hidden" id="doctorEditId" />
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label" data-i18n="doctorName">Doctor Name</label><input class="input" id="doctorNameInput" /></div>
+          <div><label class="label" data-i18n="specialty">Specialty</label><input class="input" id="doctorSpecialtyInput" /></div>
+          <div>
+            <label class="label" data-i18n="status">Status</label>
+            <select class="input" id="doctorStatusInput">
+              <option value="onDuty" data-i18n="onDuty">On Duty</option>
+              <option value="onLeave" data-i18n="onLeave">On Leave</option>
+            </select>
+          </div>
+          <div><label class="label" data-i18n="fixedSalary">Fixed Salary</label><input class="input" type="number" id="doctorSalaryInput" value="0" /></div>
+          <div><label class="label" data-i18n="incentiveRate">Incentive Rate %</label><input class="input" type="number" id="doctorIncentiveInput" value="0" /></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('doctorModal')" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-primary" onclick="MediFlow.ClinicCore.saveDoctor()" data-i18n="save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: EMPLOYEE ===================== -->
+  <div class="modal-overlay" id="employeeModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="font-semibold text-lg" id="employeeModalTitle">Add Employee</h3>
+        <button onclick="MediFlow.UI.closeModal('employeeModal')" style="color: var(--mf-text-soft);">
+          <span class="ms ms-md">close</span>
+        </button>
+      </div>
+      <div class="modal-body space-y-4">
+        <input type="hidden" id="employeeEditId" />
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Name</label><input class="input" id="employeeNameInput" /></div>
+          <div><label class="label">Role</label><input class="input" id="employeeRoleInput" placeholder="Receptionist, Nurse..." /></div>
+          <div><label class="label">Salary</label><input class="input" type="number" id="employeeSalaryInput" value="0" /></div>
+          <div>
+            <label class="label">Status</label>
+            <select class="input" id="employeeStatusInput">
+              <option value="active">Active</option>
+              <option value="onLeave">On Leave</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('employeeModal')" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-primary" onclick="MediFlow.ClinicCore.saveEmployee()" data-i18n="save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: PAY DOCTOR ===================== -->
+  <div class="modal-overlay" id="payDoctorModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="font-semibold text-lg" data-i18n="payDoctor">Pay Doctor</h3>
+        <button onclick="MediFlow.UI.closeModal('payDoctorModal')" style="color: var(--mf-text-soft);">
+          <span class="ms ms-md">close</span>
+        </button>
+      </div>
+      <div class="modal-body space-y-4">
+        <input type="hidden" id="payDoctorId" />
+        <div class="rounded-xl p-4 space-y-2" style="background-color: var(--mf-muted-bg);">
+          <div class="flex justify-between"><span style="color: var(--mf-text-soft);" data-i18n="doctorName">Doctor Name</span><span class="font-semibold" id="payDoctorName">—</span></div>
+          <div class="flex justify-between"><span style="color: var(--mf-text-soft);" data-i18n="fixedSalary">Fixed Salary</span><span id="payDoctorSalary">—</span></div>
+          <div class="flex justify-between"><span style="color: var(--mf-text-soft);" data-i18n="earnedToday">Earned Today</span><span id="payDoctorEarned">—</span></div>
+        </div>
+        <div>
+          <label class="label" data-i18n="payoutAmount">Payout Amount</label>
+          <input class="input" type="number" id="payDoctorAmount" value="0" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('payDoctorModal')" data-i18n="cancel">Cancel</button>
+        <button class="btn btn-success" onclick="MediFlow.ClinicCore.confirmPayDoctor()" data-i18n="pay">Pay</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SCRIPTS (order matters) ===================== -->
+  <script src="assets/js/core/store.js"></script>
+  <script src="assets/js/core/i18n.js"></script>
+  <script src="assets/js/core/ui.js"></script>
+  <script src="assets/js/core/router.js"></script>
+  <script src="assets/js/core/seed.js"></script>
+  <!-- Clinic modules (register themselves with ClinicRegistry) -->
+  <script src="assets/js/clinics/clinic-core.js"></script>
+  <script src="assets/js/clinics/laser.js"></script>
+  <script src="assets/js/clinics/dental.js"></script>
+  <script src="assets/js/clinics/lab.js"></script>
+  <script src="assets/js/clinics/pediatrics.js"></script>
+  <script src="assets/js/clinics/internal.js"></script>
+</body>
+</html>
