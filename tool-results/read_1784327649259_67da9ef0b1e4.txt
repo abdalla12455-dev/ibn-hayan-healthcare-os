@@ -1,0 +1,889 @@
+     1→/* ============================================================
+     2→   MediFlow — Clinic Core
+     3→   - ClinicRegistry: each specialty module registers a config
+     4→   - applyClinicLayout(clinicType): looks up registry & renders
+     5→   - Shared patient lifecycle (status flow + timestamps)
+     6→   - Shared doctor/employee CRUD
+     7→   - Financial engine: fixed salary + incentive * patientsCount
+     8→   ============================================================ */
+     9→
+    10→window.MediFlow = window.MediFlow || {};
+    11→
+    12→MediFlow.ClinicRegistry = (function () {
+    13→  'use strict';
+    14→  const _registry = {};
+    15→
+    16→  function register(config) {
+    17→    if (!config || !config.type) throw new Error('Clinic module config requires .type');
+    18→    _registry[config.type] = config;
+    19→    // Auto-init if defined
+    20→    if (typeof config.init === 'function') {
+    21→      try { config.init(); } catch (e) { console.error(`[ClinicRegistry] init fail for ${config.type}`, e); }
+    22→    }
+    23→  }
+    24→  function get(type) { return _registry[type] || null; }
+    25→  function all() { return Object.values(_registry); }
+    26→  function types() { return Object.keys(_registry); }
+    27→
+    28→  return { register, get, all, types };
+    29→})();
+    30→
+    31→MediFlow.ClinicCore = (function () {
+    32→  'use strict';
+    33→
+    34→  const { Store, I18n, UI, Router, Seed } = MediFlow;
+    35→  const { t, applyI18n, applyDirection } = I18n;
+    36→  const { escapeHtml, fmtMoney, fmtNum, fmtTime, fmtDate, fmtDuration, uid, nowIso, clinicTypeMeta } = UI;
+    37→
+    38→  // ---- Active clinic context ----
+    39→  let _clinic = null;        // { id, type, name, manager, plan, ... }
+    40→  let _ds = null;            // DataService bound to _clinic.id
+    41→  let _module = null;        // Active clinic module config
+    42→
+    43→  // ---- Patient status flow ----
+    44→  const PATIENT_FLOW = ['arrived', 'waiting', 'withDoctor', 'completed'];
+    45→
+    46→  // ============================================================
+    47→  // INIT
+    48→  // ============================================================
+    49→  function init() {
+    50→    Seed.seedIfEmpty();
+    51→    loadClinicContext();
+    52→    if (!_clinic) return;
+    53→
+    54→    UI.applyTheme();
+    55→    applyI18n();
+    56→    applyDirection();
+    57→    applyClinicLayout(_clinic.type);
+    58→
+    59→    Router.configure({
+    60→      titleEl: 'pageTitle',
+    61→      subtitleEl: 'pageSubtitle',
+    62→      titleMap: {
+    63→        'view-dashboard': 'dashboard',
+    64→        'view-patients': 'patients',
+    65→        'view-doctors': 'doctors',
+    66→        'view-employees': 'employees',
+    67→        'view-financials': 'financials',
+    68→        'view-settings': 'settings'
+    69→      }
+    70→    });
+    71→    // Re-render after every navigation
+    72→    Router.after(renderAll);
+    73→    Router.init();
+    74→
+    75→    bindHeader();
+    76→    bindSettings();
+    77→    bindPatientFilters();
+    78→    UI.bindGlobalEvents();
+    79→    renderAll();
+    80→    updateLangLabel();
+    81→  }
+    82→
+    83→  function loadClinicContext() {
+    84→    const meta = Store.getActiveClinic();
+    85→    if (!meta) {
+    86→      alert('No clinic selected. Redirecting to Super Admin.');
+    87→      window.location.href = 'index.html';
+    88→      return;
+    89→    }
+    90→    const clinics = Store.getClinics();
+    91→    _clinic = clinics.find(c => c.id === meta.id);
+    92→    if (!_clinic) {
+    93→      alert('Clinic not found. Redirecting to Super Admin.');
+    94→      window.location.href = 'index.html';
+    95→      return;
+    96→    }
+    97→    _ds = Store.forClinic(_clinic.id);
+    98→    _module = MediFlow.ClinicRegistry.get(_clinic.type);
+    99→
+   100→    // Header / sidebar cosmetics
+   101→    const meta2 = clinicTypeMeta(_clinic.type);
+   102→    document.getElementById('clinicNameHeader').textContent = _clinic.name;
+   103→    document.getElementById('clinicTypeHeader').textContent = t(meta2.tKey);
+   104→    document.getElementById('clinicIcon').textContent = meta2.icon;
+   105→    document.getElementById('clinicIconWrap').className = `w-10 h-10 rounded-xl flex items-center justify-center text-white ${meta2.color}`;
+   106→    document.getElementById('managerAvatar').textContent = (_clinic.manager || 'CA').slice(0, 2).toUpperCase();
+   107→    document.title = `MediFlow · ${_clinic.name}`;
+   108→
+   109→    document.getElementById('settingsClinicName').value = _clinic.name;
+   110→    document.getElementById('settingsClinicManager').value = _clinic.manager || '';
+   111→  }
+   112→
+   113→  // ============================================================
+   114→  // DYNAMIC LAYOUT ENGINE
+   115→  // applyClinicLayout(clinicType) — looks up registry, injects:
+   116→  //   - extra sidebar nav items
+   117→  //   - extra content-canvas sections
+   118→  //   - clinic-specific patient form fields
+   119→  //   - clinic-specific table columns
+   120→  // No if/switch chains — pure registry lookup.
+   121→  // ============================================================
+   122→  function applyClinicLayout(clinicType) {
+   123→    const mod = MediFlow.ClinicRegistry.get(clinicType);
+   124→    if (!mod) {
+   125→      console.warn(`[ClinicCore] No module registered for type "${clinicType}"`);
+   126→      return;
+   127→    }
+   128→    _module = mod;
+   129→
+   130→    // 1) Inject extra sidebar nav items
+   131→    const navHost = document.getElementById('clinicExtraNav');
+   132→    if (navHost && mod.extraNav) {
+   133→      navHost.innerHTML = mod.extraNav.map(item => `
+   134→        <div class="mf-nav-item" data-view="${item.view}">
+   135→          <span class="ms ms-md">${item.icon}</span><span>${escapeHtml(item.label)}</span>
+   136→        </div>
+   137→      `).join('');
+   138→    } else if (navHost) {
+   139→      navHost.innerHTML = '';
+   140→    }
+   141→
+   142→    // 2) Inject extra content-canvas sections
+   143→    const viewsHost = document.getElementById('clinicExtraViews');
+   144→    if (viewsHost && mod.extraViews) {
+   145→      viewsHost.innerHTML = mod.extraViews.map(v => v.html).join('');
+   146→    } else if (viewsHost) {
+   147→      viewsHost.innerHTML = '';
+   148→    }
+   149→
+   150→    // 3) Inject clinic-specific patient form fields
+   151→    const fieldsHost = document.getElementById('clinicSpecificFields');
+   152→    if (fieldsHost && mod.renderFormFields) {
+   153→      fieldsHost.innerHTML = mod.renderFormFields();
+   154→    } else if (fieldsHost) {
+   155→      fieldsHost.innerHTML = '';
+   156→    }
+   157→
+   158→    // 4) Inject clinic-specific table headers (optional)
+   159→    if (mod.extraTableHeaders) {
+   160→      ['patientTableHead', 'patientFullTableHead'].forEach(id => {
+   161→        const head = document.getElementById(id);
+   162→        if (head) {
+   163→          // Rebuild keeping the standard ones at start, extra before actions
+   164→          // Simpler: append if not present
+   165→          const existing = head.querySelector('th[data-extra]');
+   166→          if (!existing) {
+   167→            head.insertAdjacentHTML('beforeend', mod.extraTableHeaders);
+   168→          }
+   169→        }
+   170→      });
+   171→    }
+   172→
+   173→    // 5) Re-bind nav (new items just added)
+   174→    Router.bindNav();
+   175→
+   176→    // 6) Run module's onLayoutApplied hook
+   177→    if (typeof mod.onLayoutApplied === 'function') {
+   178→      try { mod.onLayoutApplied(); } catch (e) { console.error(e); }
+   179→    }
+   180→
+   181→    applyI18n();
+   182→  }
+   183→
+   184→  // ============================================================
+   185→  // RENDER ALL
+   186→  // ============================================================
+   187→  function renderAll() {
+   188→    if (!_clinic) return;
+   189→    renderDashboardStats();
+   190→    renderPatientsTable();
+   191→    renderPatientsFullTable();
+   192→    renderDoctors();
+   193→    renderEmployees();
+   194→    renderFinancials();
+   195→    renderNotifList();
+   196→    renderNotifBadge();
+   197→    applyI18n();
+   198→    // Module-specific rendering hook
+   199→    if (_module && typeof _module.render === 'function') {
+   200→      try { _module.render(); } catch (e) { console.error(e); }
+   201→    }
+   202→  }
+   203→
+   204→  // ---- Dashboard stats ----
+   205→  function renderDashboardStats() {
+   206→    const today = todayPatients();
+   207→    document.getElementById('statPatientsToday').textContent = fmtNum(today.length);
+   208→    document.getElementById('statDoctorsCount').textContent = fmtNum(_ds.getDoctors().length);
+   209→    document.getElementById('statTodayRevenue').textContent = fmtMoney(today.reduce((s, p) => s + (Number(p.invoice) || 0), 0));
+   210→    document.getElementById('statWaiting').textContent = fmtNum(_ds.getPatients().filter(p => p.status === 'waiting' || p.status === 'arrived').length);
+   211→  }
+   212→
+   213→  // ============================================================
+   214→  // PATIENT LIFECYCLE
+   215→  // ============================================================
+   216→  function advancePatientStatus(id) {
+   217→    const list = _ds.getPatients();
+   218→    const p = list.find(x => x.id === id);
+   219→    if (!p) return;
+   220→    const idx = PATIENT_FLOW.indexOf(p.status);
+   221→    if (idx === -1 || idx >= PATIENT_FLOW.length - 1) return;
+   222→    const next = PATIENT_FLOW[idx + 1];
+   223→    p.status = next;
+   224→    if (next === 'withDoctor') p.withDoctorAt = nowIso();
+   225→    if (next === 'completed')  p.completedAt  = nowIso();
+   226→    _ds.setPatients(list);
+   227→    Store.pushNotif(`Patient "${p.name}" → ${t('st_' + next)}`, 'info');
+   228→    UI.toast(`Patient advanced to ${t('st_' + next)}`, 'success');
+   229→    bumpClinicStats();
+   230→    renderAll();
+   231→  }
+   232→
+   233→  function setPatientStatus(id, status) {
+   234→    const list = _ds.getPatients();
+   235→    const p = list.find(x => x.id === id);
+   236→    if (!p) return;
+   237→    p.status = status;
+   238→    if (status === 'withDoctor' && !p.withDoctorAt) p.withDoctorAt = nowIso();
+   239→    if (status === 'completed'  && !p.completedAt)  p.completedAt  = nowIso();
+   240→    if (status === 'cancelled') p.completedAt = nowIso();
+   241→    _ds.setPatients(list);
+   242→    Store.pushNotif(`Patient "${p.name}" marked ${t('st_' + status)}`, 'info');
+   243→    bumpClinicStats();
+   244→    renderAll();
+   245→  }
+   246→
+   247→  function calcWaitTime(p) {
+   248→    if (!p.arrivedAt) return 0;
+   249→    const end = p.withDoctorAt || p.completedAt || nowIso();
+   250→    return new Date(end) - new Date(p.arrivedAt);
+   251→  }
+   252→
+   253→  // ---- Bump super-admin's bookings/revenue counters for this clinic ----
+   254→  function bumpClinicStats() {
+   255→    const clinics = Store.getClinics();
+   256→    const idx = clinics.findIndex(c => c.id === _clinic.id);
+   257→    if (idx === -1) return;
+   258→    const all = _ds.getPatients();
+   259→    clinics[idx].bookings = all.length;
+   260→    clinics[idx].revenue  = all.reduce((s, p) => s + (Number(p.invoice) || 0), 0);
+   261→    _clinic = clinics[idx];
+   262→    Store.setClinics(clinics);
+   263→  }
+   264→
+   265→  // ---- Dashboard table (live queue) ----
+   266→  function renderPatientsTable() {
+   267→    const tbody = document.getElementById('patientsTableBody');
+   268→    if (!tbody) return;
+   269→    const list = _ds.getPatients().slice().reverse();
+   270→    if (list.length === 0) {
+   271→      tbody.innerHTML = emptyRow(8);
+   272→      return;
+   273→    }
+   274→    tbody.innerHTML = list.map(p => {
+   275→      const doc = _ds.getDoctors().find(d => d.id === p.doctorId);
+   276→      const wait = fmtDuration(calcWaitTime(p));
+   277→      const extraCells = _module && _module.renderExtraCells
+   278→        ? _module.renderExtraCells(p)
+   279→        : '';
+   280→      return `
+   281→        <tr>
+   282→          <td class="font-medium">${escapeHtml(p.name)}</td>
+   283→          <td>${escapeHtml(p.phone || '—')}</td>
+   284→          <td>${doc ? escapeHtml(doc.name) : '—'}</td>
+   285→          <td><span class="badge badge-${p.status}">${t('st_' + p.status)}</span></td>
+   286→          <td>${fmtTime(p.arrivedAt)}</td>
+   287→          <td>${wait}</td>
+   288→          <td class="font-semibold">${fmtMoney(p.invoice || 0)}</td>
+   289→          <td>
+   290→            <div class="flex gap-1">
+   291→              ${nextStatusButton(p)}
+   292→              <button class="btn btn-ghost btn-sm text-red-500" title="Cancel" onclick="MediFlow.ClinicCore.setPatientStatus('${p.id}','cancelled')">
+   293→                <span class="ms ms-sm">cancel</span>
+   294→              </button>
+   295→            </div>
+   296→          </td>
+   297→          ${extraCells}
+   298→        </tr>
+   299→      `;
+   300→    }).join('');
+   301→  }
+   302→
+   303→  function nextStatusButton(p) {
+   304→    const idx = PATIENT_FLOW.indexOf(p.status);
+   305→    if (idx === -1 || idx >= PATIENT_FLOW.length - 1) return `<span class="text-xs px-2" style="color: var(--mf-text-soft);">—</span>`;
+   306→    const next = PATIENT_FLOW[idx + 1];
+   307→    const icon = { waiting: 'hourglass_top', withDoctor: 'medical_services', completed: 'check_circle' }[next] || 'arrow_forward';
+   308→    return `<button class="btn btn-ghost btn-sm" title="Advance" onclick="MediFlow.ClinicCore.advancePatientStatus('${p.id}')">
+   309→              <span class="ms ms-sm">${icon}</span>
+   310→            </button>`;
+   311→  }
+   312→
+   313→  // ---- Full patients table (with filters) ----
+   314→  function bindPatientFilters() {
+   315→    const search = document.getElementById('patientSearch');
+   316→    const filter = document.getElementById('patientStatusFilter');
+   317→    if (search) search.addEventListener('input', UI.debounce(renderPatientsFullTable, 150));
+   318→    if (filter) filter.addEventListener('change', renderPatientsFullTable);
+   319→  }
+   320→
+   321→  function renderPatientsFullTable() {
+   322→    const tbody = document.getElementById('patientsFullTableBody');
+   323→    if (!tbody) return;
+   324→    const search = (document.getElementById('patientSearch').value || '').toLowerCase();
+   325→    const status = document.getElementById('patientStatusFilter').value;
+   326→    let list = _ds.getPatients();
+   327→    if (search) list = list.filter(p => p.name.toLowerCase().includes(search) || (p.phone || '').includes(search));
+   328→    if (status) list = list.filter(p => p.status === status);
+   329→    if (list.length === 0) {
+   330→      tbody.innerHTML = emptyRow(7);
+   331→      return;
+   332→    }
+   333→    tbody.innerHTML = list.map(p => {
+   334→      const doc = _ds.getDoctors().find(d => d.id === p.doctorId);
+   335→      const extraCells = _module && _module.renderExtraCells
+   336→        ? _module.renderExtraCells(p)
+   337→        : '';
+   338→      return `
+   339→        <tr>
+   340→          <td class="font-medium">${escapeHtml(p.name)}</td>
+   341→          <td>${escapeHtml(p.phone || '—')}</td>
+   342→          <td>${p.age || '—'}</td>
+   343→          <td>${doc ? escapeHtml(doc.name) : '—'}</td>
+   344→          <td><span class="badge badge-${p.status}">${t('st_' + p.status)}</span></td>
+   345→          <td class="font-semibold">${fmtMoney(p.invoice || 0)}</td>
+   346→          <td>
+   347→            <div class="flex gap-1">
+   348→              <button class="btn btn-ghost btn-sm" title="Edit" onclick="MediFlow.ClinicCore.editPatient('${p.id}')">
+   349→                <span class="ms ms-sm">edit</span>
+   350→              </button>
+   351→              <button class="btn btn-ghost btn-sm text-red-500" title="Delete" onclick="MediFlow.ClinicCore.deletePatient('${p.id}')">
+   352→                <span class="ms ms-sm">delete</span>
+   353→              </button>
+   354→            </div>
+   355→          </td>
+   356→          ${extraCells}
+   357→        </tr>
+   358→      `;
+   359→    }).join('');
+   360→  }
+   361→
+   362→  function emptyRow(colspan) {
+   363→    return `<tr><td colspan="${colspan}" class="text-center py-8" style="color: var(--mf-text-soft);" data-i18n="noData">No data available</td></tr>`;
+   364→  }
+   365→
+   366→  // ============================================================
+   367→  // PATIENT CRUD
+   368→  // ============================================================
+   369→  function openPatientModal() {
+   370→    document.getElementById('patientModalTitle').textContent = t('addPatient');
+   371→    document.getElementById('patientEditId').value = '';
+   372→    document.getElementById('patientNameInput').value = '';
+   373→    document.getElementById('patientPhoneInput').value = '';
+   374→    document.getElementById('patientAgeInput').value = '';
+   375→    document.getElementById('patientGenderInput').value = 'male';
+   376→    document.getElementById('patientInvoiceInput').value = '0';
+   377→    populateDoctorSelect('');
+   378→    // Reset clinic-specific fields
+   379→    if (_module && _module.renderFormFields) {
+   380→      document.getElementById('clinicSpecificFields').innerHTML = _module.renderFormFields();
+   381→    }
+   382→    UI.openModal('patientModal');
+   383→  }
+   384→
+   385→  function editPatient(id) {
+   386→    const p = _ds.getPatients().find(x => x.id === id);
+   387→    if (!p) return;
+   388→    document.getElementById('patientModalTitle').textContent = t('editPatient');
+   389→    document.getElementById('patientEditId').value = p.id;
+   390→    document.getElementById('patientNameInput').value = p.name;
+   391→    document.getElementById('patientPhoneInput').value = p.phone || '';
+   392→    document.getElementById('patientAgeInput').value = p.age || '';
+   393→    document.getElementById('patientGenderInput').value = p.gender || 'male';
+   394→    document.getElementById('patientInvoiceInput').value = p.invoice || 0;
+   395→    populateDoctorSelect(p.doctorId);
+   396→    if (_module && _module.renderFormFields) {
+   397→      document.getElementById('clinicSpecificFields').innerHTML = _module.renderFormFields();
+   398→      if (typeof _module.hydrateFormFields === 'function') _module.hydrateFormFields(p);
+   399→    }
+   400→    UI.openModal('patientModal');
+   401→  }
+   402→
+   403→  function populateDoctorSelect(selectedId) {
+   404→    const sel = document.getElementById('patientDoctorInput');
+   405→    const docs = _ds.getDoctors();
+   406→    if (docs.length === 0) {
+   407→      sel.innerHTML = `<option value="">— No doctors —</option>`;
+   408→      return;
+   409→    }
+   410→    sel.innerHTML = docs.map(d =>
+   411→      `<option value="${d.id}" ${d.id === selectedId ? 'selected' : ''}>${escapeHtml(d.name)} — ${escapeHtml(d.specialty || '')}</option>`
+   412→    ).join('');
+   413→  }
+   414→
+   415→  function savePatient() {
+   416→    const id = document.getElementById('patientEditId').value;
+   417→    const name = document.getElementById('patientNameInput').value.trim();
+   418→    if (!name) { UI.toast('Patient name is required', 'warning'); return; }
+   419→    const payload = {
+   420→      name,
+   421→      phone: document.getElementById('patientPhoneInput').value.trim(),
+   422→      age: Number(document.getElementById('patientAgeInput').value) || 0,
+   423→      gender: document.getElementById('patientGenderInput').value,
+   424→      doctorId: document.getElementById('patientDoctorInput').value,
+   425→      invoice: Number(document.getElementById('patientInvoiceInput').value) || 0
+   426→    };
+   427→    // Attach clinic-specific fields via the module
+   428→    if (_module && typeof _module.collectFormFields === 'function') {
+   429→      Object.assign(payload, _module.collectFormFields());
+   430→    }
+   431→    const list = _ds.getPatients();
+   432→    if (id) {
+   433→      const idx = list.findIndex(p => p.id === id);
+   434→      if (idx > -1) list[idx] = { ...list[idx], ...payload };
+   435→      Store.pushNotif(`Patient "${name}" updated`, 'info');
+   436→      UI.toast('Patient updated', 'success');
+   437→    } else {
+   438→      payload.id = uid('pat');
+   439→      payload.status = 'arrived';
+   440→      payload.arrivedAt = nowIso();
+   441→      payload.withDoctorAt = null;
+   442→      payload.completedAt = null;
+   443→      list.push(payload);
+   444→      Store.pushNotif(`New patient "${name}" arrived`, 'success');
+   445→      UI.toast('Patient added', 'success');
+   446→    }
+   447→    _ds.setPatients(list);
+   448→    bumpClinicStats();
+   449→    UI.closeModal('patientModal');
+   450→    renderAll();
+   451→  }
+   452→
+   453→  function deletePatient(id) {
+   454→    const p = _ds.getPatients().find(x => x.id === id);
+   455→    if (!p) return;
+   456→    if (!confirm(`Delete patient "${p.name}"?`)) return;
+   457→    _ds.setPatients(_ds.getPatients().filter(x => x.id !== id));
+   458→    Store.pushNotif(`Patient "${p.name}" deleted`, 'danger');
+   459→    bumpClinicStats();
+   460→    renderAll();
+   461→  }
+   462→
+   463→  // ============================================================
+   464→  // DOCTOR CRUD
+   465→  // ============================================================
+   466→  function renderDoctors() {
+   467→    const grid = document.getElementById('doctorsGrid');
+   468→    if (!grid) return;
+   469→    const docs = _ds.getDoctors();
+   470→    if (docs.length === 0) {
+   471→      grid.innerHTML = `<div class="col-span-full text-center py-12" style="color: var(--mf-text-soft);" data-i18n="noData">No data available</div>`;
+   472→      return;
+   473→    }
+   474→    grid.innerHTML = docs.map(d => {
+   475→      const today = todayPatients().filter(p => p.doctorId === d.id);
+   476→      const earned = calculateDoctorEarning(d, today.length, today);
+   477→      return `
+   478→        <div class="mf-card p-5">
+   479→          <div class="flex items-start justify-between mb-3">
+   480→            <div class="flex items-center gap-3">
+   481→              <div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-semibold">
+   482→                ${escapeHtml(initials(d.name))}
+   483→              </div>
+   484→              <div>
+   485→                <h4 class="font-semibold">${escapeHtml(d.name)}</h4>
+   486→                <p class="text-xs" style="color: var(--mf-text-soft);">${escapeHtml(d.specialty || '—')}</p>
+   487→              </div>
+   488→            </div>
+   489→            <span class="badge badge-${d.status}">${t(d.status)}</span>
+   490→          </div>
+   491→          <div class="grid grid-cols-2 gap-2 text-sm mb-4">
+   492→            <div><span style="color: var(--mf-text-soft);">${t('fixedSalary')}:</span> <span class="font-medium">${fmtMoney(d.fixedSalary)}</span></div>
+   493→            <div><span style="color: var(--mf-text-soft);">${t('incentiveRate')}:</span> <span class="font-medium">${d.incentiveRate}%</span></div>
+   494→            <div><span style="color: var(--mf-text-soft);">${t('patientsToday')}:</span> <span class="font-medium">${today.length}</span></div>
+   495→            <div><span style="color: var(--mf-text-soft);">${t('earnedToday')}:</span> <span class="font-medium">${fmtMoney(earned)}</span></div>
+   496→          </div>
+   497→          <div class="flex gap-2">
+   498→            <button class="btn btn-success flex-1" onclick="MediFlow.ClinicCore.openPayDoctorModal('${d.id}')">
+   499→              <span class="ms ms-sm">payments</span><span data-i18n="payDoctor">Pay Doctor</span>
+   500→            </button>
+   501→            <button class="btn btn-ghost" onclick="MediFlow.ClinicCore.editDoctor('${d.id}')">
+   502→              <span class="ms ms-sm">edit</span>
+   503→            </button>
+   504→            <button class="btn btn-ghost text-red-500" onclick="MediFlow.ClinicCore.deleteDoctor('${d.id}')">
+   505→              <span class="ms ms-sm">delete</span>
+   506→            </button>
+   507→          </div>
+   508→        </div>
+   509→      `;
+   510→    }).join('');
+   511→    applyI18n();
+   512→  }
+   513→
+   514→  function initials(name) {
+   515→    if (!name) return '?';
+   516→    return name.split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+   517→  }
+   518→
+   519→  function openDoctorModal() {
+   520→    document.getElementById('doctorModalTitle').textContent = t('addDoctor');
+   521→    document.getElementById('doctorEditId').value = '';
+   522→    document.getElementById('doctorNameInput').value = '';
+   523→    document.getElementById('doctorSpecialtyInput').value = '';
+   524→    document.getElementById('doctorStatusInput').value = 'onDuty';
+   525→    document.getElementById('doctorSalaryInput').value = '0';
+   526→    document.getElementById('doctorIncentiveInput').value = '0';
+   527→    UI.openModal('doctorModal');
+   528→  }
+   529→
+   530→  function editDoctor(id) {
+   531→    const d = _ds.getDoctors().find(x => x.id === id);
+   532→    if (!d) return;
+   533→    document.getElementById('doctorModalTitle').textContent = t('editDoctor');
+   534→    document.getElementById('doctorEditId').value = d.id;
+   535→    document.getElementById('doctorNameInput').value = d.name;
+   536→    document.getElementById('doctorSpecialtyInput').value = d.specialty || '';
+   537→    document.getElementById('doctorStatusInput').value = d.status;
+   538→    document.getElementById('doctorSalaryInput').value = d.fixedSalary;
+   539→    document.getElementById('doctorIncentiveInput').value = d.incentiveRate;
+   540→    UI.openModal('doctorModal');
+   541→  }
+   542→
+   543→  function saveDoctor() {
+   544→    const id = document.getElementById('doctorEditId').value;
+   545→    const name = document.getElementById('doctorNameInput').value.trim();
+   546→    if (!name) { UI.toast('Doctor name is required', 'warning'); return; }
+   547→    const payload = {
+   548→      name,
+   549→      specialty: document.getElementById('doctorSpecialtyInput').value.trim(),
+   550→      status: document.getElementById('doctorStatusInput').value,
+   551→      fixedSalary: Number(document.getElementById('doctorSalaryInput').value) || 0,
+   552→      incentiveRate: Number(document.getElementById('doctorIncentiveInput').value) || 0
+   553→    };
+   554→    const list = _ds.getDoctors();
+   555→    if (id) {
+   556→      const idx = list.findIndex(d => d.id === id);
+   557→      if (idx > -1) list[idx] = { ...list[idx], ...payload };
+   558→      UI.toast('Doctor updated', 'success');
+   559→    } else {
+   560→      payload.id = uid('doc');
+   561→      list.push(payload);
+   562→      Store.pushNotif(`New doctor "${name}" added`, 'success');
+   563→      UI.toast('Doctor added', 'success');
+   564→    }
+   565→    _ds.setDoctors(list);
+   566→    UI.closeModal('doctorModal');
+   567→    renderAll();
+   568→  }
+   569→
+   570→  function deleteDoctor(id) {
+   571→    const d = _ds.getDoctors().find(x => x.id === id);
+   572→    if (!d) return;
+   573→    if (!confirm(`Delete doctor "${d.name}"?`)) return;
+   574→    _ds.setDoctors(_ds.getDoctors().filter(x => x.id !== id));
+   575→    Store.pushNotif(`Doctor "${d.name}" deleted`, 'danger');
+   576→    renderAll();
+   577→  }
+   578→
+   579→  // ============================================================
+   580→  // EMPLOYEE CRUD
+   581→  // ============================================================
+   582→  function renderEmployees() {
+   583→    const tbody = document.getElementById('employeesTableBody');
+   584→    if (!tbody) return;
+   585→    const list = _ds.getEmployees();
+   586→    if (list.length === 0) {
+   587→      tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8" style="color: var(--mf-text-soft);">No employees yet</td></tr>`;
+   588→      return;
+   589→    }
+   590→    tbody.innerHTML = list.map(e => `
+   591→      <tr>
+   592→        <td class="font-medium">${escapeHtml(e.name)}</td>
+   593→        <td>${escapeHtml(e.role || '—')}</td>
+   594→        <td class="font-semibold">${fmtMoney(e.salary || 0)}</td>
+   595→        <td><span class="badge ${e.status === 'active' ? 'badge-active' : e.status === 'onLeave' ? 'badge-onLeave' : 'badge-cancelled'}">${escapeHtml(e.status || '—')}</span></td>
+   596→        <td>
+   597→          <div class="flex gap-1">
+   598→            <button class="btn btn-ghost btn-sm" onclick="MediFlow.ClinicCore.editEmployee('${e.id}')">
+   599→              <span class="ms ms-sm">edit</span>
+   600→            </button>
+   601→            <button class="btn btn-ghost btn-sm text-red-500" onclick="MediFlow.ClinicCore.deleteEmployee('${e.id}')">
+   602→              <span class="ms ms-sm">delete</span>
+   603→            </button>
+   604→          </div>
+   605→        </td>
+   606→      </tr>
+   607→    `).join('');
+   608→  }
+   609→
+   610→  function openEmployeeModal() {
+   611→    document.getElementById('employeeModalTitle').textContent = 'Add Employee';
+   612→    document.getElementById('employeeEditId').value = '';
+   613→    document.getElementById('employeeNameInput').value = '';
+   614→    document.getElementById('employeeRoleInput').value = '';
+   615→    document.getElementById('employeeSalaryInput').value = '0';
+   616→    document.getElementById('employeeStatusInput').value = 'active';
+   617→    UI.openModal('employeeModal');
+   618→  }
+   619→
+   620→  function editEmployee(id) {
+   621→    const e = _ds.getEmployees().find(x => x.id === id);
+   622→    if (!e) return;
+   623→    document.getElementById('employeeModalTitle').textContent = 'Edit Employee';
+   624→    document.getElementById('employeeEditId').value = e.id;
+   625→    document.getElementById('employeeNameInput').value = e.name;
+   626→    document.getElementById('employeeRoleInput').value = e.role || '';
+   627→    document.getElementById('employeeSalaryInput').value = e.salary || 0;
+   628→    document.getElementById('employeeStatusInput').value = e.status || 'active';
+   629→    UI.openModal('employeeModal');
+   630→  }
+   631→
+   632→  function saveEmployee() {
+   633→    const id = document.getElementById('employeeEditId').value;
+   634→    const name = document.getElementById('employeeNameInput').value.trim();
+   635→    if (!name) { UI.toast('Employee name is required', 'warning'); return; }
+   636→    const payload = {
+   637→      name,
+   638→      role: document.getElementById('employeeRoleInput').value.trim(),
+   639→      salary: Number(document.getElementById('employeeSalaryInput').value) || 0,
+   640→      status: document.getElementById('employeeStatusInput').value
+   641→    };
+   642→    const list = _ds.getEmployees();
+   643→    if (id) {
+   644→      const idx = list.findIndex(e => e.id === id);
+   645→      if (idx > -1) list[idx] = { ...list[idx], ...payload };
+   646→    } else {
+   647→      payload.id = uid('emp');
+   648→      list.push(payload);
+   649→    }
+   650→    _ds.setEmployees(list);
+   651→    UI.closeModal('employeeModal');
+   652→    renderAll();
+   653→  }
+   654→
+   655→  function deleteEmployee(id) {
+   656→    if (!confirm('Delete this employee?')) return;
+   657→    _ds.setEmployees(_ds.getEmployees().filter(x => x.id !== id));
+   658→    renderAll();
+   659→  }
+   660→
+   661→  // ============================================================
+   662→  // PAY DOCTOR
+   663→  // ============================================================
+   664→  function openPayDoctorModal(id) {
+   665→    const d = _ds.getDoctors().find(x => x.id === id);
+   666→    if (!d) return;
+   667→    const today = todayPatients().filter(p => p.doctorId === d.id);
+   668→    const earned = calculateDoctorEarning(d, today.length, today);
+   669→    document.getElementById('payDoctorId').value = d.id;
+   670→    document.getElementById('payDoctorName').textContent = d.name;
+   671→    document.getElementById('payDoctorSalary').textContent = fmtMoney(d.fixedSalary);
+   672→    document.getElementById('payDoctorEarned').textContent = fmtMoney(earned);
+   673→    document.getElementById('payDoctorAmount').value = (d.fixedSalary + earned).toFixed(2);
+   674→    UI.openModal('payDoctorModal');
+   675→  }
+   676→
+   677→  function confirmPayDoctor() {
+   678→    const id = document.getElementById('payDoctorId').value;
+   679→    const amount = Number(document.getElementById('payDoctorAmount').value) || 0;
+   680→    const d = _ds.getDoctors().find(x => x.id === id);
+   681→    if (!d) return;
+   682→    // Record payout
+   683→    const fin = _ds.getFinancials();
+   684→    fin.payouts = fin.payouts || [];
+   685→    fin.payouts.unshift({ id: uid('pyt'), doctorId: d.id, doctorName: d.name, amount, ts: nowIso() });
+   686→    fin.expenses = (fin.expenses || 0) + amount;
+   687→    _ds.setFinancials(fin);
+   688→    Store.pushNotif(`Payment of ${fmtMoney(amount)} processed to ${d.name}`, 'success');
+   689→    UI.toast(`Paid ${fmtMoney(amount)} to ${d.name}`, 'success');
+   690→    UI.closeModal('payDoctorModal');
+   691→    renderAll();
+   692→  }
+   693→
+   694→  // ============================================================
+   695→  // FINANCIAL ENGINE
+   696→  // Calculates payout = fixedSalary + (sum of invoices * incentiveRate/100)
+   697→  // where patientsCount drives the incentive component.
+   698→  // ============================================================
+   699→  function calculateDoctorEarning(doctor, patientsCount, patientList) {
+   700→    const list = patientList || todayPatients().filter(p => p.doctorId === doctor.id);
+   701→    const incentive = list.reduce((s, p) => s + (Number(p.invoice) || 0) * (doctor.incentiveRate / 100), 0);
+   702→    // For "today earned" we return only the incentive portion (salary is monthly)
+   703→    return incentive;
+   704→  }
+   705→
+   706→  function renderFinancials() {
+   707→    const today = todayPatients();
+   708→    const todayRev = today.reduce((s, p) => s + (Number(p.invoice) || 0), 0);
+   709→    const all = _ds.getPatients();
+   710→    const monthRev = all.filter(p => {
+   711→      if (!p.arrivedAt) return false;
+   712→      const d = new Date(p.arrivedAt);
+   713→      const now = new Date();
+   714→      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+   715→    }).reduce((s, p) => s + (Number(p.invoice) || 0), 0);
+   716→    const salaries = _ds.getDoctors().reduce((s, d) => s + (d.fixedSalary || 0), 0);
+   717→    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+   718→    set('finTodayRev', fmtMoney(todayRev));
+   719→    set('finMonthRev', fmtMoney(monthRev));
+   720→    set('finSalaries', fmtMoney(salaries));
+   721→
+   722→    // Salary table
+   723→    const tbody = document.getElementById('salaryTableBody');
+   724→    if (!tbody) return;
+   725→    const docs = _ds.getDoctors();
+   726→    if (docs.length === 0) {
+   727→      tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8" style="color: var(--mf-text-soft);" data-i18n="noData">No data available</td></tr>`;
+   728→      return;
+   729→    }
+   730→    tbody.innerHTML = docs.map(d => {
+   731→      const today = todayPatients().filter(p => p.doctorId === d.id);
+   732→      const earned = calculateDoctorEarning(d, today.length, today);
+   733→      return `
+   734→        <tr>
+   735→          <td class="font-medium">${escapeHtml(d.name)}</td>
+   736→          <td>${fmtMoney(d.fixedSalary)}</td>
+   737→          <td>${d.incentiveRate}%</td>
+   738→          <td>${today.length}</td>
+   739→          <td class="font-semibold text-emerald-600">${fmtMoney(earned)}</td>
+   740→          <td>
+   741→            <button class="btn btn-success btn-sm" onclick="MediFlow.ClinicCore.openPayDoctorModal('${d.id}')">
+   742→              <span class="ms ms-sm">payments</span><span data-i18n="pay">Pay</span>
+   743→            </button>
+   744→          </td>
+   745→        </tr>
+   746→      `;
+   747→    }).join('');
+   748→    applyI18n();
+   749→  }
+   750→
+   751→  // ============================================================
+   752→  // SETTINGS
+   753→  // ============================================================
+   754→  function bindHeader() {
+   755→    document.getElementById('themeToggle').addEventListener('click', () => {
+   756→      UI.toggleTheme();
+   757→      updateSettingsTheme();
+   758→    });
+   759→    document.getElementById('langToggle').addEventListener('click', () => {
+   760→      const next = I18n.getLang() === 'en' ? 'ar' : 'en';
+   761→      I18n.setLang(next);
+   762→      updateLangLabel();
+   763→      // Re-apply layout so clinic-type labels re-render in new lang
+   764→      applyClinicLayout(_clinic.type);
+   765→      renderAll();
+   766→    });
+   767→    document.getElementById('notifBtn').addEventListener('click', () => {
+   768→      document.getElementById('notifPanel').classList.toggle('active');
+   769→    });
+   770→  }
+   771→
+   772→  function bindSettings() {
+   773→    document.getElementById('settingsThemeToggle').addEventListener('click', () => {
+   774→      UI.toggleTheme();
+   775→      updateSettingsTheme();
+   776→    });
+   777→    document.querySelectorAll('.lang-btn').forEach(b => {
+   778→      b.addEventListener('click', () => {
+   779→        I18n.setLang(b.getAttribute('data-lang'));
+   780→        updateLangLabel();
+   781→        applyClinicLayout(_clinic.type);
+   782→        renderAll();
+   783→      });
+   784→    });
+   785→    updateSettingsTheme();
+   786→  }
+   787→
+   788→  function updateLangLabel() {
+   789→    const el = document.getElementById('langLabel');
+   790→    if (el) el.textContent = I18n.getLang() === 'en' ? 'عربي' : 'English';
+   791→  }
+   792→
+   793→  function updateSettingsTheme() {
+   794→    const dark = UI.getTheme() === 'dark';
+   795→    document.querySelectorAll('[data-theme-label]').forEach(el => {
+   796→      el.textContent = dark ? t('darkMode') : t('lightMode');
+   797→    });
+   798→    document.querySelectorAll('[data-theme-toggle-icon]').forEach(el => {
+   799→      el.textContent = dark ? 'toggle_on' : 'toggle_off';
+   800→    });
+   801→  }
+   802→
+   803→  function saveClinicInfo() {
+   804→    const clinics = Store.getClinics();
+   805→    const idx = clinics.findIndex(c => c.id === _clinic.id);
+   806→    if (idx === -1) return;
+   807→    clinics[idx].name = document.getElementById('settingsClinicName').value.trim() || clinics[idx].name;
+   808→    clinics[idx].manager = document.getElementById('settingsClinicManager').value.trim();
+   809→    Store.setClinics(clinics);
+   810→    _clinic = clinics[idx];
+   811→    document.getElementById('clinicNameHeader').textContent = _clinic.name;
+   812→    document.getElementById('managerAvatar').textContent = (_clinic.manager || 'CA').slice(0, 2).toUpperCase();
+   813→    Store.pushNotif('Clinic info updated', 'success');
+   814→    UI.toast('Clinic info saved', 'success');
+   815→  }
+   816→
+   817→  // ============================================================
+   818→  // NOTIFICATIONS
+   819→  // ============================================================
+   820→  function renderNotifList() {
+   821→    const list = document.getElementById('notifList');
+   822→    if (!list) return;
+   823→    const notifs = Store.getNotifs();
+   824→    if (notifs.length === 0) {
+   825→      list.innerHTML = `<p class="text-center py-8 text-sm" style="color: var(--mf-text-soft);" data-i18n="noData">No data available</p>`;
+   826→      return;
+   827→    }
+   828→    const iconMap = { info: 'info', success: 'check_circle', danger: 'error', warning: 'warning' };
+   829→    const colorMap = { info: 'text-blue-500', success: 'text-emerald-500', danger: 'text-red-500', warning: 'text-amber-500' };
+   830→    list.innerHTML = notifs.map(n => `
+   831→      <div class="p-3 rounded-xl ${n.read ? '' : 'bg-indigo-50 dark:bg-indigo-900/30'}" style="${n.read ? '' : 'background-color: var(--mf-primary-l);'}">
+   832→        <div class="flex items-start gap-2">
+   833→          <span class="ms ms-sm ${colorMap[n.type] || 'text-blue-500'} mt-0.5">${iconMap[n.type] || 'info'}</span>
+   834→          <div class="flex-1 min-w-0">
+   835→            <p class="text-sm font-medium">${escapeHtml(n.message)}</p>
+   836→            <p class="text-xs mt-1" style="color: var(--mf-text-soft);">${fmtTime(n.ts)}</p>
+   837→          </div>
+   838→        </div>
+   839→      </div>
+   840→    `).join('');
+   841→    Store.markAllNotifsRead();
+   842→  }
+   843→
+   844→  function renderNotifBadge() {
+   845→    const badge = document.getElementById('notifBadge');
+   846→    if (!badge) return;
+   847→    const unread = Store.getNotifs().filter(n => !n.read).length;
+   848→    if (unread > 0) {
+   849→      badge.textContent = unread > 9 ? '9+' : unread;
+   850→      badge.classList.remove('hidden');
+   851→    } else {
+   852→      badge.classList.add('hidden');
+   853→    }
+   854→  }
+   855→
+   856→  // ============================================================
+   857→  // DATA HELPERS
+   858→  // ============================================================
+   859→  function todayPatients() {
+   860→    const today = new Date().toDateString();
+   861→    return _ds.getPatients().filter(p => p.arrivedAt && new Date(p.arrivedAt).toDateString() === today);
+   862→  }
+   863→
+   864→  // ============================================================
+   865→  // PUBLIC API
+   866→  // ============================================================
+   867→  return {
+   868→    init,
+   869→    renderAll,
+   870→    applyClinicLayout,
+   871→    // patient
+   872→    openPatientModal, editPatient, savePatient, deletePatient,
+   873→    advancePatientStatus, setPatientStatus,
+   874→    // doctor
+   875→    openDoctorModal, editDoctor, saveDoctor, deleteDoctor,
+   876→    openPayDoctorModal, confirmPayDoctor,
+   877→    // employee
+   878→    openEmployeeModal, editEmployee, saveEmployee, deleteEmployee,
+   879→    // settings
+   880→    saveClinicInfo,
+   881→    // exposed for module access (read-only)
+   882→    getContext: () => ({ clinic: _clinic, ds: _ds, module: _module }),
+   883→    calculateDoctorEarning,
+   884→    todayPatients
+   885→  };
+   886→})();
+   887→
+   888→document.addEventListener('DOMContentLoaded', MediFlow.ClinicCore.init);
+   889→

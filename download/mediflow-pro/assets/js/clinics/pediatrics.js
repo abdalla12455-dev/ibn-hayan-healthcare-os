@@ -52,7 +52,7 @@ MediFlow.Clinics.Pediatrics = (function () {
     renderExtraCells(p) {
       const { escapeHtml } = MediFlow.UI;
       const w = p.weight ? `${p.weight} kg` : '—';
-      return `<td>${w}</td><td>${escapeHtml(p.guardian || '—')}</td>`;
+      return `<td class="text-soft">${w}</td><td class="text-soft">${escapeHtml(p.guardian || '—')}</td>`;
     },
 
     render() { /* nothing specialty to render */ }

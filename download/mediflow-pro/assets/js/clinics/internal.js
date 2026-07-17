@@ -49,7 +49,7 @@ MediFlow.Clinics.Internal = (function () {
 
     renderExtraCells(p) {
       const { escapeHtml } = MediFlow.UI;
-      return `<td>${escapeHtml(p.procedure || '—')}</td><td>${escapeHtml(p.result || '—')}</td>`;
+      return `<td class="text-soft">${escapeHtml(p.procedure || '—')}</td><td class="text-soft">${escapeHtml(p.result || '—')}</td>`;
     },
 
     render() { /* nothing specialty to render */ }

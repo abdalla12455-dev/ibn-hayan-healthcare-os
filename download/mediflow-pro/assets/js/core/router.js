@@ -31,17 +31,24 @@ MediFlow.Router = (function () {
     // Run pre-navigate hooks
     _beforeHooks.forEach(fn => { try { fn(viewId); } catch (e) { console.error(e); } });
 
-    // Hide every section
-    canvas.querySelectorAll(':scope > section').forEach(s => s.classList.add('hidden'));
+    // Hide every section inside the canvas (including nested ones in #clinicExtraViews)
+    canvas.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
 
-    // Show target
-    const target = canvas.querySelector(`:scope > #${viewId}`);
+    // Show target (find anywhere inside canvas, not just direct children)
+    const target = canvas.querySelector(`#${viewId}`);
     if (!target) { console.warn(`[Router] section #${viewId} not found`); return; }
     target.classList.remove('hidden');
 
+    // If the target is inside a wrapper (e.g. #clinicExtraViews), make sure the wrapper is also visible
+    let parent = target.parentElement;
+    while (parent && parent !== canvas) {
+      if (parent.classList.contains('hidden')) parent.classList.remove('hidden');
+      parent = parent.parentElement;
+    }
+
     // Update sidebar active state
-    document.querySelectorAll('.mf-nav-item[data-view]').forEach(n => n.classList.remove('active'));
-    const navItem = document.querySelector(`.mf-nav-item[data-view="${viewId}"]`);
+    document.querySelectorAll('.nav-item[data-view]').forEach(n => n.classList.remove('active'));
+    const navItem = document.querySelector(`.nav-item[data-view="${viewId}"]`);
     if (navItem) navItem.classList.add('active');
 
     // Update page title
@@ -58,7 +65,7 @@ MediFlow.Router = (function () {
   }
 
   function bindNav() {
-    document.querySelectorAll('.mf-nav-item[data-view]').forEach(item => {
+    document.querySelectorAll('.nav-item[data-view]').forEach(item => {
       item.addEventListener('click', () => navigate(item.getAttribute('data-view')));
     });
   }

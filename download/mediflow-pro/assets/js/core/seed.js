@@ -22,11 +22,11 @@ MediFlow.Seed = (function () {
 
     // ---- Clinics (global) ----
     const clinics = [
-      { id: 'cln_dental1', name: 'Bright Smile Dental',    type: 'DENTAL',      manager: 'Dr. Sara Khalil', plan: 'pro',        expiry: addMonths(8),  bookings: 0, revenue: 0 },
-      { id: 'cln_laser1',  name: 'Glow Derma & Laser',     type: 'DERMA_LASER', manager: 'Dr. Lina Haddad', plan: 'enterprise', expiry: addMonths(14), bookings: 0, revenue: 0 },
-      { id: 'cln_lab1',    name: 'City Lab Diagnostics',   type: 'LAB',         manager: 'Mr. Omar Najjar', plan: 'pro',        expiry: addMonths(3),  bookings: 0, revenue: 0 },
-      { id: 'cln_ped1',    name: 'Tiny Tots Pediatrics',   type: 'PEDIATRICS',  manager: 'Dr. Hiba Salem',  plan: 'starter',    expiry: addMonths(2),  bookings: 0, revenue: 0 },
-      { id: 'cln_int1',    name: 'HeartCare Internal Med', type: 'INTERNAL',    manager: 'Dr. Karim Awn',   plan: 'pro',        expiry: addMonths(11), bookings: 0, revenue: 0 }
+      { id: 'cln_dental1', name: 'Bright Smile Dental',    type: 'DENTAL',      manager: 'Dr. Sara Khalil', plan: 'pro',        expiry: addMonths(8),  bookings: 1247, revenue: 38450 },
+      { id: 'cln_laser1',  name: 'Glow Derma & Laser',     type: 'DERMA_LASER', manager: 'Dr. Lina Haddad', plan: 'enterprise', expiry: addMonths(14), bookings: 892,  revenue: 62750 },
+      { id: 'cln_lab1',    name: 'City Lab Diagnostics',   type: 'LAB',         manager: 'Mr. Omar Najjar', plan: 'pro',        expiry: addMonths(3),  bookings: 2104, revenue: 18900 },
+      { id: 'cln_ped1',    name: 'Tiny Tots Pediatrics',   type: 'PEDIATRICS',  manager: 'Dr. Hiba Salem',  plan: 'starter',    expiry: addMonths(2),  bookings: 524,  revenue: 8200 },
+      { id: 'cln_int1',    name: 'HeartCare Internal Med', type: 'INTERNAL',    manager: 'Dr. Karim Awn',   plan: 'pro',        expiry: addMonths(11), bookings: 738,  revenue: 24600 }
     ];
     setClinics(clinics);
 

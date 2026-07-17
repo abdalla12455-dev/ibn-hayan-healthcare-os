@@ -3,324 +3,800 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MediFlow · Super Admin</title>
+  <title>MediFlow · Super Admin Console</title>
+  <meta name="description" content="MediFlow — Enterprise clinic management SaaS. Manage multiple clinics, subscriptions, and analytics from one console." />
 
   <!-- Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Material Symbols -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <!-- Chart.js for analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <!-- Custom styles -->
   <link rel="stylesheet" href="assets/css/main.css" />
 </head>
-<body class="min-h-screen">
+<body>
 
-  <div class="flex h-screen overflow-hidden">
+<div class="app-shell">
 
-    <!-- ===================== SIDEBAR ===================== -->
-    <aside class="mf-sidebar w-64 flex-shrink-0 flex flex-col">
-      <div class="p-5 border-b" style="border-color: var(--mf-border);">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white">
-            <span class="ms ms-lg">local_hospital</span>
-          </div>
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <span class="ms ms-md">monitor_heart</span>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name" data-i18n="appName">MediFlow</span>
+        <span class="brand-tag" data-i18n="superAdmin">Super Admin</span>
+      </div>
+    </div>
+
+    <nav class="nav-section">
+      <div class="nav-section-label" data-i18n="navOverview">Overview</div>
+      <div class="nav-item active" data-view="view-dashboard">
+        <span class="ms">space_dashboard</span>
+        <span class="nav-label" data-i18n="dashboard">Dashboard</span>
+      </div>
+      <div class="nav-item" data-view="view-clinics">
+        <span class="ms">apartment</span>
+        <span class="nav-label" data-i18n="clinics">Clinics</span>
+        <span class="nav-badge" id="navClinicCount">0</span>
+      </div>
+      <div class="nav-item" data-view="view-subscriptions">
+        <span class="ms">card_membership</span>
+        <span class="nav-label" data-i18n="subscriptions">Subscriptions</span>
+      </div>
+
+      <div class="nav-section-label" data-i18n="navInsights">Insights</div>
+      <div class="nav-item" data-view="view-reports">
+        <span class="ms">insights</span>
+        <span class="nav-label" data-i18n="reports">Reports</span>
+      </div>
+      <div class="nav-item" data-view="view-activity">
+        <span class="ms">history</span>
+        <span class="nav-label" data-i18n="activity">Activity</span>
+      </div>
+
+      <div class="nav-section-label" data-i18n="navSystem">System</div>
+      <div class="nav-item" data-view="view-settings">
+        <span class="ms">settings</span>
+        <span class="nav-label" data-i18n="settings">Settings</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user" id="userMenuTrigger">
+        <div class="avatar">SA</div>
+        <div class="sidebar-footer-content" style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:600; color:var(--text-strong);" class="truncate">Super Admin</div>
+          <div style="font-size:11px; color:var(--text-soft);" class="truncate">admin@mediflow.io</div>
+        </div>
+        <span class="ms ms-sm sidebar-footer-content" style="color:var(--text-faint);">expand_more</span>
+      </div>
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- ===================== MAIN ===================== -->
+  <div class="main-area">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="flex items-center gap-4 min-w-0">
+        <button class="btn btn-ghost btn-icon btn-sm md:hidden" id="mobileMenuBtn" aria-label="Menu">
+          <span class="ms">menu</span>
+        </button>
+        <div class="breadcrumbs hidden sm:flex">
+          <span class="crumb" data-i18n="superAdmin">Super Admin</span>
+          <span class="ms sep">chevron_right</span>
+          <span class="crumb current" id="pageTitle" data-i18n="dashboard">Dashboard</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="search-bar hidden md:flex">
+          <span class="ms">search</span>
+          <input type="text" placeholder="Search clinics, doctors, patients..." id="globalSearch" />
+          <kbd>⌘K</kbd>
+        </div>
+
+        <button class="btn btn-ghost btn-icon" id="langToggle" title="Language">
+          <span class="ms">language</span>
+        </button>
+        <button class="btn btn-ghost btn-icon" id="themeToggle" title="Theme">
+          <span class="ms" data-theme-icon>dark_mode</span>
+        </button>
+        <button class="btn btn-ghost btn-icon relative" id="notifBtn" title="Notifications">
+          <span class="ms">notifications</span>
+          <span id="notifBadge" class="absolute -top-0.5 -right-0.5 bg-rose-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center hidden">0</span>
+        </button>
+        <div class="divider-vertical hidden sm:block"></div>
+        <div class="avatar avatar-lg cursor-pointer" title="Super Admin">SA</div>
+      </div>
+    </header>
+
+    <!-- CONTENT CANVAS -->
+    <main id="content-canvas" class="content-canvas">
+
+      <!-- ===== DASHBOARD ===== -->
+      <section id="view-dashboard" class="space-y-6 view-enter">
+
+        <!-- Page header -->
+        <div class="page-header">
           <div>
-            <h1 class="font-bold text-lg leading-tight" data-i18n="appName">MediFlow</h1>
-            <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="superAdmin">Super Admin</p>
+            <h1 class="page-title" data-i18n="welcomeBack">Welcome back, Admin</h1>
+            <p class="page-subtitle" id="pageSubtitle" data-i18n="appTagline">Here's what's happening across your clinics today.</p>
           </div>
-        </div>
-      </div>
-
-      <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
-        <div class="mf-nav-item active" data-view="view-dashboard">
-          <span class="ms ms-md">dashboard</span><span data-i18n="dashboard">Dashboard</span>
-        </div>
-        <div class="mf-nav-item" data-view="view-clinics">
-          <span class="ms ms-md">business</span><span data-i18n="clinics">Clinics</span>
-        </div>
-        <div class="mf-nav-item" data-view="view-subscriptions">
-          <span class="ms ms-md">card_membership</span><span data-i18n="subscriptions">Subscriptions</span>
-        </div>
-        <div class="mf-nav-item" data-view="view-reports">
-          <span class="ms ms-md">analytics</span><span data-i18n="reports">Reports</span>
-        </div>
-        <div class="mf-nav-item" data-view="view-settings">
-          <span class="ms ms-md">settings</span><span data-i18n="settings">Settings</span>
-        </div>
-      </nav>
-
-      <div class="p-3 border-t" style="border-color: var(--mf-border);">
-        <div class="text-xs px-2" style="color: var(--mf-text-soft);">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="live-dot"></span>
-            <span>SaaS Live</span>
-          </div>
-          <p>v2.0.0 · modular</p>
-        </div>
-      </div>
-    </aside>
-
-    <!-- ===================== MAIN ===================== -->
-    <div class="flex-1 flex flex-col overflow-hidden">
-
-      <!-- HEADER -->
-      <header class="mf-header h-16 flex items-center justify-between px-6 flex-shrink-0">
-        <div>
-          <h2 class="font-semibold text-lg" id="pageTitle" data-i18n="dashboard">Dashboard</h2>
-          <p class="text-xs" style="color: var(--mf-text-soft);" id="pageSubtitle" data-i18n="appTagline">Clinic Management SaaS</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button id="langToggle" class="btn btn-ghost btn-sm" title="Language">
-            <span class="ms ms-sm">language</span>
-            <span id="langLabel">عربي</span>
-          </button>
-          <button id="themeToggle" class="btn btn-ghost btn-sm" title="Theme">
-            <span class="ms ms-sm" data-theme-icon>dark_mode</span>
-          </button>
-          <button id="notifBtn" class="btn btn-ghost btn-sm relative" title="Notifications">
-            <span class="ms ms-sm">notifications</span>
-            <span id="notifBadge" class="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center hidden">0</span>
-          </button>
-          <div class="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm">SA</div>
-        </div>
-      </header>
-
-      <!-- CONTENT CANVAS — SPA target -->
-      <main id="content-canvas" class="flex-1 overflow-y-auto p-6">
-
-        <!-- ===== Dashboard ===== -->
-        <section id="view-dashboard" class="space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="mf-card p-5 flex items-center gap-4">
-              <div class="stat-icon indigo"><span class="ms ms-lg">business</span></div>
-              <div>
-                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="totalClinics">Total Clinics</p>
-                <p class="text-2xl font-bold" id="statClinics">0</p>
-              </div>
-            </div>
-            <div class="mf-card p-5 flex items-center gap-4">
-              <div class="stat-icon emerald"><span class="ms ms-lg">payments</span></div>
-              <div>
-                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="totalRevenue">Total Revenue</p>
-                <p class="text-2xl font-bold" id="statRevenue">$0</p>
-              </div>
-            </div>
-            <div class="mf-card p-5 flex items-center gap-4">
-              <div class="stat-icon blue"><span class="ms ms-md">medical_services</span></div>
-              <div>
-                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="activeDoctors">Active Doctors</p>
-                <p class="text-2xl font-bold" id="statDoctors">0</p>
-              </div>
-            </div>
-            <div class="mf-card p-5 flex items-center gap-4">
-              <div class="stat-icon amber"><span class="ms ms-lg">groups</span></div>
-              <div>
-                <p class="text-xs" style="color: var(--mf-text-soft);" data-i18n="totalPatients">Total Patients</p>
-                <p class="text-2xl font-bold" id="statPatients">0</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="mf-card overflow-hidden">
-            <div class="px-5 py-4 border-b flex items-center justify-between" style="border-color: var(--mf-border);">
-              <h3 class="font-semibold" data-i18n="clinics">Clinics</h3>
-              <button class="btn btn-primary" onclick="MediFlow.SuperAdmin.openClinicModal()">
-                <span class="ms ms-sm">add</span><span data-i18n="addClinic">Add Clinic</span>
-              </button>
-            </div>
-            <div class="overflow-x-auto">
-              <table class="mf-table">
-                <thead>
-                  <tr>
-                    <th data-i18n="clinicName">Clinic Name</th>
-                    <th data-i18n="clinicType">Clinic Type</th>
-                    <th data-i18n="manager">Manager</th>
-                    <th data-i18n="plan">Plan</th>
-                    <th data-i18n="expiry">Expiry</th>
-                    <th data-i18n="bookings">Bookings</th>
-                    <th data-i18n="revenue">Revenue</th>
-                    <th data-i18n="actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="clinicsTableBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===== Clinics ===== -->
-        <section id="view-clinics" class="hidden space-y-6">
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold" data-i18n="clinics">Clinics</h3>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="MediFlow.SuperAdmin.exportReport()">
+              <span class="ms">download</span>
+              <span data-i18n="export">Export</span>
+            </button>
             <button class="btn btn-primary" onclick="MediFlow.SuperAdmin.openClinicModal()">
-              <span class="ms ms-sm">add</span><span data-i18n="addClinic">Add Clinic</span>
+              <span class="ms">add</span>
+              <span data-i18n="addClinic">Add Clinic</span>
             </button>
           </div>
-          <div id="clinicsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-        </section>
-
-        <!-- ===== Subscriptions ===== -->
-        <section id="view-subscriptions" class="hidden space-y-6">
-          <h3 class="text-lg font-semibold" data-i18n="subscriptions">Subscriptions</h3>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="mf-card p-6">
-              <div class="flex items-center justify-between mb-4">
-                <h4 class="font-semibold text-lg" data-i18n="plan_starter">Starter</h4>
-                <span class="badge badge-active">Active</span>
-              </div>
-              <p class="text-3xl font-bold mb-4">$49<span class="text-sm" style="color: var(--mf-text-soft);">/mo</span></p>
-              <ul class="text-sm space-y-2 mb-4" style="color: var(--mf-text);">
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Up to 2 doctors</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Basic patient flow</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>1 clinic location</li>
-              </ul>
-              <p class="text-sm" style="color: var(--mf-text-soft);" id="starterCount">0 clinics</p>
-            </div>
-            <div class="mf-card p-6 ring-2 ring-indigo-500">
-              <div class="flex items-center justify-between mb-4">
-                <h4 class="font-semibold text-lg" data-i18n="plan_pro">Professional</h4>
-                <span class="badge badge-withDoctor">Popular</span>
-              </div>
-              <p class="text-3xl font-bold mb-4">$149<span class="text-sm" style="color: var(--mf-text-soft);">/mo</span></p>
-              <ul class="text-sm space-y-2 mb-4" style="color: var(--mf-text);">
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Up to 10 doctors</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Financial reports</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Inventory module</li>
-              </ul>
-              <p class="text-sm" style="color: var(--mf-text-soft);" id="proCount">0 clinics</p>
-            </div>
-            <div class="mf-card p-6">
-              <div class="flex items-center justify-between mb-4">
-                <h4 class="font-semibold text-lg" data-i18n="plan_enterprise">Enterprise</h4>
-                <span class="badge badge-arrived">Premium</span>
-              </div>
-              <p class="text-3xl font-bold mb-4">$399<span class="text-sm" style="color: var(--mf-text-soft);">/mo</span></p>
-              <ul class="text-sm space-y-2 mb-4" style="color: var(--mf-text);">
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Unlimited doctors</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Multi-branch</li>
-                <li class="flex items-center gap-2"><span class="ms ms-sm text-emerald-500">check_circle</span>Priority support</li>
-              </ul>
-              <p class="text-sm" style="color: var(--mf-text-soft);" id="enterpriseCount">0 clinics</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===== Reports ===== -->
-        <section id="view-reports" class="hidden space-y-6">
-          <h3 class="text-lg font-semibold" data-i18n="reports">Reports</h3>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div class="mf-card p-5">
-              <h4 class="font-semibold mb-4">Revenue by Clinic Type</h4>
-              <div id="revenueByType" class="space-y-3"></div>
-            </div>
-            <div class="mf-card p-5">
-              <h4 class="font-semibold mb-4">Top Performing Clinics</h4>
-              <div id="topClinics" class="space-y-3"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===== Settings ===== -->
-        <section id="view-settings" class="hidden space-y-6 max-w-2xl">
-          <h3 class="text-lg font-semibold" data-i18n="settings">Settings</h3>
-          <div class="mf-card p-6 space-y-5">
-            <div>
-              <label class="label" data-i18n="darkMode">Dark Mode</label>
-              <button id="settingsThemeToggle" class="btn btn-ghost">
-                <span class="ms ms-sm" data-theme-toggle-icon>toggle_off</span>
-                <span data-theme-label>Off</span>
-              </button>
-            </div>
-            <div>
-              <label class="label" data-i18n="language">Language</label>
-              <div class="flex gap-2">
-                <button class="btn btn-ghost lang-btn" data-lang="en">English</button>
-                <button class="btn btn-ghost lang-btn" data-lang="ar">العربية</button>
-              </div>
-            </div>
-            <div class="pt-4 border-t" style="border-color: var(--mf-border);">
-              <button class="btn btn-danger" onclick="MediFlow.SuperAdmin.resetAllData()">
-                <span class="ms ms-sm">delete_forever</span><span data-i18n="resetData">Reset All Data</span>
-              </button>
-              <p class="text-xs mt-2" style="color: var(--mf-text-soft);">This will clear all localStorage and re-seed sample data.</p>
-            </div>
-          </div>
-        </section>
-
-      </main>
-    </div>
-  </div>
-
-  <!-- ===================== NOTIFICATION PANEL ===================== -->
-  <div class="notif-panel" id="notifPanel">
-    <div class="p-4 border-b flex items-center justify-between" style="border-color: var(--mf-border);">
-      <h4 class="font-semibold" data-i18n="notifications">Notifications</h4>
-      <button onclick="MediFlow.UI.closeModal('notifPanel'); document.getElementById('notifPanel').classList.remove('active')" class="hover:opacity-70" style="color: var(--mf-text-soft);">
-        <span class="ms ms-md">close</span>
-      </button>
-    </div>
-    <div class="flex-1 overflow-y-auto p-3 space-y-2" id="notifList"></div>
-  </div>
-
-  <!-- ===================== MODAL: ADD/EDIT CLINIC ===================== -->
-  <div class="modal-overlay" id="clinicModal">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 class="font-semibold text-lg" id="clinicModalTitle" data-i18n="addClinic">Add Clinic</h3>
-        <button onclick="MediFlow.UI.closeModal('clinicModal')" class="hover:opacity-70" style="color: var(--mf-text-soft);">
-          <span class="ms ms-md">close</span>
-        </button>
-      </div>
-      <div class="modal-body space-y-4">
-        <input type="hidden" id="clinicEditId" />
-        <div>
-          <label class="label" data-i18n="clinicName">Clinic Name</label>
-          <input class="input" id="clinicNameInput" placeholder="e.g. Bright Smile Dental" />
         </div>
-        <div class="grid grid-cols-2 gap-4">
+
+        <!-- KPI grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="totalClinics">Total Clinics</span>
+              <div class="kpi-icon tint-brand"><span class="ms">apartment</span></div>
+            </div>
+            <div class="kpi-value" id="statClinics">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-delta up"><span class="ms" style="font-size:14px;">trending_up</span>+12%</span>
+              <span class="kpi-caption" data-i18n="vsLastMonth">vs last month</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="totalRevenue">Total Revenue</span>
+              <div class="kpi-icon tint-success"><span class="ms">payments</span></div>
+            </div>
+            <div class="kpi-value" id="statRevenue">$0</div>
+            <div class="kpi-meta">
+              <span class="kpi-delta up"><span class="ms" style="font-size:14px;">trending_up</span>+8.2%</span>
+              <span class="kpi-caption" data-i18n="vsLastMonth">vs last month</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="activeDoctors">Active Doctors</span>
+              <div class="kpi-icon tint-info"><span class="ms">medical_services</span></div>
+            </div>
+            <div class="kpi-value" id="statDoctors">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-delta flat"><span class="ms" style="font-size:14px;">trending_flat</span>0%</span>
+              <span class="kpi-caption" data-i18n="vsLastMonth">vs last month</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="totalPatients">Total Patients</span>
+              <div class="kpi-icon tint-violet"><span class="ms">groups</span></div>
+            </div>
+            <div class="kpi-value" id="statPatients">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-delta up"><span class="ms" style="font-size:14px;">trending_up</span>+23%</span>
+              <span class="kpi-caption" data-i18n="vsLastMonth">vs last month</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts row -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="card lg:col-span-2">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title" data-i18n="revenueOverview">Revenue Overview</h3>
+                <p class="card-subtitle" data-i18n="revenueOverviewSubtitle">Monthly revenue across all clinics</p>
+              </div>
+              <div class="segmented">
+                <button class="segment active" data-range="6m">6M</button>
+                <button class="segment" data-range="1y">1Y</button>
+                <button class="segment" data-range="all">All</button>
+              </div>
+            </div>
+            <div class="card-body" style="height: 320px;">
+              <canvas id="revenueChart"></canvas>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title" data-i18n="clinicTypes">Clinic Types</h3>
+                <p class="card-subtitle" data-i18n="distributionBySpecialty">Distribution by specialty</p>
+              </div>
+            </div>
+            <div class="card-body" style="height: 320px;">
+              <canvas id="clinicTypesChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Clinics table -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title" data-i18n="clinics">Clinics</h3>
+              <p class="card-subtitle" data-i18n="clinicsManageSubtitle">Manage all clinics in your network</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="search-bar" style="width: 220px;">
+                <span class="ms">search</span>
+                <input type="text" placeholder="Search clinics..." id="clinicsSearch" />
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="MediFlow.SuperAdmin.openClinicModal()">
+                <span class="ms">add</span>
+                <span data-i18n="addClinic">Add Clinic</span>
+              </button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="sortable" data-sort="name"><span data-i18n="clinicName">Clinic Name</span><span class="ms sort-icon">arrow_upward</span></th>
+                  <th data-i18n="clinicType">Type</th>
+                  <th data-i18n="manager">Manager</th>
+                  <th class="sortable" data-sort="plan"><span data-i18n="plan">Plan</span><span class="ms sort-icon">unfold_more</span></th>
+                  <th data-i18n="expiry">Subscription</th>
+                  <th class="sortable" data-sort="bookings"><span data-i18n="bookings">Bookings</span><span class="ms sort-icon">unfold_more</span></th>
+                  <th class="sortable" data-sort="revenue"><span data-i18n="revenue">Revenue</span><span class="ms sort-icon">unfold_more</span></th>
+                  <th style="text-align:right;" data-i18n="actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clinicsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Activity + Quick Actions -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="card lg:col-span-2">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="recentActivity">Recent Activity</h3>
+              <button class="btn btn-ghost btn-sm" onclick="MediFlow.Router.navigate('view-activity')">
+                <span data-i18n="viewAll">View all</span>
+                <span class="ms">arrow_forward</span>
+              </button>
+            </div>
+            <div class="card-body" id="recentActivityList" style="padding: 0;"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="quickActions">Quick Actions</h3>
+            </div>
+            <div class="card-body space-y-2">
+              <button class="btn btn-secondary w-full justify-start" onclick="MediFlow.SuperAdmin.openClinicModal()">
+                <span class="ms tint-brand" style="border-radius:6px; padding:4px; background:var(--brand-soft);">add_business</span>
+                <span data-i18n="addClinic">Add new clinic</span>
+              </button>
+              <button class="btn btn-secondary w-full justify-start" onclick="MediFlow.Router.navigate('view-subscriptions')">
+                <span class="ms tint-success" style="border-radius:6px; padding:4px; background:var(--success-soft);">card_membership</span>
+                <span data-i18n="manageSubs">Manage subscriptions</span>
+              </button>
+              <button class="btn btn-secondary w-full justify-start" onclick="MediFlow.Router.navigate('view-reports')">
+                <span class="ms tint-info" style="border-radius:6px; padding:4px; background:var(--info-soft);">analytics</span>
+                <span data-i18n="viewReports">View reports</span>
+              </button>
+              <button class="btn btn-secondary w-full justify-start" onclick="MediFlow.SuperAdmin.exportReport()">
+                <span class="ms tint-violet" style="border-radius:6px; padding:4px; background:var(--violet-50);">download</span>
+                <span data-i18n="exportData">Export data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===== CLINICS (grid view) ===== -->
+      <section id="view-clinics" class="hidden space-y-6">
+        <div class="page-header">
           <div>
-            <label class="label" data-i18n="clinicType">Clinic Type</label>
-            <select class="input" id="clinicTypeSelect">
+            <h1 class="page-title" data-i18n="clinics">Clinics</h1>
+            <p class="page-subtitle" data-i18n="clinicsGridSubtitle">All clinics in your network, organized by specialty</p>
+          </div>
+          <div class="page-actions">
+            <div class="segmented" id="viewToggle">
+              <button class="segment active" data-mode="grid"><span class="ms">grid_view</span>Grid</button>
+              <button class="segment" data-mode="table"><span class="ms">view_list</span>Table</button>
+            </div>
+            <button class="btn btn-primary" onclick="MediFlow.SuperAdmin.openClinicModal()">
+              <span class="ms">add</span>
+              <span data-i18n="addClinic">Add Clinic</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card">
+          <div class="card-body flex flex-wrap items-center gap-3">
+            <div class="search-bar" style="flex:1; min-width: 240px;">
+              <span class="ms">search</span>
+              <input type="text" placeholder="Search by clinic name or manager..." id="clinicsGridSearch" />
+            </div>
+            <select class="select" id="filterType" style="width: auto; min-width: 160px;">
+              <option value="">All Types</option>
               <option value="DENTAL">Dental</option>
               <option value="DERMA_LASER">Derma / Laser</option>
               <option value="LAB">Laboratory</option>
               <option value="PEDIATRICS">Pediatrics</option>
               <option value="INTERNAL">Internal Medicine</option>
             </select>
-          </div>
-          <div>
-            <label class="label" data-i18n="manager">Manager</label>
-            <input class="input" id="clinicManagerInput" placeholder="Dr. ..." />
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="label" data-i18n="plan">Plan</label>
-            <select class="input" id="clinicPlanSelect">
+            <select class="select" id="filterPlan" style="width: auto; min-width: 140px;">
+              <option value="">All Plans</option>
               <option value="starter">Starter</option>
               <option value="pro">Professional</option>
               <option value="enterprise">Enterprise</option>
             </select>
           </div>
+        </div>
+
+        <div id="clinicsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </section>
+
+      <!-- ===== SUBSCRIPTIONS ===== -->
+      <section id="view-subscriptions" class="hidden space-y-6">
+        <div class="page-header">
           <div>
-            <label class="label" data-i18n="expiry">Expiry</label>
-            <input class="input" type="date" id="clinicExpiryInput" />
+            <h1 class="page-title" data-i18n="subscriptions">Subscriptions</h1>
+            <p class="page-subtitle" data-i18n="subsSubtitle">Compare plans and track subscription health</p>
           </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('clinicModal')" data-i18n="cancel">Cancel</button>
-        <button class="btn btn-primary" onclick="MediFlow.SuperAdmin.saveClinic()" data-i18n="save">Save</button>
+
+        <!-- Plan distribution -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="plan_starter">Starter</span>
+              <div class="kpi-icon tint-info"><span class="ms">rocket_launch</span></div>
+            </div>
+            <div class="kpi-value" id="starterCount">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-caption">$49/mo each</span>
+            </div>
+          </div>
+          <div class="kpi-card" style="border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand);">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="plan_pro">Professional</span>
+              <div class="kpi-icon tint-brand"><span class="ms">workspace_premium</span></div>
+            </div>
+            <div class="kpi-value" id="proCount">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-caption">$149/mo each</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="plan_enterprise">Enterprise</span>
+              <div class="kpi-icon tint-violet"><span class="ms">diamond</span></div>
+            </div>
+            <div class="kpi-value" id="enterpriseCount">0</div>
+            <div class="kpi-meta">
+              <span class="kpi-caption">$399/mo each</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Plans comparison -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <div class="kpi-icon tint-info"><span class="ms">rocket_launch</span></div>
+                  <h3 class="card-title" data-i18n="plan_starter">Starter</h3>
+                </div>
+                <span class="badge badge-info">Tier 1</span>
+              </div>
+              <div class="flex items-baseline gap-1 mb-1">
+                <span class="text-3xl font-bold tabular">$49</span>
+                <span class="text-soft text-sm">/mo</span>
+              </div>
+              <p class="text-soft text-sm mb-5" data-i18n="starterTagline">For small single-doctor clinics getting started.</p>
+              <ul class="space-y-3 text-sm mb-6">
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Up to 2 doctors</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Basic patient flow</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>1 clinic location</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Email support</li>
+              </ul>
+              <button class="btn btn-secondary w-full" onclick="MediFlow.SuperAdmin.choosePlan('starter')">Choose Starter</button>
+            </div>
+          </div>
+
+          <div class="card" style="border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand), var(--shadow-md); position: relative;">
+            <div style="position:absolute; top:-12px; left:50%; transform:translateX(-50%); background:var(--brand); color:#fff; font-size:11px; font-weight:600; padding:4px 12px; border-radius:var(--r-full);">MOST POPULAR</div>
+            <div class="card-body">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <div class="kpi-icon tint-brand"><span class="ms">workspace_premium</span></div>
+                  <h3 class="card-title" data-i18n="plan_pro">Professional</h3>
+                </div>
+                <span class="badge badge-brand">Tier 2</span>
+              </div>
+              <div class="flex items-baseline gap-1 mb-1">
+                <span class="text-3xl font-bold tabular">$149</span>
+                <span class="text-soft text-sm">/mo</span>
+              </div>
+              <p class="text-soft text-sm mb-5" data-i18n="proTagline">For growing multi-doctor clinics with reporting needs.</p>
+              <ul class="space-y-3 text-sm mb-6">
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Up to 10 doctors</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Financial reports & analytics</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Inventory module</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Priority support</li>
+              </ul>
+              <button class="btn btn-primary w-full" onclick="MediFlow.SuperAdmin.choosePlan('pro')">Choose Professional</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                  <div class="kpi-icon tint-violet"><span class="ms">diamond</span></div>
+                  <h3 class="card-title" data-i18n="plan_enterprise">Enterprise</h3>
+                </div>
+                <span class="badge badge-violet">Tier 3</span>
+              </div>
+              <div class="flex items-baseline gap-1 mb-1">
+                <span class="text-3xl font-bold tabular">$399</span>
+                <span class="text-soft text-sm">/mo</span>
+              </div>
+              <p class="text-soft text-sm mb-5" data-i18n="enterpriseTagline">For large multi-branch networks with advanced needs.</p>
+              <ul class="space-y-3 text-sm mb-6">
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Unlimited doctors</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Multi-branch support</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>Custom integrations</li>
+                <li class="flex items-center gap-2"><span class="ms text-success" style="font-size:18px;">check_circle</span>24/7 dedicated support</li>
+              </ul>
+              <button class="btn btn-secondary w-full" onclick="MediFlow.SuperAdmin.choosePlan('enterprise')">Choose Enterprise</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active subscriptions table -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title" data-i18n="activeSubscriptions">Active Subscriptions</h3>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th data-i18n="clinicName">Clinic</th>
+                  <th data-i18n="plan">Plan</th>
+                  <th data-i18n="expiry">Renewal Date</th>
+                  <th data-i18n="status">Status</th>
+                  <th data-i18n="monthlyValue">Monthly Value</th>
+                </tr>
+              </thead>
+              <tbody id="subscriptionsTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== REPORTS ===== -->
+      <section id="view-reports" class="hidden space-y-6">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" data-i18n="reports">Reports</h1>
+            <p class="page-subtitle" data-i18n="reportsSubtitle">Deep-dive analytics across your clinic network</p>
+          </div>
+          <div class="page-actions">
+            <div class="segmented">
+              <button class="segment active" data-period="month">This Month</button>
+              <button class="segment" data-period="quarter">Quarter</button>
+              <button class="segment" data-period="year">Year</button>
+            </div>
+            <button class="btn btn-secondary" onclick="MediFlow.SuperAdmin.exportReport()">
+              <span class="ms">download</span>
+              <span data-i18n="export">Export</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Top KPIs -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="avgRevenuePerClinic">Avg Revenue / Clinic</span>
+              <div class="kpi-icon tint-brand"><span class="ms">trending_up</span></div>
+            </div>
+            <div class="kpi-value" id="statAvgRevenue">$0</div>
+            <div class="kpi-meta"><span class="kpi-delta up"><span class="ms" style="font-size:14px;">trending_up</span>+5.4%</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="avgBookings">Avg Bookings / Clinic</span>
+              <div class="kpi-icon tint-info"><span class="ms">event</span></div>
+            </div>
+            <div class="kpi-value" id="statAvgBookings">0</div>
+            <div class="kpi-meta"><span class="kpi-delta up"><span class="ms" style="font-size:14px;">trending_up</span>+12%</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="expiringSoon">Expiring Soon</span>
+              <div class="kpi-icon tint-warning"><span class="ms">schedule</span></div>
+            </div>
+            <div class="kpi-value" id="statExpiring">0</div>
+            <div class="kpi-meta"><span class="kpi-caption">Next 30 days</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label" data-i18n="churnRisk">Churn Risk</span>
+              <div class="kpi-icon tint-danger"><span class="ms">warning</span></div>
+            </div>
+            <div class="kpi-value" id="statChurn">0</div>
+            <div class="kpi-meta"><span class="kpi-caption">Expired subs</span></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="revenueByType">Revenue by Clinic Type</h3>
+            </div>
+            <div class="card-body space-y-4" id="revenueByType"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="topClinics">Top Performing Clinics</h3>
+            </div>
+            <div class="card-body space-y-2" id="topClinics"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title" data-i18n="allClinicsPerformance">All Clinics Performance</h3>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th data-i18n="clinicName">Clinic</th>
+                  <th data-i18n="clinicType">Type</th>
+                  <th data-i18n="plan">Plan</th>
+                  <th data-i18n="bookings">Bookings</th>
+                  <th data-i18n="revenue">Revenue</th>
+                  <th data-i18n="performance">Performance</th>
+                </tr>
+              </thead>
+              <tbody id="performanceTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ACTIVITY ===== -->
+      <section id="view-activity" class="hidden space-y-6">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" data-i18n="activity">Activity</h1>
+            <p class="page-subtitle" data-i18n="activitySubtitle">Audit trail of all administrative actions</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn btn-secondary" onclick="MediFlow.SuperAdmin.clearActivity()">
+              <span class="ms">delete_sweep</span>
+              <span data-i18n="clearAll">Clear All</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body" id="activityTimeline" style="padding: var(--sp-6);">
+            <!-- Activity items rendered here -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SETTINGS ===== -->
+      <section id="view-settings" class="hidden space-y-6 max-w-3xl">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" data-i18n="settings">Settings</h1>
+            <p class="page-subtitle" data-i18n="settingsSubtitle">Manage your console preferences</p>
+          </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title" data-i18n="appearance">Appearance</h3>
+          </div>
+          <div class="card-body space-y-5">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="label" style="margin-bottom: 2px;" data-i18n="darkMode">Dark Mode</div>
+                <div class="text-soft text-xs" data-i18n="darkModeDesc">Switch between light and dark themes</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settingsThemeToggle" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="divider"></div>
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="label" style="margin-bottom: 2px;" data-i18n="language">Language</div>
+                <div class="text-soft text-xs" data-i18n="languageDesc">Select your preferred language</div>
+              </div>
+              <div class="segmented">
+                <button class="segment lang-btn" data-lang="en">English</button>
+                <button class="segment lang-btn" data-lang="ar">العربية</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Profile -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title" data-i18n="profile">Profile</h3>
+          </div>
+          <div class="card-body space-y-4">
+            <div class="flex items-center gap-4">
+              <div class="avatar avatar-xl">SA</div>
+              <div>
+                <div class="font-semibold text-strong">Super Admin</div>
+                <div class="text-soft text-sm">admin@mediflow.io</div>
+              </div>
+              <button class="btn btn-secondary btn-sm ml-auto">
+                <span class="ms">edit</span>
+                <span data-i18n="edit">Edit</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="card" style="border-color: var(--danger);">
+          <div class="card-header" style="border-bottom-color: var(--danger);">
+            <h3 class="card-title" style="color: var(--danger);" data-i18n="dangerZone">Danger Zone</h3>
+          </div>
+          <div class="card-body">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <div class="label" style="margin-bottom: 2px;" data-i18n="resetData">Reset All Data</div>
+                <div class="text-soft text-xs" data-i18n="resetDataDesc">Wipe all clinics, doctors, patients, and settings. Cannot be undone.</div>
+              </div>
+              <button class="btn btn-danger" onclick="MediFlow.SuperAdmin.resetAllData()">
+                <span class="ms">delete_forever</span>
+                <span data-i18n="resetData">Reset All Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ===================== DRAWER: NOTIFICATIONS ===================== -->
+<div class="drawer" id="notifDrawer">
+  <div class="drawer-header">
+    <div class="flex items-center gap-2">
+      <h3 class="card-title" data-i18n="notifications">Notifications</h3>
+      <span class="badge badge-brand" id="notifCount">0</span>
+    </div>
+    <div class="flex items-center gap-1">
+      <button class="btn btn-ghost btn-sm" onclick="MediFlow.SuperAdmin.markAllRead()">
+        <span class="ms">done_all</span>
+        <span data-i18n="markAllRead">Mark all read</span>
+      </button>
+      <div class="modal-close" onclick="MediFlow.SuperAdmin.toggleNotifDrawer(false)">
+        <span class="ms">close</span>
       </div>
     </div>
   </div>
+  <div class="drawer-body" id="notifList"></div>
+</div>
 
-  <!-- ===================== SCRIPTS (order matters) ===================== -->
-  <script src="assets/js/core/store.js"></script>
-  <script src="assets/js/core/i18n.js"></script>
-  <script src="assets/js/core/ui.js"></script>
-  <script src="assets/js/core/router.js"></script>
-  <script src="assets/js/core/seed.js"></script>
-  <script src="assets/js/super-admin.js"></script>
+<!-- ===================== MODAL: ADD/EDIT CLINIC ===================== -->
+<div class="modal-overlay" id="clinicModal">
+  <div class="modal-card modal-lg">
+    <div class="modal-header">
+      <h3 class="modal-title" id="clinicModalTitle" data-i18n="addClinic">Add Clinic</h3>
+      <div class="modal-close" onclick="MediFlow.UI.closeModal('clinicModal')">
+        <span class="ms">close</span>
+      </div>
+    </div>
+    <div class="modal-body space-y-4">
+      <input type="hidden" id="clinicEditId" />
+      <div class="form-row">
+        <label class="label" for="clinicNameInput"><span data-i18n="clinicName">Clinic Name</span><span class="req">*</span></label>
+        <input class="input" id="clinicNameInput" placeholder="e.g. Bright Smile Dental" />
+        <div class="help-text" data-i18n="clinicNameHelp">The display name shown across the platform</div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label" for="clinicTypeSelect"><span data-i18n="clinicType">Clinic Type</span><span class="req">*</span></label>
+          <select class="select" id="clinicTypeSelect">
+            <option value="DENTAL">Dental</option>
+            <option value="DERMA_LASER">Derma / Laser</option>
+            <option value="LAB">Laboratory</option>
+            <option value="PEDIATRICS">Pediatrics</option>
+            <option value="INTERNAL">Internal Medicine</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" for="clinicManagerInput"><span data-i18n="manager">Manager</span></label>
+          <input class="input" id="clinicManagerInput" placeholder="Dr. ..." />
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label" for="clinicPlanSelect"><span data-i18n="plan">Plan</span><span class="req">*</span></label>
+          <select class="select" id="clinicPlanSelect">
+            <option value="starter">Starter — $49/mo</option>
+            <option value="pro">Professional — $149/mo</option>
+            <option value="enterprise">Enterprise — $399/mo</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" for="clinicExpiryInput"><span data-i18n="expiry">Subscription Expiry</span></label>
+          <input class="input" type="date" id="clinicExpiryInput" />
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="MediFlow.UI.closeModal('clinicModal')" data-i18n="cancel">Cancel</button>
+      <button class="btn btn-primary" onclick="MediFlow.SuperAdmin.saveClinic()">
+        <span class="ms">save</span>
+        <span data-i18n="save">Save</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL: CONFIRM DELETE ===================== -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal-card modal-sm">
+    <div class="modal-header">
+      <h3 class="modal-title" id="confirmTitle">Confirm Action</h3>
+      <div class="modal-close" onclick="MediFlow.UI.closeModal('confirmModal')">
+        <span class="ms">close</span>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-danger">
+        <span class="ms">warning</span>
+        <div>
+          <div class="font-semibold" id="confirmHeadline" style="color: var(--danger-fg);">Are you sure?</div>
+          <div class="text-soft text-sm mt-1" id="confirmMessage">This action cannot be undone.</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="MediFlow.UI.closeModal('confirmModal')" data-i18n="cancel">Cancel</button>
+      <button class="btn btn-danger" id="confirmOkBtn">
+        <span class="ms">delete</span>
+        <span data-i18n="delete">Delete</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== SCRIPTS (order matters) ===================== -->
+<script src="assets/js/core/store.js"></script>
+<script src="assets/js/core/i18n.js"></script>
+<script src="assets/js/core/ui.js"></script>
+<script src="assets/js/core/router.js"></script>
+<script src="assets/js/core/seed.js"></script>
+<script src="assets/js/super-admin.js"></script>
 </body>
 </html>

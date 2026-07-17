@@ -1,6 +1,18 @@
-# MediFlow — Modular Clinic Management SaaS
+# MediFlow — Enterprise Clinic Management SaaS
 
-A professional-grade, multi-tier SaaS clinic management system built with **Vanilla JavaScript + HTML5 + Tailwind CSS (CDN)**. Strictly modular, local-first, with per-clinic data isolation.
+A premium, production-grade, multi-tier SaaS clinic management system built with **Vanilla JavaScript + HTML5 + Tailwind CSS (CDN)**. Inspired by Linear, Stripe Dashboard, Notion, and Vercel — designed for trust, precision, and operational efficiency.
+
+## Premium Design System
+
+The interface is built on a complete enterprise design system with:
+
+- **Refined color tokens** — semantic palette (brand, success, warning, danger, info, violet) with proper light/dark variants
+- **8px spacing grid** — consistent rhythm across all components
+- **Professional typography** — Inter font with tight heading tracking, tabular numerics for data
+- **Soft elevation system** — 5 shadow levels (xs → 2xl) for layered depth
+- **Subtle motion** — fast, purposeful transitions (120–280ms) with custom easing curves
+- **Component library** — buttons, cards, badges, tables, modals, drawers, toasts, tabs, segmented controls, switches, chips, KPI cards — all consistent
+- **Bidirectional RTL/LTR** — full Arabic support with proper layout flipping
 
 ---
 
@@ -125,28 +137,29 @@ A reusable `openModal(id)` / `closeModal(id)` / `closeAllModals()` API. Any elem
 ## Feature Summary
 
 ### Super Admin (`index.html` + `super-admin.js`)
-- Dashboard: 4 live stat cards (clinics, revenue, doctors, patients)
-- Clinics: full CRUD with table + card grid views
-- Subscriptions: Starter / Pro / Enterprise comparison with live counts
-- Reports: revenue-by-type progress bars + top-5 clinics leaderboard
-- Settings: theme toggle, language switch, full data reset
-- Hand-off: clicking **Open** saves clinic context to localStorage and redirects to `clinic-portal.html`
+- **Dashboard**: 4 KPI cards with trend deltas (clinics, revenue, doctors, patients) · revenue-overview line chart (Chart.js) · clinic-types doughnut chart · live clinics table with sortable columns · recent activity timeline · quick actions panel
+- **Clinics**: filterable card grid (by type & plan) + search · clinic-type color-coded pills with icons
+- **Subscriptions**: 3 plan comparison cards (Starter / Pro / Enterprise) with "Most Popular" highlight · active subscriptions table with renewal status badges
+- **Reports**: 4 advanced KPIs (avg revenue, avg bookings, expiring soon, churn risk) · revenue-by-type progress bars · top-5 clinics leaderboard · all-clinics performance table with progress indicators
+- **Activity**: full audit timeline of all administrative actions
+- **Settings**: appearance (theme switch + language segmented control) · profile card · danger zone with confirm-dialog reset
+- **Notifications**: slide-in drawer with mark-all-read action
 
 ### Clinic Portal (`clinic-portal.html` + `clinic-core.js` + `clinics/*.js`)
-- Dashboard: today's patients, doctors, revenue, waiting count + live queue table
-- Patients: search + status filter + lifecycle buttons (`arrived → waiting → withDoctor → completed`)
-- Doctors: card grid with salary, incentive rate, today's earnings + Pay Doctor modal
-- Employees: full CRUD table
-- Financials: today/month revenue, salary payout table with Pay buttons
-- Settings: clinic info edit, theme, language
+- **Dashboard**: 4 KPI cards (patients today, doctors, today revenue, waiting) · live patient queue table with status badges & advance buttons · queue status breakdown panel with progress bars
+- **Patients**: searchable + status-filterable table with avatars, status badges, edit/delete actions
+- **Doctors**: premium card grid with avatars, gradient backgrounds, salary/incentive/patients/earned stats · Pay Doctor modal with calculation breakdown
+- **Employees**: enterprise table with role/salary/status columns
+- **Financials**: 3 KPI cards (today/month revenue + total salaries) · doctor compensation table with one-click pay
+- **Settings**: clinic info editor, theme switch, language segmented control
 
-### Per-Clinic Specialties
+### Per-Clinic Specialties (auto-injected via ClinicRegistry)
 | Type | Module | Unique Features |
 |---|---|---|
-| `DENTAL` | `dental.js` | 32-tooth interactive chart (affected/extracted states, persisted globally) |
-| `DERMA_LASER` | `laser.js` | Laser type, body area, skin type, hair thickness, sessions count + Laser Sessions overview |
-| `LAB` | `lab.js` | Test type, result + **full inventory CRUD** with low-stock & expiry warnings |
-| `PEDIATRICS` | `pediatrics.js` | Weight, guardian name |
+| `DENTAL` | `dental.js` | 32-tooth interactive chart with affected/extracted markers, segmented mode toggle, persisted globally |
+| `DERMA_LASER` | `laser.js` | Laser type, body area, skin type (I-VI), hair thickness, sessions count · dedicated Laser Sessions view |
+| `LAB` | `lab.js` | Test type, result · **full inventory CRUD** with 3 KPI stats (total / low stock / expiring) + low-stock & expiry badges |
+| `PEDIATRICS` | `pediatrics.js` | Weight tracking, guardian name |
 | `INTERNAL` | `internal.js` | Procedure, clinical notes |
 
 ---
@@ -225,8 +238,34 @@ Clinic modules self-register on load — order between them does not matter.
 - **Vanilla JavaScript** (ES6+, no framework, no bundler)
 - **HTML5** semantic markup
 - **Tailwind CSS** via CDN
+- **Chart.js 4.4** for analytics visualizations
 - **Material Symbols** for icons
+- **Inter** font family for premium typography
 - **localStorage** as mock backend (with per-clinic prefixing)
 - **Custom i18n dictionary** for bidirectional Arabic/English
 
 No build tools. No npm install. Just open the HTML.
+
+---
+
+## Premium UI Components Reference
+
+| Component | Class | Description |
+|---|---|---|
+| KPI Card | `.kpi-card` | Stat card with label, value, trend delta, colored icon |
+| Card | `.card`, `.card-hover` | Surface container with optional hover lift |
+| Button | `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-danger`, `.btn-success` | 5 variants, 3 sizes (sm, default, lg), `.btn-icon` for square |
+| Input | `.input`, `.select`, `.textarea` | Form fields with focus ring |
+| Badge | `.badge`, `.badge-success`, `.badge-warning`, `.badge-danger`, `.badge-info`, `.badge-brand`, `.badge-violet`, `.badge-neutral` | Status pills with optional dot (`.badge-dot`) |
+| Table | `.table` | Sticky-header enterprise table with hover rows |
+| Modal | `.modal-overlay`, `.modal-card` | Promise-based confirm dialog via `UI.confirm()` |
+| Drawer | `.drawer` | Slide-in side panel |
+| Toast | auto-stacked | `UI.toast(msg, type, timeout)` |
+| Tabs | `.tabs-underline` or `.segmented` | Underline or pill-style navigation |
+| Switch | `.switch` | Toggle input with smooth slider |
+| KPI Icon | `.kpi-icon`, `.tint-brand`, `.tint-success`, etc. | Color-tinted icon containers |
+| Clinic Pill | `.clinic-pill`, `.clinic-type-{TYPE}` | Specialty-labeled pill with colored icon |
+| Progress | `.progress`, `.progress-bar` | Animated progress with color variants |
+| Search Bar | `.search-bar` | Premium search input with icon + kbd shortcut |
+| Breadcrumbs | `.breadcrumbs` | Hierarchical navigation |
+| Live Dot | `.live-dot` | Pulsing indicator for real-time elements |

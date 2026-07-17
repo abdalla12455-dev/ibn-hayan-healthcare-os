@@ -1,13 +1,8 @@
 /* ============================================================
-   MediFlow — Laboratory Clinic Module
-   Specialty: test types, results, and full inventory CRUD
-   - Clinic-specific fields: testType, result
-   - Extra view: Inventory management (reagents/supplies)
-   - Inventory persists at clinic_${id}_inventory
+   MediFlow — Laboratory Clinic Module (Premium)
    ============================================================ */
 
 window.MediFlow = window.MediFlow || {};
-
 MediFlow.Clinics = MediFlow.Clinics || {};
 
 MediFlow.Clinics.Lab = (function () {
@@ -26,23 +21,32 @@ MediFlow.Clinics.Lab = (function () {
       {
         id: 'view-inventory',
         html: `
-          <section id="view-inventory" class="hidden space-y-6">
-            <div class="flex items-center justify-between">
-              <h3 class="text-lg font-semibold">Lab Inventory</h3>
-              <button class="btn btn-primary" onclick="MediFlow.Clinics.Lab.openInventoryModal()">
-                <span class="ms ms-sm">add</span>Add Item
-              </button>
+          <section id="view-inventory" class="hidden space-y-6 view-enter">
+            <div class="page-header">
+              <div>
+                <h1 class="page-title">Lab Inventory</h1>
+                <p class="page-subtitle">Manage reagents, supplies, and consumables</p>
+              </div>
+              <div class="page-actions">
+                <button class="btn btn-primary" onclick="MediFlow.Clinics.Lab.openInventoryModal()">
+                  <span class="ms">add</span>
+                  Add Item
+                </button>
+              </div>
             </div>
-            <div class="mf-card overflow-hidden">
-              <div class="overflow-x-auto">
-                <table class="mf-table">
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" id="inventoryStats"></div>
+
+            <div class="card">
+              <div class="table-scroll">
+                <table class="table">
                   <thead>
                     <tr>
-                      <th>Item Name</th>
+                      <th>Item</th>
                       <th>Quantity</th>
                       <th>Unit</th>
                       <th>Expiry</th>
-                      <th>Actions</th>
+                      <th style="text-align:right;">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="inventoryTableBody"></tbody>
@@ -55,10 +59,10 @@ MediFlow.Clinics.Lab = (function () {
           <div class="modal-overlay" id="inventoryModal">
             <div class="modal-card">
               <div class="modal-header">
-                <h3 class="font-semibold text-lg" id="inventoryModalTitle">Add Inventory Item</h3>
-                <button onclick="MediFlow.UI.closeModal('inventoryModal')" style="color: var(--mf-text-soft);">
-                  <span class="ms ms-md">close</span>
-                </button>
+                <h3 class="modal-title" id="inventoryModalTitle">Add Inventory Item</h3>
+                <div class="modal-close" onclick="MediFlow.UI.closeModal('inventoryModal')">
+                  <span class="ms">close</span>
+                </div>
               </div>
               <div class="modal-body space-y-4">
                 <input type="hidden" id="inventoryEditId" />
@@ -73,7 +77,7 @@ MediFlow.Clinics.Lab = (function () {
                   </div>
                   <div>
                     <label class="label">Unit</label>
-                    <select class="input" id="inventoryUnitInput">
+                    <select class="select" id="inventoryUnitInput">
                       <option value="pcs">pcs</option>
                       <option value="vials">vials</option>
                       <option value="boxes">boxes</option>
@@ -88,8 +92,10 @@ MediFlow.Clinics.Lab = (function () {
                 </div>
               </div>
               <div class="modal-footer">
-                <button class="btn btn-ghost" onclick="MediFlow.UI.closeModal('inventoryModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="MediFlow.Clinics.Lab.saveInventory()">Save</button>
+                <button class="btn btn-secondary" onclick="MediFlow.UI.closeModal('inventoryModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="MediFlow.Clinics.Lab.saveInventory()">
+                  <span class="ms">save</span>Save
+                </button>
               </div>
             </div>
           </div>
@@ -127,43 +133,93 @@ MediFlow.Clinics.Lab = (function () {
 
     renderExtraCells(p) {
       const { escapeHtml } = MediFlow.UI;
-      return `<td>${escapeHtml(p.testType || '—')}</td><td>${escapeHtml(p.result || '—')}</td>`;
+      return `<td class="text-soft">${escapeHtml(p.testType || '—')}</td><td class="text-soft">${escapeHtml(p.result || '—')}</td>`;
     },
 
-    // ---- Render the Inventory view ----
     render() {
-      const { ClinicCore, UI, I18n } = MediFlow;
+      const { ClinicCore, UI } = MediFlow;
       const { ds } = ClinicCore.getContext();
-      const { escapeHtml, fmtDate, fmtDateInput } = UI;
+      const { escapeHtml, fmtDate, fmtDateInput, fmtNum } = UI;
+
+      // Render inventory stats
+      const statsHost = document.getElementById('inventoryStats');
+      if (statsHost) {
+        const list = ds.getInventory();
+        const totalItems = list.length;
+        const lowStock = list.filter(it => it.quantity <= 20).length;
+        const expiringSoon = list.filter(it => {
+          if (!it.expiry) return false;
+          const days = Math.floor((new Date(it.expiry) - new Date()) / 86400000);
+          return days >= 0 && days < 60;
+        }).length;
+        statsHost.innerHTML = `
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Total Items</span>
+              <div class="kpi-icon tint-info"><span class="ms">inventory_2</span></div>
+            </div>
+            <div class="kpi-value">${fmtNum(totalItems)}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Low Stock</span>
+              <div class="kpi-icon tint-warning"><span class="ms">warning</span></div>
+            </div>
+            <div class="kpi-value">${fmtNum(lowStock)}</div>
+            <div class="kpi-meta"><span class="kpi-caption">≤ 20 units left</span></div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-header">
+              <span class="kpi-label">Expiring Soon</span>
+              <div class="kpi-icon tint-danger"><span class="ms">schedule</span></div>
+            </div>
+            <div class="kpi-value">${fmtNum(expiringSoon)}</div>
+            <div class="kpi-meta"><span class="kpi-caption">within 60 days</span></div>
+          </div>
+        `;
+      }
+
       const tbody = document.getElementById('inventoryTableBody');
       if (!tbody) return;
       const list = ds.getInventory();
       if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8" style="color: var(--mf-text-soft);">No inventory items</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="table-empty"><span class="ms">inventory_2</span><p>No inventory items</p></div></td></tr>`;
         return;
       }
       tbody.innerHTML = list.map(it => {
         const lowStock = it.quantity <= 20;
         const expDays = it.expiry ? Math.floor((new Date(it.expiry) - new Date()) / 86400000) : null;
         const expBadge = expDays === null ? '' :
-          expDays < 0 ? `<span class="badge badge-expired ml-2">Expired</span>` :
-          expDays < 60 ? `<span class="badge badge-expiring ml-2">${expDays}d left</span>` : '';
+          expDays < 0 ? `<span class="badge badge-danger badge-dot ml-2">Expired</span>` :
+          expDays < 60 ? `<span class="badge badge-warning badge-dot ml-2">${expDays}d left</span>` : '';
         return `
           <tr>
-            <td class="font-medium">${escapeHtml(it.name)}</td>
             <td>
-              <span class="${lowStock ? 'text-red-500 font-semibold' : ''}">${it.quantity}</span>
-              ${lowStock ? '<span class="badge badge-expiring ml-2">Low</span>' : ''}
+              <div class="flex items-center gap-3">
+                <div class="kpi-icon tint-info" style="width:32px; height:32px;">
+                  <span class="ms" style="font-size:18px;">science</span>
+                </div>
+                <div class="font-semibold text-strong">${escapeHtml(it.name)}</div>
+              </div>
             </td>
-            <td>${escapeHtml(it.unit || '—')}</td>
-            <td>${fmtDate(it.expiry)} ${expBadge}</td>
             <td>
-              <div class="flex gap-1">
-                <button class="btn btn-ghost btn-sm" onclick="MediFlow.Clinics.Lab.editInventory('${it.id}')">
-                  <span class="ms ms-sm">edit</span>
+              <div class="flex items-center gap-2">
+                <span class="font-semibold tabular ${lowStock ? 'text-warning' : 'text-strong'}">${it.quantity}</span>
+                ${lowStock ? '<span class="badge badge-warning badge-dot">Low</span>' : ''}
+              </div>
+            </td>
+            <td class="text-soft">${escapeHtml(it.unit || '—')}</td>
+            <td>
+              <span class="text-soft">${fmtDate(it.expiry)}</span>
+              ${expBadge}
+            </td>
+            <td>
+              <div class="row-actions">
+                <button class="btn btn-ghost btn-icon btn-sm" onclick="MediFlow.Clinics.Lab.editInventory('${it.id}')" title="Edit">
+                  <span class="ms">edit</span>
                 </button>
-                <button class="btn btn-ghost btn-sm text-red-500" onclick="MediFlow.Clinics.Lab.deleteInventory('${it.id}')">
-                  <span class="ms ms-sm">delete</span>
+                <button class="btn btn-ghost btn-icon btn-sm" onclick="MediFlow.Clinics.Lab.deleteInventory('${it.id}')" title="Delete" style="color: var(--danger);">
+                  <span class="ms">delete</span>
                 </button>
               </div>
             </td>
@@ -173,7 +229,6 @@ MediFlow.Clinics.Lab = (function () {
     }
   };
 
-  // ---- Inventory CRUD ----
   function openInventoryModal() {
     document.getElementById('inventoryModalTitle').textContent = 'Add Inventory Item';
     document.getElementById('inventoryEditId').value = '';
@@ -203,7 +258,10 @@ MediFlow.Clinics.Lab = (function () {
     const { ds } = ClinicCore.getContext();
     const id = document.getElementById('inventoryEditId').value;
     const name = document.getElementById('inventoryNameInput').value.trim();
-    if (!name) { UI.toast('Item name is required', 'warning'); return; }
+    if (!name) {
+      UI.toast('Item name is required', 'warning');
+      return;
+    }
     const payload = {
       name,
       quantity: Number(document.getElementById('inventoryQtyInput').value) || 0,
@@ -215,25 +273,31 @@ MediFlow.Clinics.Lab = (function () {
       const idx = list.findIndex(x => x.id === id);
       if (idx > -1) list[idx] = { ...list[idx], ...payload };
     } else {
-      payload.id = MediFlow.UI.uid('inv');
+      payload.id = UI.uid('inv');
       list.push(payload);
     }
     ds.setInventory(list);
     UI.closeModal('inventoryModal');
     UI.toast(id ? 'Item updated' : 'Item added', 'success');
-    MediFlow.ClinicCore.renderAll();
+    ClinicCore.renderAll();
   }
 
-  function deleteInventory(id) {
+  async function deleteInventory(id) {
     const { ClinicCore, UI } = MediFlow;
     const { ds } = ClinicCore.getContext();
-    if (!confirm('Delete this inventory item?')) return;
+    const ok = await UI.confirm({
+      title: 'Delete Item',
+      headline: 'Delete this inventory item?',
+      message: 'This action cannot be undone.',
+      confirmText: 'Delete',
+      danger: true
+    });
+    if (!ok) return;
     ds.setInventory(ds.getInventory().filter(x => x.id !== id));
     UI.toast('Item deleted', 'success');
-    MediFlow.ClinicCore.renderAll();
+    ClinicCore.renderAll();
   }
 
-  // ---- Helpers ----
   function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
   function getVal(id) { const el = document.getElementById(id); return el ? el.value : ''; }
   function fmtDateInput(iso) {
@@ -241,7 +305,6 @@ MediFlow.Clinics.Lab = (function () {
     try { return new Date(iso).toISOString().slice(0, 10); } catch { return ''; }
   }
 
-  // ---- Self-register ----
   MediFlow.ClinicRegistry.register(config);
 
   return { config, openInventoryModal, editInventory, saveInventory, deleteInventory };
