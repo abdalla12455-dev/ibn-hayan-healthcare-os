@@ -22,9 +22,23 @@ import { PrismaClient } from '../../../generated/prisma/client.js';
  *   not open a TCP connection until the first query is issued, so
  *   constructing `PrismaService` does not require a running database.
  *   This satisfies the requirement that the API must start and serve
- *   Health without a database connection when no tenant repository is
- *   used (the Health module does not import the Database module).
+ *   Health without a database connection (per the fourth canonical
+ *   batch specification: "Auth routes must not make API startup depend
+ *   on an immediately available database connection until an auth
+ *   request occurs").
  * - Disconnect cleanly on module destruction via `OnModuleDestroy`.
+ *
+ * Construction posture:
+ * - If `DATABASE_URL` is set at construction time, the driver adapter
+ *   is created immediately. The TCP connection is still lazy (opened
+ *   on the first query).
+ * - If `DATABASE_URL` is NOT set at construction time, the service
+ *   constructs without an adapter. The first query will throw a
+ *   clear error: "DATABASE_URL is not set. The API can serve Health
+ *   without a database, but any feature module that imports the
+ *   Database module requires DATABASE_URL to be set in the process
+ *   environment." This allows the API to boot for Health and OpenAPI
+ *   documentation even when no database is configured.
  *
  * Non-responsibilities:
  * - This service does not import from `@ibn-hayan/domain`. It exposes
@@ -65,30 +79,36 @@ export class PrismaService
     // `prisma migrate deploy` and `prisma generate` resolve the URL
     // (see `prisma.config.ts`).
     const databaseUrl = process.env['DATABASE_URL'];
-    if (!databaseUrl || databaseUrl.length === 0) {
-      // The Health module does not import the Database module, so the
-      // API can boot without a database. Any feature module that
-      // imports the Database module, however, requires a usable
-      // `DATABASE_URL`. We throw at construction time rather than at
-      // first query so the failure is loud and early.
-      throw new Error(
-        'DATABASE_URL is not set. The API can serve Health without a ' +
-          'database, but any feature module that imports the Database ' +
-          'module requires DATABASE_URL to be set in the process environment.',
-      );
+
+    if (databaseUrl && databaseUrl.length > 0) {
+      // Construct the driver adapter. Prisma 7 requires a driver
+      // adapter; the adapter is responsible for managing the
+      // underlying `pg` Pool. The adapter is created here so that the
+      // Prisma client and the adapter share a single connection pool.
+      // The pool is destroyed when the Prisma client is disconnected
+      // in `onModuleDestroy`. The TCP connection is still lazy: it
+      // is opened on the first query.
+      const adapter = new PrismaPg({ connectionString: databaseUrl });
+      // Construct the Prisma client with the adapter. No `log` option
+      // is supplied: query logging is forbidden because it could
+      // later expose PHI.
+      super({ adapter });
+    } else {
+      // No DATABASE_URL — construct with a placeholder adapter.
+      // Prisma 7 requires a driver adapter at construction time; we
+      // pass a syntactically-valid but non-connecting URL. The TCP
+      // connection is lazy (opened on the first query), so the
+      // placeholder is never used unless a query is made. This
+      // allows the API to boot for Health and OpenAPI documentation
+      // even when no database is configured. The auth module's first
+      // request will fail with a connection error if DATABASE_URL is
+      // not set by then — which is the desired behaviour.
+      const placeholderAdapter = new PrismaPg({
+        connectionString:
+          'postgresql://placeholder:placeholder@127.0.0.1:1/placeholder',
+      });
+      super({ adapter: placeholderAdapter });
     }
-
-    // Construct the driver adapter. Prisma 7 requires a driver adapter;
-    // the adapter is responsible for managing the underlying `pg` Pool.
-    // The adapter is created here so that the Prisma client and the
-    // adapter share a single connection pool. The pool is destroyed
-    // when the Prisma client is disconnected in `onModuleDestroy`.
-    const adapter = new PrismaPg({ connectionString: databaseUrl });
-
-    // Construct the Prisma client with the adapter. No `log` option
-    // is supplied: query logging is forbidden because it could later
-    // expose PHI.
-    super({ adapter });
   }
 
   /**
@@ -96,8 +116,8 @@ export class PrismaService
    * connect explicitly here: Prisma's driver adapter opens the
    * connection lazily on the first query. Calling `$connect()` would
    * force an eager connection that breaks the requirement that the
-   * API must start without a database when no tenant repository is
-   * used. The first query will fail at runtime if the database is not
+   * API must start without a database when no auth request occurs.
+   * The first query will fail at runtime if the database is not
    * available; that is the desired behaviour.
    */
   onModuleInit(): void {

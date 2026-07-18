@@ -6,22 +6,38 @@
 // PostgreSQL-native SQL, and the generated migration SQL is reviewed
 // before being applied to any database.
 //
-// Per the third canonical batch specification:
-// - Only the tenancy foundation (Tenant, Organisation, Facility) is
-//   persisted in this batch. No patient, user, session, audit, billing,
-//   scheduling, inventory, or notification tables exist here yet.
+// Per the third canonical batch specification (tenancy foundation):
+// - The tenancy foundation (Tenant, Organisation, Facility) is persisted
+//   with restricted deletes and no cascading. Tenant deletion is
+//   restricted while organisations exist; organisation deletion is
+//   restricted while facilities exist.
 // - No row-level security policies exist yet. RLS and database-role
 //   separation arrive in a dedicated reviewed batch before any
 //   tenant-owned data is exposed through a public API endpoint.
-// - No cascading deletes. Tenant deletion is restricted while
-//   organisations exist; organisation deletion is restricted while
-//   facilities exist. This is the structural enforcement of the
-//   lifecycle: a tenant with active children cannot be silently
-//   destroyed.
 // - No soft-delete columns (`deletedAt`). Soft-delete is a future
 //   batch concern, governed by a separate ADR.
 // - No PostgreSQL extensions are enabled. The schema uses only
 //   built-in PostgreSQL features.
+//
+// Per the fourth canonical batch specification (identity & sessions):
+// - User, LocalCredential, TenantMembership, and AuthSession tables are
+//   persisted. The User model carries no password hash; the password
+//   hash lives on the infrastructure-only LocalCredential row and is
+//   never exposed through the domain `User` type (per ADR-013 §1.1
+//   point 12 and §1.3 — session records do not include credential
+//   material).
+// - AuthSession persists only the SHA-256 hash of the opaque session
+//   token, never the raw token. The raw token lives only in the
+//   HttpOnly cookie and in process memory between generation and
+//   cookie-setting (per ADR-013 §1.1 and §1.3).
+// - No role or permission columns exist on TenantMembership. The
+//   role/permission catalogue is deferred to a subsequent batch.
+// - No tenant-context selection columns exist on AuthSession (no
+//   `activeOrganisationId` or `activeFacilityId`). Context selection
+//   is deferred to a subsequent batch.
+// - No cascading deletes. All foreign keys use ON DELETE RESTRICT.
+// - No seed credentials. The development bootstrap command requires
+//   explicit environment variables and creates the dev user idempotently.
 //
 // Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
 // schema language cannot express a PostgreSQL concept that the design
@@ -66,6 +82,7 @@ model Tenant {
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   organisations Organisation[]
+  memberships  TenantMembership[]
 
   @@map("tenants")
 }
@@ -153,4 +170,176 @@ model Facility {
   @@index([tenantId], map: "facilities_tenant_id_idx")
   @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
   @@map("facilities")
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  active
+  disabled
+}
+
+/// A User is an authenticated identity that can sign in to the Ibn
+/// Hayan Healthcare Operating System. Every session, membership, and
+/// audit event belongs to exactly one User. A User is platform-scoped
+/// (not tenant-scoped); a User's tenant access is expressed through
+/// `TenantMembership` rows.
+///
+/// Per ADR-013 §1.1, authentication is separated from authorisation.
+/// This model represents the authenticated identity only; the
+/// authorisation verification chain (ADR-013 §1.4) consults the
+/// membership set at every protected API operation.
+///
+/// This model carries NO password hash. The Argon2id password hash
+/// lives on the infrastructure-only `LocalCredential` row, which is
+/// keyed by `userId` (one credential per user). The domain `User`
+/// type in `packages/domain/src/identity/user.ts` mirrors this shape
+/// minus the credential relation; the persistence adapter maps
+/// between the two. The password hash is never exposed through the
+/// domain `User` type or through any API response.
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @db.VarChar(320)
+  normalisedEmail String     @unique @map("normalised_email") @db.VarChar(320)
+  displayName     String     @map("display_name") @db.VarChar(200)
+  status          UserStatus @default(active)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  localCredential LocalCredential?
+  memberships     TenantMembership[]
+  sessions        AuthSession[]
+
+  @@index([status], map: "users_status_idx")
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// LocalCredential
+// ---------------------------------------------------------------------------
+
+/// A LocalCredential stores the Argon2id password hash for a User.
+/// There is exactly one credential per user (enforced by using
+/// `userId` as the primary key). The credential row is never exposed
+/// through the domain `User` type or through any API response; it is
+/// consumed only by the infrastructure-only `LocalCredentialService`
+/// in `apps/api/src/infrastructure/database/`, which is in turn
+/// consumed by the `PasswordService` and `AuthService`.
+///
+/// `ON DELETE RESTRICT` means a User with a credential cannot be
+/// deleted until the credential is deleted first. This is a
+/// defence-in-depth measure: it prevents an accidental `delete user`
+/// from silently orphaning the credential row.
+///
+/// The `passwordHash` field stores the PHC-string-formatted Argon2id
+/// hash (e.g. `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`). The
+/// hash includes the salt, the parameters, and the version, so
+/// parameter changes are forward-compatible.
+model LocalCredential {
+  userId            String   @id @map("user_id") @db.Uuid
+  passwordHash      String   @map("password_hash")
+  passwordChangedAt DateTime @map("password_changed_at") @db.Timestamptz
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("local_credentials")
+}
+
+// ---------------------------------------------------------------------------
+// TenantMembership
+// ---------------------------------------------------------------------------
+
+enum TenantMembershipStatus {
+  active
+  suspended
+}
+
+/// A TenantMembership is the link between a User and a Tenant. A User
+/// may hold at most one membership per Tenant (enforced by the unique
+/// constraint on `(tenantId, userId)`). A User's set of memberships
+/// determines the Tenants they may operate within.
+///
+/// Per the fourth canonical batch specification, this model carries
+/// NO role or permission columns. The role/permission catalogue is
+/// deferred to a subsequent batch. Adding such columns in the future
+/// is a coordinated domain change, not a silent addition.
+///
+/// `ON DELETE RESTRICT` on both foreign keys means:
+/// - A Tenant with active memberships cannot be deleted (the
+///   memberships must be deleted first).
+/// - A User with active memberships cannot be deleted (the
+///   memberships must be deleted first).
+/// This is the structural enforcement of the lifecycle: a tenant or
+/// user with active relationships cannot be silently destroyed.
+model TenantMembership {
+  id        String                 @id @default(uuid()) @db.Uuid
+  tenantId  String                 @map("tenant_id") @db.Uuid
+  userId    String                 @map("user_id") @db.Uuid
+  status    TenantMembershipStatus @default(active)
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
+  @@index([tenantId], map: "tenant_memberships_tenant_id_idx")
+  @@index([userId], map: "tenant_memberships_user_id_idx")
+  @@map("tenant_memberships")
+}
+
+// ---------------------------------------------------------------------------
+// AuthSession
+// ---------------------------------------------------------------------------
+
+/// An AuthSession is a server-side record representing an authenticated
+/// browser session. Per ADR-013 §1.1 and §1.3, sessions are
+/// server-managed and opaque: the browser holds only an opaque,
+/// high-entropy session identifier in an HttpOnly cookie; the server
+/// holds this record in the transactional store.
+///
+/// The `tokenHash` field stores the SHA-256 hash of the opaque session
+/// token. The raw token is NEVER persisted. It lives only in the
+/// HttpOnly cookie and in process memory between generation and
+/// cookie-setting. The `tokenHash` is a fixed-length 64-character
+/// lowercase hexadecimal string (256 bits / 4 bits per hex character).
+///
+/// `expiresAt` is the absolute expiry timestamp. A session is
+/// considered expired once `now >= expiresAt`.
+///
+/// `lastSeenAt` is updated on every session-validation touch
+/// (subject to the idle-touch interval).
+///
+/// `rotatedAt` is the timestamp of the most recent token rotation,
+/// or null if the session has never been rotated.
+///
+/// `revokedAt` is the timestamp of explicit revocation, or null if
+/// the session is not revoked. Once set, the session is no longer
+/// active regardless of `expiresAt`.
+///
+/// `ON DELETE RESTRICT` means a User with sessions cannot be deleted
+/// until the sessions are revoked or deleted first.
+///
+/// Per the fourth canonical batch specification, this model does NOT
+/// carry `activeOrganisationId`, `activeFacilityId`, or any other
+/// context-selection column. Tenant-context selection is deferred.
+model AuthSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz
+  rotatedAt  DateTime? @map("rotated_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([userId], map: "auth_sessions_user_id_idx")
+  @@index([expiresAt], map: "auth_sessions_expires_at_idx")
+  @@map("auth_sessions")
 }

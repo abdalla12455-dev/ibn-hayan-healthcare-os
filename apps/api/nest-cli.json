@@ -3,6 +3,19 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "builder": {
+      "type": "swc",
+      "options": {
+        "ignore": [
+          "**/*.spec.ts",
+          "**/*.e2e-spec.ts",
+          "**/*.db-spec.ts",
+          "**/*.auth-spec.ts",
+          "src/scripts/**"
+        ]
+      }
+    },
+    "deleteOutDir": false,
+    "tsConfigPath": "tsconfig.build.json"
   }
 }

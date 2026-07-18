@@ -15,6 +15,11 @@
       "types": "./dist/tenancy/index.d.ts",
       "import": "./dist/tenancy/index.js",
       "require": "./dist/tenancy/index.js"
+    },
+    "./identity": {
+      "types": "./dist/identity/index.d.ts",
+      "import": "./dist/identity/index.js",
+      "require": "./dist/identity/index.js"
     }
   },
   "files": [

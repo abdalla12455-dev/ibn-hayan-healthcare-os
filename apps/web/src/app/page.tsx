@@ -1,5 +1,6 @@
 import { LANDING_COPY } from "./landing-content";
 import { ApiStatus } from "@/components/system/api-status";
+import Link from "next/link";
 
 /**
  * Canonical landing page for the Ibn Hayan Healthcare Operating System.
@@ -18,6 +19,9 @@ import { ApiStatus } from "@/components/system/api-status";
  * fetches the API health endpoint in the browser and displays the runtime
  * connection state. The component does not poll and does not affect the
  * page's single-H1 structure.
+ *
+ * A minimal navigation link to the login page is included in the header
+ * so operators can reach the authentication flow from the landing page.
  *
  * Bilingual implementation-status content is rendered in two semantic
  * <section> blocks that follow the API status. Each block sets its own
@@ -56,6 +60,17 @@ export default function LandingPage() {
               {arabicEntry.systemName}
             </span>
           </h1>
+          <nav className="flex gap-4">
+            <Link
+              href="/login"
+              className="rounded-md px-4 py-2 text-base font-medium text-white inline-flex"
+              style={{ backgroundColor: "var(--accent)" }}
+            >
+              <span lang="en" dir="ltr">Sign in</span>
+              {' / '}
+              <span lang="ar" dir="rtl">تسجيل الدخول</span>
+            </Link>
+          </nav>
         </header>
 
         <ApiStatus />

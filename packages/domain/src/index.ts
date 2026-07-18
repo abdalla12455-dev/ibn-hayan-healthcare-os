@@ -20,6 +20,12 @@
  * Bounded contexts currently exported:
  * - tenancy: Tenant, Organisation, Facility domain models and the
  *   TenantRepository, OrganisationRepository, FacilityRepository ports.
+ * - identity: User, TenantMembership, Session domain models and the
+ *   UserRepository, TenantMembershipRepository, SessionRepository
+ *   ports. Per ADR-013, the session record carries only a SHA-256
+ *   hash of the opaque session token, never the raw token; the User
+ *   model excludes password hashes (those live on the
+ *   infrastructure-only LocalCredential row).
  *
  * Additional bounded contexts (patients, audit, billing, scheduling,
  * inventory, configuration, etc.) arrive in subsequent batches alongside
@@ -31,3 +37,4 @@ export const DOMAIN_PACKAGE_VERSION = '0.0.0' as const;
 export const DOMAIN_PACKAGE_NAME = '@ibn-hayan/domain' as const;
 
 export * from './tenancy/index.js';
+export * from './identity/index.js';

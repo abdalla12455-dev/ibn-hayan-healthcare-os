@@ -11,6 +11,13 @@
  * This is the structural expression of ADR-012 §1.4 safeguard 2
  * (Repository interfaces) and CODING_STANDARDS.md §5 (Domain
  * Isolation from Framework and ORM Types).
+ *
+ * The `LocalCredentialService` is an infrastructure-only service
+ * (no domain port) and IS exported because the auth module's
+ * `PasswordService` consumes it directly to read and write Argon2id
+ * password hashes. The password hash never leaves the infrastructure
+ * layer; it is never surfaced through a domain type or an API
+ * response.
  */
 
 export { DatabaseModule } from './database.module.js';
@@ -18,4 +25,8 @@ export {
   TENANT_REPOSITORY,
   ORGANISATION_REPOSITORY,
   FACILITY_REPOSITORY,
+  USER_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  SESSION_REPOSITORY,
 } from './database.module.js';
+export { LocalCredentialService } from './repositories/local-credential.service.js';

@@ -14,9 +14,9 @@
  * directories, engineers respect the dependency direction ratified in
  * ADR-012 and FOLDER_STRUCTURE.md.
  *
- * In this batch the package exports the Health contract. Additional
- * contracts (auth, patients, organisations, audit, etc.) arrive in
- * subsequent batches alongside their respective vertical slices.
+ * In this batch the package exports the Health and Auth contracts.
+ * Additional contracts (patients, organisations, audit, etc.) arrive
+ * in subsequent batches alongside their respective vertical slices.
  */
 
 export const CONTRACTS_PACKAGE_VERSION = '0.0.0' as const;
@@ -24,3 +24,4 @@ export const CONTRACTS_PACKAGE_VERSION = '0.0.0' as const;
 export const CONTRACTS_PACKAGE_NAME = '@ibn-hayan/contracts' as const;
 
 export * from './health/index.js';
+export * from './auth/index.js';

@@ -344,6 +344,8 @@ async function ensureCluster(): Promise<ClusterHandle> {
       } catch {
         // Best-effort.
       }
+      // Unset DATABASE_URL (defence-in-depth, same reason as afterAll).
+      delete process.env['DATABASE_URL'];
     }
   });
 
@@ -501,6 +503,12 @@ export function setupDatabaseTests(): void {
       } catch {
         // Best-effort.
       }
+      // Unset DATABASE_URL so the next test file (in the same vitest
+      // fork) does not adopt the now-stopped cluster as an external
+      // cluster. Without this, the second test file's
+      // `ensureCluster()` would see the stale DATABASE_URL, skip
+      // booting a fresh cluster, and fail connectivity verification.
+      delete process.env['DATABASE_URL'];
     }
     handle = null;
   });

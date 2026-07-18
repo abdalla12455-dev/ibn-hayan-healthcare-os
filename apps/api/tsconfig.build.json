@@ -5,8 +5,10 @@
     "test",
     "dist",
     "generated",
+    "src/scripts",
     "**/*.spec.ts",
     "**/*.e2e-spec.ts",
-    "**/*.db-spec.ts"
+    "**/*.db-spec.ts",
+    "**/*.auth-spec.ts"
   ]
 }

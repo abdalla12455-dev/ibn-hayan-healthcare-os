@@ -39,7 +39,12 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: webOrigin,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Accept'],
+    // The X-CSRF-Token header is required for the logout endpoint
+    // (per ADR-013 §1.1 — CSRF protection for state-changing
+    // browser requests). The header is explicitly allowed here so
+    // the browser's preflight check does not reject the logout
+    // request.
+    allowedHeaders: ['Content-Type', 'Accept', 'X-CSRF-Token'],
     credentials: true,
   });
 

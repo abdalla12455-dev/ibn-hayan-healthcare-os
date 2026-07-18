@@ -269,19 +269,35 @@ describe('OpenAPI documentation (e2e)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('does not advertise a security scheme', async () => {
+  it('advertises exactly one cookie security scheme named session', async () => {
+    // The fourth canonical batch introduces the `session` cookie
+    // authentication scheme. The scheme documents that the auth
+    // endpoints require the `ibn_hayan_session` cookie. The scheme
+    // is documentation only; the actual enforcement is performed by
+    // the auth controller and service at runtime.
     const response = await request(server)
       .get(`/${OPENAPI_JSON_PATH}`)
       .expect(200);
 
     const spec = response.body as {
-      securitySchemes?: Record<string, unknown>;
+      components?: {
+        securitySchemes?: Record<
+          string,
+          { type?: string; in?: string; name?: string }
+        >;
+      };
       security?: unknown;
-      components?: { securitySchemes?: Record<string, unknown> };
     };
 
-    // No security schemes should be defined in this batch.
-    expect(spec.components?.securitySchemes).toBeUndefined();
+    expect(spec.components?.securitySchemes).toBeDefined();
+    const schemes = spec.components?.securitySchemes ?? {};
+    expect(Object.keys(schemes).sort()).toEqual(['session']);
+    const sessionScheme = schemes['session'];
+    expect(sessionScheme?.type).toBe('apiKey');
+    expect(sessionScheme?.in).toBe('cookie');
+    expect(sessionScheme?.name).toBe('ibn_hayan_session');
+    // No top-level security requirement — each endpoint declares its
+    // own security via @ApiCookieAuth.
     expect(spec.security).toBeUndefined();
   });
 

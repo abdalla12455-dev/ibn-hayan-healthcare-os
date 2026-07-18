@@ -10,6 +10,10 @@ packages:
 # - prisma: required by prisma CLI preinstall hook
 # - sharp: required by Next.js image optimisation
 # - unrs-resolver: required by eslint-plugin-import resolution
+# - argon2: required by @ibn-hayan/api password hashing; ships prebuilt
+#   binaries via prebuildify, but allow the build script so a source
+#   build can fall back if the prebuilt binary does not match the
+#   platform (clean-room reproducibility).
 allowBuilds:
   '@scarf/scarf': false
   '@prisma/engines': true
@@ -18,3 +22,4 @@ allowBuilds:
   prisma: true
   sharp: true
   unrs-resolver: true
+  argon2: true

@@ -16,7 +16,8 @@
     "typecheck": "pnpm run build:shared && pnpm -r typecheck",
     "test": "pnpm run build:shared && pnpm -r test",
     "test:integration": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:integration",
-    "test:database": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:database"
+    "test:database": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:database",
+    "test:auth": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:auth"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

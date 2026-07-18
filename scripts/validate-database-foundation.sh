@@ -433,20 +433,25 @@ verify_count_zero \
   "SELECT COUNT(*) FROM pg_policies WHERE schemaname = 'public';" \
   "no RLS policies exist"
 
-# No forbidden tables
+# No forbidden tables.
+# Note: the fourth canonical batch deliberately adds `users`,
+# `tenant_memberships`, `local_credentials`, and `auth_sessions`
+# tables. These are removed from the forbidden list below. The
+# remaining tables (patients, user_sessions, audit_logs, etc.) are
+# still forbidden — they belong to future batches.
 verify_count_zero \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('patients', 'users', 'user_sessions', 'audit_logs', 'audit_events', 'appointments', 'billing_accounts', 'inventory_items', 'notifications', 'memberships', 'roles', 'permissions', 'encounters', 'configurations');" \
-  "no patient/user/audit/billing/scheduling/inventory/notification/identity tables exist"
+  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('patients', 'user_sessions', 'audit_logs', 'audit_events', 'appointments', 'billing_accounts', 'inventory_items', 'notifications', 'roles', 'permissions', 'encounters', 'configurations');" \
+  "no patient/audit/billing/scheduling/inventory/notification/role/permission tables exist"
 
 # No extensions except plpgsql
 verify_count_zero \
   "SELECT COUNT(*) FROM pg_extension WHERE extname != 'plpgsql';" \
   "no non-default PostgreSQL extensions are enabled"
 
-# No seed rows in any tenancy table
+# No seed rows in any tenancy or identity table
 verify_count_zero \
-  "SELECT (SELECT COUNT(*) FROM tenants) + (SELECT COUNT(*) FROM organisations) + (SELECT COUNT(*) FROM facilities);" \
-  "no seed rows exist in tenancy tables"
+  "SELECT (SELECT COUNT(*) FROM tenants) + (SELECT COUNT(*) FROM organisations) + (SELECT COUNT(*) FROM facilities) + (SELECT COUNT(*) FROM users) + (SELECT COUNT(*) FROM local_credentials) + (SELECT COUNT(*) FROM tenant_memberships) + (SELECT COUNT(*) FROM auth_sessions);" \
+  "no seed rows exist in tenancy or identity tables"
 
 # ---------------------------------------------------------------------------
 # Success

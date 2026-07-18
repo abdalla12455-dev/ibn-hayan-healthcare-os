@@ -24,6 +24,14 @@ import {
  * uses `DocumentBuilder.addServer('/api/v1')` so that the generated
  * specification records the correct base path for every operation.
  *
+ * Per the fourth canonical batch specification, the OpenAPI document
+ * includes an HttpOnly cookie authentication scheme named `session`.
+ * The scheme documents that the `/api/v1/auth/session`,
+ * `/api/v1/auth/csrf`, and `/api/v1/auth/logout` endpoints require the
+ * `ibn_hayan_session` cookie. The scheme is documentation only; the
+ * actual cookie enforcement is performed by the auth controller and
+ * service at runtime.
+ *
  * @param app The NestJS application instance. The global prefix must be
  *            set before this function is called.
  */
@@ -39,6 +47,16 @@ export function setupOpenApi(app: INestApplication): void {
     .setTitle(OPENAPI_TITLE)
     .setDescription(OPENAPI_DESCRIPTION)
     .setVersion(OPENAPI_API_VERSION)
+    .addSecurity('session', {
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'ibn_hayan_session',
+      description:
+        'Opaque session token set by POST /api/v1/auth/login. ' +
+        'HttpOnly: not readable by JavaScript. Secure in production. ' +
+        'SameSite=Lax. Required by /api/v1/auth/session, ' +
+        '/api/v1/auth/csrf, and /api/v1/auth/logout.',
+    })
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { HealthService } from './health.service';
 
@@ -16,8 +17,17 @@ import { HealthService } from './health.service';
  * same shape for API consumers. The integration test in
  * `openapi.e2e-spec.ts` verifies that the generated specification contains
  * exactly the three contract fields and no others.
+ *
+ * Per the fourth canonical batch security requirement, Health is
+ * explicitly exempt from the global throttler configuration via
+ * `@SkipThrottle()`. Health must remain available for liveness probes
+ * regardless of authentication traffic. Without this exemption, a
+ * flood of login attempts could trigger the global throttler and
+ * make the health probe return 429, causing orchestrators to mark
+ * the API as unhealthy.
  */
 @ApiTags('health')
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(private readonly healthService: HealthService) {}
