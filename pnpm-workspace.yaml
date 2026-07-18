@@ -9,6 +9,7 @@ packages:
 # - sharp: required by Next.js image optimisation
 # - unrs-resolver: required by eslint-plugin-import resolution
 allowBuilds:
+  '@scarf/scarf': false
   '@swc/core': true
   esbuild: true
   sharp: true

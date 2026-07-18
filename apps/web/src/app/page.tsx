@@ -1,12 +1,12 @@
 import { LANDING_COPY } from "./landing-content";
+import { ApiStatus } from "@/components/system/api-status";
 
 /**
  * Canonical landing page for the Ibn Hayan Healthcare Operating System.
  *
- * The page is a pure presentation surface. It performs no network requests,
- * reads no environment variables, and contains no authoritative business
- * logic. It is reachable at the root of the web application via the Next.js
- * App Router.
+ * The page is a presentation surface. It contains no authoritative
+ * business logic. It is reachable at the root of the web application via
+ * the Next.js App Router.
  *
  * The document has exactly one <h1>, which presents both the English and
  * Arabic system names. Each name is wrapped in a <span> that carries its
@@ -14,8 +14,13 @@ import { LANDING_COPY } from "./landing-content";
  * correct pronunciation and text direction even when the names are read
  * inside a single heading.
  *
+ * Below the identity header, the {@link ApiStatus} client component
+ * fetches the API health endpoint in the browser and displays the runtime
+ * connection state. The component does not poll and does not affect the
+ * page's single-H1 structure.
+ *
  * Bilingual implementation-status content is rendered in two semantic
- * <section> blocks that follow the single <h1>. Each block sets its own
+ * <section> blocks that follow the API status. Each block sets its own
  * `lang` and `dir` attributes and uses <h2> as its section heading so the
  * heading hierarchy remains logical and accessible. The two blocks are
  * independent; neither is a translation of the other's heading hierarchy.
@@ -52,6 +57,8 @@ export default function LandingPage() {
             </span>
           </h1>
         </header>
+
+        <ApiStatus />
 
         {LANDING_COPY.map((entry) => (
           <LandingSection key={entry.lang} entry={entry} />

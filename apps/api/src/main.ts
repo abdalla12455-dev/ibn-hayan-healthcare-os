@@ -2,6 +2,7 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { setupOpenApi } from './openapi/openapi.setup';
 
 /**
  * Bootstrap entrypoint for the Ibn Hayan API.
@@ -49,6 +50,10 @@ async function bootstrap(): Promise<void> {
       transform: true,
     }),
   );
+
+  // OpenAPI documentation is mounted only outside production. The setup
+  // function is a no-op when NODE_ENV=production.
+  setupOpenApi(app);
 
   const port = readApiPort(configService);
   await app.listen(port);
