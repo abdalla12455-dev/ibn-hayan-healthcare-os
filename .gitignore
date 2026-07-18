@@ -1,2 +1,8 @@
 skills/
 node_modules/
+
+# Tool invocation artifacts (not part of project deliverables)
+tool-results/
+
+# Environment
+.env
