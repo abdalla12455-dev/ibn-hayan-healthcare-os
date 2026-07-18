@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/*
+ * Ibn Hayan Healthcare Operating System — Web Styling Foundation
+ *
+ * The design system is intentionally restrained: a single neutral palette
+ * with one accent colour, a clear typographic scale, and explicit support
+ * for both left-to-right (English) and right-to-left (Arabic) layout.
+ * All colour pairs meet WCAG AA contrast ratios at typical body sizes.
+ */
+
+:root {
+  /* Neutral palette (slate-based, AAA on body text where possible) */
+  --background: #ffffff;
+  --surface: #f8fafc;
+  --surface-border: #e2e8f0;
+  --foreground: #0f172a;
+  --foreground-muted: #475569;
+
+  /* Accent palette — healthcare-native teal */
+  --accent: #0f766e;
+  --accent-foreground: #ffffff;
+  --accent-muted: #ccfbf1;
+
+  /* Status */
+  --status-ok: #15803d;
+  --status-ok-muted: #dcfce7;
+
+  /* Typography */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  --font-arabic: "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+
+  /* Layout */
+  --page-max-width: 64rem;
+  --page-padding-x: 1.25rem;
+  --page-padding-y: 2.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1220;
+    --surface: #111827;
+    --surface-border: #1f2937;
+    --foreground: #e5e7eb;
+    --foreground-muted: #94a3b8;
+    --accent: #5eead4;
+    --accent-foreground: #042f2e;
+    --accent-muted: #134e4a;
+    --status-ok: #4ade80;
+    --status-ok-muted: #052e16;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-border: var(--surface-border);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-muted: var(--accent-muted);
+  --color-status-ok: var(--status-ok);
+  --color-status-ok-muted: var(--status-ok-muted);
+  --font-sans: var(--font-sans);
+  --font-arabic: var(--font-arabic);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+/* RTL adjustments apply automatically when [dir="rtl"] is set on a subtree */
+[dir="rtl"] {
+  font-family: var(--font-arabic);
+  text-align: right;
+}
+
+[dir="ltr"] {
+  text-align: left;
+}
+
+/* Visible keyboard focus styles for all interactive elements */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Honour reduced-motion preferences globally */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

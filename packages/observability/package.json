@@ -1,0 +1,14 @@
+{
+  "name": "@ibn-hayan/observability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No tests in @ibn-hayan/observability yet' && exit 0"
+  }
+}

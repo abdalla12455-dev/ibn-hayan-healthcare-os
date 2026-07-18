@@ -1,0 +1,21 @@
+{
+  "name": "ibn-hayan-healthcare-os",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.14.0",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @ibn-hayan/web dev",
+    "dev:api": "pnpm --filter @ibn-hayan/api start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:integration": "pnpm --filter @ibn-hayan/api test:integration"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

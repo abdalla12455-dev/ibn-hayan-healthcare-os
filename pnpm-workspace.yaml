@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Native build dependencies that are allowed to run install scripts.
+# pnpm 11 uses an explicit `allowBuilds` object map keyed by package name.
+# - @swc/core: required by @ibn-hayan/api Vitest config (unplugin-swc)
+# - esbuild: required by @ibn-hayan/web Vitest config and Next.js build
+# - sharp: required by Next.js image optimisation
+# - unrs-resolver: required by eslint-plugin-import resolution
+allowBuilds:
+  '@swc/core': true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

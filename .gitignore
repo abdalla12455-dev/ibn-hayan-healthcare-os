@@ -6,3 +6,23 @@ tool-results/
 
 # Environment
 .env
+
+# Build artifacts
+dist/
+build/
+.next/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Local runtime files
+.env.local
+.env.*.local
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
