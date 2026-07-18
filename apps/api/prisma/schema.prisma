@@ -32,12 +32,35 @@
 //   cookie-setting (per ADR-013 §1.1 and §1.3).
 // - No role or permission columns exist on TenantMembership. The
 //   role/permission catalogue is deferred to a subsequent batch.
-// - No tenant-context selection columns exist on AuthSession (no
-//   `activeOrganisationId` or `activeFacilityId`). Context selection
-//   is deferred to a subsequent batch.
 // - No cascading deletes. All foreign keys use ON DELETE RESTRICT.
 // - No seed credentials. The development bootstrap command requires
 //   explicit environment variables and creates the dev user idempotently.
+//
+// Per the fifth canonical batch specification (session tenant context):
+// - AuthSession gains a nullable `active_tenant_membership_id` column
+//   referencing `tenant_memberships.id`. The column is nullable: a
+//   `null` value means "no active Tenant context"; the session
+//   remains valid.
+// - TenantMembership gains a composite unique constraint on `(id, userId)`
+//   to support a composite foreign key from `auth_sessions`. The
+//   composite foreign key
+//   `auth_sessions(active_tenant_membership_id, user_id)` →
+//   `tenant_memberships(id, user_id)` is added by a reviewed raw SQL
+//   migration because Prisma 7 cannot express composite foreign keys
+//   in the schema language. The composite FK enforces at the database
+//   level that a session cannot reference another user's membership.
+// - No active Organisation or Facility context columns exist on
+//   AuthSession. The fifth batch introduces active Tenant context
+//   only.
+// - No role or permission context columns exist on AuthSession.
+// - No raw Tenant slug, display name, or any denormalised Tenant
+//   field is persisted on AuthSession. The session references the
+//   Tenant transitively through the selected TenantMembership.
+// - ON DELETE RESTRICT on both the single-column and composite
+//   foreign keys: deleting a TenantMembership that is referenced by
+//   an active session is rejected. This is the structural
+//   enforcement of the lifecycle: a selected membership cannot be
+//   silently destroyed.
 //
 // Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
 // schema language cannot express a PostgreSQL concept that the design
@@ -51,6 +74,10 @@
 // composite unique constraint on `organisations(tenantId, id)`, and
 // the restricted-delete behaviour are added by the reviewed raw SQL
 // migration that accompanies the Prisma-generated migration.
+//
+// The same approach is used for the fifth-batch composite foreign key
+//   auth_sessions(active_tenant_membership_id, user_id) REFERENCES tenant_memberships(id, user_id)
+// declared in the `session_tenant_context` migration.
 
 generator client {
   provider = "prisma-client"
@@ -268,6 +295,19 @@ enum TenantMembershipStatus {
 /// deferred to a subsequent batch. Adding such columns in the future
 /// is a coordinated domain change, not a silent addition.
 ///
+/// Per the fifth canonical batch specification, this model gains a
+/// composite unique constraint on `(id, userId)`. The composite
+/// uniqueness exists specifically to support a database-enforced
+/// same-user context constraint: the composite foreign key
+/// `auth_sessions(active_tenant_membership_id, user_id)` →
+/// `tenant_memberships(id, user_id)` rejects any attempt to set a
+/// session's active context to a membership owned by a different
+/// user. Prisma 7 cannot express a composite foreign key in the
+/// schema language; the composite FK is added by a reviewed raw SQL
+/// migration in `session_tenant_context`. The composite unique
+/// constraint here is required for the composite FK to be valid in
+/// PostgreSQL.
+///
 /// `ON DELETE RESTRICT` on both foreign keys means:
 /// - A Tenant with active memberships cannot be deleted (the
 ///   memberships must be deleted first).
@@ -287,6 +327,7 @@ model TenantMembership {
   user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
+  @@unique([id, userId], map: "tenant_memberships_id_user_id_key")
   @@index([tenantId], map: "tenant_memberships_tenant_id_idx")
   @@index([userId], map: "tenant_memberships_user_id_idx")
   @@map("tenant_memberships")
@@ -321,25 +362,50 @@ model TenantMembership {
 /// the session is not revoked. Once set, the session is no longer
 /// active regardless of `expiresAt`.
 ///
-/// `ON DELETE RESTRICT` means a User with sessions cannot be deleted
-/// until the sessions are revoked or deleted first.
+/// `activeTenantMembershipId` is the TenantMembership this session has
+/// selected as its active Tenant context, or null when no context is
+/// selected. Per the fifth canonical batch specification:
+/// - The active context is session-specific: different sessions for
+///   the same user have independent context.
+/// - Selection is by TenantMembership ID, never by an arbitrary
+///   Tenant ID. The session cannot be forced into a Tenant for
+///   which the user has no membership.
+/// - The single-column foreign key `active_tenant_membership_id` →
+///   `tenant_memberships.id` enforces that the referenced row exists.
+/// - The composite foreign key
+///   `auth_sessions(active_tenant_membership_id, user_id)` →
+///   `tenant_memberships(id, user_id)` (added by the
+///   `session_tenant_context` raw SQL supplement) enforces that
+///   the referenced membership belongs to this session's user. A
+///   cross-user selection is rejected at the database level.
+/// - Both foreign keys use ON DELETE RESTRICT: deleting a membership
+///   that is referenced by an active session is rejected.
+/// - No active Organisation or Facility context columns exist on
+///   AuthSession. The fifth batch introduces active Tenant context
+///   only.
+/// - No raw Tenant slug, display name, or any denormalised Tenant
+///   field is persisted on AuthSession. The session references the
+///   Tenant transitively through the selected TenantMembership.
+/// - No role or permission context columns exist on AuthSession.
 ///
-/// Per the fourth canonical batch specification, this model does NOT
-/// carry `activeOrganisationId`, `activeFacilityId`, or any other
-/// context-selection column. Tenant-context selection is deferred.
+/// `ON DELETE RESTRICT` on the user foreign key means a User with
+/// sessions cannot be deleted until the sessions are revoked or
+/// deleted first.
 model AuthSession {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  tokenHash  String   @unique @map("token_hash") @db.Char(64)
-  expiresAt  DateTime @map("expires_at") @db.Timestamptz
-  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz
-  rotatedAt  DateTime? @map("rotated_at") @db.Timestamptz
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id                       String   @id @default(uuid()) @db.Uuid
+  userId                   String   @map("user_id") @db.Uuid
+  tokenHash                String   @unique @map("token_hash") @db.Char(64)
+  activeTenantMembershipId String?  @map("active_tenant_membership_id") @db.Uuid
+  expiresAt                DateTime @map("expires_at") @db.Timestamptz
+  lastSeenAt               DateTime @map("last_seen_at") @db.Timestamptz
+  rotatedAt                DateTime? @map("rotated_at") @db.Timestamptz
+  revokedAt                DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")
+  @@index([activeTenantMembershipId], map: "auth_sessions_active_tenant_membership_id_idx")
   @@map("auth_sessions")
 }

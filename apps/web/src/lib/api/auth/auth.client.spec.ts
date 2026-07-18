@@ -34,6 +34,7 @@ const validSessionResponse = {
       status: 'active',
     },
   ],
+  activeTenantContext: null,
   expiresAt: '2026-01-01T12:00:00.000Z',
 };
 

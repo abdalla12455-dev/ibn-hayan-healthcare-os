@@ -3,6 +3,8 @@ import type {
   User,
   UserId,
   TenantMembership,
+  TenantMembershipId,
+  TenantId,
   Session,
   SessionId,
   UserRepository,
@@ -36,6 +38,7 @@ import type {
   SessionResponse,
   AuthenticatedUser,
   TenantMembershipSummary,
+  ActiveTenantContext,
 } from '@ibn-hayan/contracts';
 
 /**
@@ -366,18 +369,65 @@ export class AuthService {
   }
 
   /**
-   * Build the `SessionResponse` JSON body from a user and their
-   * memberships.
+   * Build the `SessionResponse` JSON body from a user, their
+   * memberships, and the session's active Tenant context.
+   *
+   * Per the fifth canonical batch specification, the session response
+   * now carries `activeTenantContext`. The caller passes the
+   * session's `activeTenantMembershipId` (or `null`); this method
+   * resolves it to the public `ActiveTenantContext` shape by looking
+   * up the membership and the Tenant.
+   *
+   * If the supplied `activeTenantMembershipId` is `null`, the
+   * response carries `activeTenantContext: null`.
+   *
+   * If the supplied `activeTenantMembershipId` is non-null but the
+   * membership is not in the user's active memberships list (because
+   * it was suspended, the Tenant was suspended, or the membership
+   * was deleted), the response carries `activeTenantContext: null`.
+   * The caller (the session endpoint) is responsible for clearing
+   * the persisted `activeTenantMembershipId` in this case; this
+   * method does not mutate the session row. The
+   * `SessionContextService.loadContext` method performs the same
+   * clearing logic for the context endpoint; the auth module's
+   * session endpoint performs it for the session-response endpoint.
+   *
+   * To avoid duplicating the clearing logic, the auth module's
+   * `getSessionFromCookie` method calls the session-context
+   * service's clearing logic when needed. This is a deliberate
+   * cross-module call: the auth module owns the session lifecycle,
+   * but the context-clearing logic lives in the session-context
+   * module because it is context-specific. The auth module's
+   * session endpoint depends on the session-context service via
+   * Nest DI (see `AuthModule` imports).
+   *
+   * If the caller does not supply `activeTenantMembershipId` (for
+   * backward compatibility with callers that have not yet been
+   * updated), the response carries `activeTenantContext: null`.
+   * This is a transitional default; once all callers are updated,
+   * the parameter will be required.
    */
   async buildSessionResponse(input: {
     readonly user: User;
     readonly memberships: TenantMembership[];
     readonly expiresAt: Date;
+    readonly activeTenantMembershipId?: TenantMembershipId | null;
   }): Promise<SessionResponse> {
     // Enrich memberships with tenant slug + display name.
     const summaries: TenantMembershipSummary[] = [];
+    const tenantsById = new Map<
+      TenantId,
+      { slug: string; displayName: string; status: 'active' | 'suspended' }
+    >();
     for (const membership of input.memberships) {
       const tenant = await this.tenants.findById(membership.tenantId);
+      if (tenant !== null) {
+        tenantsById.set(membership.tenantId, {
+          slug: tenant.slug,
+          displayName: tenant.displayName,
+          status: tenant.status,
+        });
+      }
       summaries.push({
         id: membership.id,
         tenantId: membership.tenantId,
@@ -385,6 +435,35 @@ export class AuthService {
         tenantDisplayName: tenant?.displayName ?? '',
         status: membership.status,
       });
+    }
+
+    // Resolve the active Tenant context. If the membership is not
+    // in the user's active memberships list, or the Tenant is not
+    // active, the context is `null`. The caller is responsible for
+    // clearing the persisted `activeTenantMembershipId` when this
+    // method returns `null` for a non-null input.
+    let activeTenantContext: ActiveTenantContext | null = null;
+    if (
+      input.activeTenantMembershipId !== undefined &&
+      input.activeTenantMembershipId !== null
+    ) {
+      const selectedMembership = input.memberships.find(
+        (m) => m.id === input.activeTenantMembershipId,
+      );
+      if (
+        selectedMembership !== undefined &&
+        selectedMembership.status === 'active'
+      ) {
+        const tenant = tenantsById.get(selectedMembership.tenantId);
+        if (tenant !== undefined && tenant.status === 'active') {
+          activeTenantContext = {
+            membershipId: selectedMembership.id,
+            tenantId: selectedMembership.tenantId,
+            tenantSlug: tenant.slug,
+            tenantDisplayName: tenant.displayName,
+          };
+        }
+      }
     }
 
     const authenticatedUser: AuthenticatedUser = {
@@ -397,6 +476,7 @@ export class AuthService {
     return {
       user: authenticatedUser,
       memberships: summaries,
+      activeTenantContext,
       expiresAt: input.expiresAt.toISOString(),
     };
   }
@@ -416,8 +496,16 @@ export class AuthService {
    *
    * Wildcard or reflected origins are not permitted: the Origin must
    * EXACTLY match one of the configured `WEB_ORIGIN` entries.
+   *
+   * Per the fifth canonical batch specification, this method is
+   * public so the session-context module can reuse the same Origin
+   * enforcement logic for PUT /api/v1/context/tenant and
+   * DELETE /api/v1/context/tenant. The session-context module MUST
+   * NOT duplicate the Origin-check logic; it MUST call this method
+   * to ensure consistent behaviour across all state-changing
+   * endpoints.
    */
-  private isOriginAllowed(
+  isOriginAllowed(
     origin: string | undefined,
     webOrigin: string | string[],
   ): boolean {

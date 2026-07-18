@@ -122,7 +122,7 @@ export class AuthController {
     description: 'Login succeeded; session cookie set.',
     schema: {
       type: 'object',
-      required: ['user', 'memberships', 'expiresAt'],
+      required: ['user', 'memberships', 'activeTenantContext', 'expiresAt'],
       properties: {
         user: {
           type: 'object',
@@ -153,6 +153,28 @@ export class AuthController {
               status: { type: 'string', enum: ['active', 'suspended'] },
             },
           },
+        },
+        activeTenantContext: {
+          description:
+            'The session active Tenant context. Always null at login because a fresh session has no selected context.',
+          oneOf: [
+            {
+              type: 'object',
+              required: [
+                'membershipId',
+                'tenantId',
+                'tenantSlug',
+                'tenantDisplayName',
+              ],
+              properties: {
+                membershipId: { type: 'string', format: 'uuid' },
+                tenantId: { type: 'string', format: 'uuid' },
+                tenantSlug: { type: 'string' },
+                tenantDisplayName: { type: 'string' },
+              },
+            },
+            { type: 'null' },
+          ],
         },
         expiresAt: { type: 'string', format: 'date-time' },
       },
@@ -212,10 +234,16 @@ export class AuthController {
 
     // Build and return the session response. The raw token is NEVER
     // included in the JSON body.
+    //
+    // Per the fifth canonical batch specification, a fresh login has
+    // no selected context — `activeTenantContext` is `null`. The
+    // user must explicitly select a Tenant through
+    // PUT /api/v1/context/tenant after login.
     return this.auth.buildSessionResponse({
       user: result.user,
       memberships: result.memberships,
       expiresAt: result.expiresAt,
+      activeTenantMembershipId: null,
     });
   }
 
@@ -241,10 +269,32 @@ export class AuthController {
     description: 'Session is valid.',
     schema: {
       type: 'object',
-      required: ['user', 'memberships', 'expiresAt'],
+      required: ['user', 'memberships', 'activeTenantContext', 'expiresAt'],
       properties: {
         user: { type: 'object' },
         memberships: { type: 'array', items: { type: 'object' } },
+        activeTenantContext: {
+          description:
+            'The session active Tenant context, or null when no context is selected or when the previously selected context is no longer valid.',
+          oneOf: [
+            {
+              type: 'object',
+              required: [
+                'membershipId',
+                'tenantId',
+                'tenantSlug',
+                'tenantDisplayName',
+              ],
+              properties: {
+                membershipId: { type: 'string', format: 'uuid' },
+                tenantId: { type: 'string', format: 'uuid' },
+                tenantSlug: { type: 'string' },
+                tenantDisplayName: { type: 'string' },
+              },
+            },
+            { type: 'null' },
+          ],
+        },
         expiresAt: { type: 'string', format: 'date-time' },
       },
     },
@@ -278,6 +328,7 @@ export class AuthController {
       user: result.user,
       memberships: result.memberships,
       expiresAt: result.expiresAt,
+      activeTenantMembershipId: result.session.activeTenantMembershipId,
     });
   }
 

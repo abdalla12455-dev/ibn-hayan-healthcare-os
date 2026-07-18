@@ -112,6 +112,7 @@ describe('identity domain exports', () => {
       id: 'session-1' as SessionId,
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
+      activeTenantMembershipId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
@@ -121,6 +122,7 @@ describe('identity domain exports', () => {
     expect(session.id).toBe('session-1');
     expect(session.userId).toBe('user-1');
     expect(session.tokenHash).toBe('a'.repeat(64));
+    expect(session.activeTenantMembershipId).toBeNull();
     expect(session.rotatedAt).toBeNull();
     expect(session.revokedAt).toBeNull();
   });
@@ -130,6 +132,7 @@ describe('identity domain exports', () => {
       id: 'session-1' as SessionId,
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
+      activeTenantMembershipId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
@@ -145,6 +148,51 @@ describe('identity domain exports', () => {
     // tokenHash is a 64-character hex string (SHA-256); never the
     // 43-character base64url raw token.
     expect(session.tokenHash).toHaveLength(64);
+  });
+
+  it('Session.activeTenantMembershipId may carry a TenantMembershipId', () => {
+    const membershipId = 'membership-1' as TenantMembershipId;
+    const session: Session = {
+      id: 'session-1' as SessionId,
+      userId: 'user-1' as UserId,
+      tokenHash: 'a'.repeat(64) as SessionTokenHash,
+      activeTenantMembershipId: membershipId,
+      expiresAt: new Date('2026-01-01T12:00:00Z'),
+      lastSeenAt: new Date('2026-01-01T00:00:00Z'),
+      rotatedAt: null,
+      revokedAt: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    expect(session.activeTenantMembershipId).toBe(membershipId);
+    expect(session.activeTenantMembershipId).toBe('membership-1');
+  });
+
+  it('Session type does not carry active Organisation or Facility context', () => {
+    // The fifth canonical batch introduces ONLY active Tenant context.
+    // Active Organisation and Facility context remain deferred. This
+    // test is the structural enforcement of that boundary at the
+    // domain type level.
+    const session: Session = {
+      id: 'session-1' as SessionId,
+      userId: 'user-1' as UserId,
+      tokenHash: 'a'.repeat(64) as SessionTokenHash,
+      activeTenantMembershipId: null,
+      expiresAt: new Date('2026-01-01T12:00:00Z'),
+      lastSeenAt: new Date('2026-01-01T00:00:00Z'),
+      rotatedAt: null,
+      revokedAt: null,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    expect(session).not.toHaveProperty('activeOrganisationId');
+    expect(session).not.toHaveProperty('activeOrganisationMembershipId');
+    expect(session).not.toHaveProperty('activeFacilityId');
+    expect(session).not.toHaveProperty('activeTenantId');
+    expect(session).not.toHaveProperty('activeTenantSlug');
+    expect(session).not.toHaveProperty('activeTenantDisplayName');
+    expect(session).not.toHaveProperty('role');
+    expect(session).not.toHaveProperty('roleId');
+    expect(session).not.toHaveProperty('permissions');
+    expect(session).not.toHaveProperty('permissionIds');
   });
 
   it('branded identifier types are erased to strings at runtime', () => {
@@ -326,6 +374,19 @@ describe('identity repository ports', () => {
       async revokeAllForUser(_userId: UserId, _revokedAt: Date): Promise<number> {
         return 0;
       },
+      async setActiveTenantMembership(
+        _sessionId: SessionId,
+        _membershipId: TenantMembershipId,
+        _selectedAt: Date,
+      ): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveTenantMembership(
+        _sessionId: SessionId,
+        _clearedAt: Date,
+      ): Promise<Session | null> {
+        return null;
+      },
     };
     expect(stub).toBeDefined();
     expect(typeof stub.create).toBe('function');
@@ -334,6 +395,8 @@ describe('identity repository ports', () => {
     expect(typeof stub.touch).toBe('function');
     expect(typeof stub.revoke).toBe('function');
     expect(typeof stub.revokeAllForUser).toBe('function');
+    expect(typeof stub.setActiveTenantMembership).toBe('function');
+    expect(typeof stub.clearActiveTenantMembership).toBe('function');
   });
 
   it('SessionRepository.findActiveByTokenHash takes (tokenHash, now) — no raw-token lookup exists', () => {
@@ -364,6 +427,12 @@ describe('identity repository ports', () => {
       },
       async revokeAllForUser(): Promise<number> {
         return 0;
+      },
+      async setActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveTenantMembership(): Promise<Session | null> {
+        return null;
       },
     };
     expect(stub.findActiveByTokenHash).toBeDefined();
@@ -401,7 +470,91 @@ describe('identity repository ports', () => {
       async revokeAllForUser(): Promise<number> {
         return 0;
       },
+      async setActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
     };
     expect(stub.rotateToken).toBeDefined();
+  });
+
+  it('SessionRepository.setActiveTenantMembership takes a TenantMembershipId, never an arbitrary TenantId', () => {
+    // The signature itself is the contract: the caller passes a
+    // branded TenantMembershipId, not a TenantId. The persistence
+    // layer enforces (via a composite foreign key) that the
+    // membership belongs to the session's user. The application
+    // layer performs an additional defensive check before calling
+    // this port.
+    const stub: SessionRepository = {
+      async create(): Promise<Session> {
+        throw new Error('not implemented');
+      },
+      async findActiveByTokenHash(): Promise<Session | null> {
+        return null;
+      },
+      async rotateToken(): Promise<Session | null> {
+        return null;
+      },
+      async touch(): Promise<Session | null> {
+        return null;
+      },
+      async revoke(): Promise<Session | null> {
+        return null;
+      },
+      async revokeAllForUser(): Promise<number> {
+        return 0;
+      },
+      async setActiveTenantMembership(
+        sessionId: SessionId,
+        membershipId: TenantMembershipId,
+        selectedAt: Date,
+      ): Promise<Session | null> {
+        expect(typeof sessionId).toBe('string');
+        expect(typeof membershipId).toBe('string');
+        expect(selectedAt).toBeInstanceOf(Date);
+        return null;
+      },
+      async clearActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+    };
+    expect(stub.setActiveTenantMembership).toBeDefined();
+  });
+
+  it('SessionRepository.clearActiveTenantMembership takes (sessionId, clearedAt)', () => {
+    const stub: SessionRepository = {
+      async create(): Promise<Session> {
+        throw new Error('not implemented');
+      },
+      async findActiveByTokenHash(): Promise<Session | null> {
+        return null;
+      },
+      async rotateToken(): Promise<Session | null> {
+        return null;
+      },
+      async touch(): Promise<Session | null> {
+        return null;
+      },
+      async revoke(): Promise<Session | null> {
+        return null;
+      },
+      async revokeAllForUser(): Promise<number> {
+        return 0;
+      },
+      async setActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveTenantMembership(
+        sessionId: SessionId,
+        clearedAt: Date,
+      ): Promise<Session | null> {
+        expect(typeof sessionId).toBe('string');
+        expect(clearedAt).toBeInstanceOf(Date);
+        return null;
+      },
+    };
+    expect(stub.clearActiveTenantMembership).toBeDefined();
   });
 });

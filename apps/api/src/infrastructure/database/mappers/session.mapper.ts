@@ -3,6 +3,7 @@ import type {
   SessionId,
   SessionTokenHash,
   UserId,
+  TenantMembershipId,
 } from '@ibn-hayan/domain';
 import type { AuthSession as PrismaAuthSession } from '../../../../generated/prisma/client.js';
 
@@ -17,6 +18,15 @@ import type { AuthSession as PrismaAuthSession } from '../../../../generated/pri
  * The Prisma `AuthSession.tokenHash` column is `CHAR(64)` (64-character
  * lowercase hex SHA-256). The domain `SessionTokenHash` is a branded
  * string. The mapper applies the brand; the value is unchanged.
+ *
+ * The Prisma `AuthSession.activeTenantMembershipId` column is a
+ * nullable UUID. The domain `Session.activeTenantMembershipId` is a
+ * branded `TenantMembershipId | null`. The mapper applies the brand
+ * when the value is non-null; `null` is preserved as `null`. This
+ * field is the structural enforcement of the fifth canonical batch
+ * specification: the active Tenant context is persisted on the
+ * session row, never in a separate context table, and is referenced
+ * by TenantMembership ID (never by an arbitrary Tenant ID).
  *
  * The Prisma `AuthSession.user` relation field is dropped by the
  * mapper. The domain `Session` type does not carry the user relation;
@@ -33,6 +43,10 @@ export function sessionFromPrisma(row: PrismaAuthSession): Session {
     id: row.id as SessionId,
     userId: row.userId as UserId,
     tokenHash: row.tokenHash as SessionTokenHash,
+    activeTenantMembershipId:
+      row.activeTenantMembershipId === null
+        ? null
+        : (row.activeTenantMembershipId as TenantMembershipId),
     expiresAt: row.expiresAt,
     lastSeenAt: row.lastSeenAt,
     rotatedAt: row.rotatedAt,

@@ -184,6 +184,7 @@ describe('LoginPage', () => {
       data: {
         user: { id: 'u1', email: 'a@b.c', displayName: 'A', status: 'active' },
         memberships: [],
+        activeTenantContext: null,
         expiresAt: '2026-01-01T00:00:00.000Z',
       },
     });

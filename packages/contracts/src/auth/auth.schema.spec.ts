@@ -190,6 +190,7 @@ describe('SessionResponseSchema', () => {
         status: 'active',
       },
     ],
+    activeTenantContext: null,
     expiresAt: '2026-01-01T12:00:00.000Z',
   };
 
@@ -304,6 +305,26 @@ describe('AuthErrorResponseSchema', () => {
       error: {
         code: 'AUTH_ORIGIN_DISALLOWED',
         message: 'Request origin is not allowed.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a context-selection-forbidden error', () => {
+    const result = AuthErrorResponseSchema.safeParse({
+      error: {
+        code: 'CONTEXT_SELECTION_FORBIDDEN',
+        message: 'The selected tenant context is not available.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a context-request-invalid error', () => {
+    const result = AuthErrorResponseSchema.safeParse({
+      error: {
+        code: 'CONTEXT_REQUEST_INVALID',
+        message: 'The request was malformed.',
       },
     });
     expect(result.success).toBe(true);

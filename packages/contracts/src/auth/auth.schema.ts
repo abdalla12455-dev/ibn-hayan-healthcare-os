@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ActiveTenantContextSchema } from '../context/context.schema.js';
 
 /**
  * Shared authentication contracts for the Ibn Hayan Healthcare
@@ -141,6 +142,22 @@ export type TenantMembershipSummary = z.infer<
  *   produced, but the session endpoint may return an empty array if
  *   the user's last membership is suspended between login and
  *   session check.
+ * - `activeTenantContext`: the session's currently selected Tenant
+ *   context, or `null` when no context is selected. Per the fifth
+ *   canonical batch specification:
+ *   - The active context is session-specific. Different sessions for
+ *     the same user have independent context.
+ *   - The shape is identical to `ActiveTenantContext` from the
+ *     context contract; the field is re-used (not duplicated) by
+ *     importing `ActiveTenantContextSchema`.
+ *   - Login may return `activeTenantContext = null` because a fresh
+ *     session has no selected context yet.
+ *   - Session inspection returns the current valid context. If the
+ *     selected membership becomes invalid (suspended membership,
+ *     suspended Tenant), the session endpoint clears it server-side
+ *     and returns `null` in the same response.
+ *   - Session rotation preserves the active context (rotation is a
+ *     token replacement, not a context change).
  * - `expiresAt`: the session's absolute expiry timestamp (ISO 8601
  *   string). The web client uses this to display session expiry and
  *   to decide when to refresh.
@@ -155,6 +172,7 @@ export const SessionResponseSchema = z
   .object({
     user: AuthenticatedUserSchema,
     memberships: z.array(TenantMembershipSummarySchema),
+    activeTenantContext: ActiveTenantContextSchema.nullable(),
     expiresAt: z.string().datetime(),
   })
   .strict();
@@ -253,6 +271,8 @@ export const AuthErrorResponseSchema = z
           'AUTH_SESSION_REQUIRED',
           'AUTH_CSRF_INVALID',
           'AUTH_ORIGIN_DISALLOWED',
+          'CONTEXT_SELECTION_FORBIDDEN',
+          'CONTEXT_REQUEST_INVALID',
         ]),
         message: z.string(),
       })

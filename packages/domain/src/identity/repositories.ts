@@ -223,4 +223,56 @@ export interface SessionRepository {
    * requests "sign out everywhere" (the last is a future batch).
    */
   revokeAllForUser(userId: UserId, revokedAt: Date): Promise<number>;
+
+  /**
+   * Set the active TenantMembership for a session.
+   *
+   * Per the fifth canonical batch specification, the active Tenant
+   * context is session-specific. The caller passes the
+   * `membershipId` to select; the persistence layer is responsible
+   * for enforcing that the membership belongs to the session's user
+   * (via a composite foreign key on
+   * `auth_sessions(active_tenant_membership_id, user_id)` →
+   * `tenant_memberships(id, user_id)`). The application layer
+   * performs an additional defensive check before calling this port.
+   *
+   * The caller passes `selectedAt` (typically `new Date()`) so the
+   * operation is deterministic and testable per
+   * CODING_STANDARDS.md §11.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked. The session's `expiresAt` is NOT
+   * extended by context selection; selection is not a re-login.
+   *
+   * This port accepts a `TenantMembershipId`, never an arbitrary
+   * `TenantId`. The caller cannot force the session into a Tenant
+   * for which the user has no membership.
+   */
+  setActiveTenantMembership(
+    sessionId: SessionId,
+    membershipId: TenantMembershipId,
+    selectedAt: Date,
+  ): Promise<Session | null>;
+
+  /**
+   * Clear the active TenantMembership for a session.
+   *
+   * Sets `activeTenantMembershipId` to `null`. The session remains
+   * valid; only its active context is removed. Used by the explicit
+   * "clear context" endpoint and by the load-context flow when the
+   * previously selected membership is no longer valid (suspended
+   * membership, suspended Tenant, or membership deleted — although
+   * deletion is blocked by `ON DELETE RESTRICT` while the session
+   * references it).
+   *
+   * The caller passes `clearedAt` (typically `new Date()`) for
+   * deterministic test behaviour.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked.
+   */
+  clearActiveTenantMembership(
+    sessionId: SessionId,
+    clearedAt: Date,
+  ): Promise<Session | null>;
 }

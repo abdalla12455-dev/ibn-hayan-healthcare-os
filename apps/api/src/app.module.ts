@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/index.js';
+import { SessionContextModule } from './modules/session-context/index.js';
 
 /**
  * Root application module.
@@ -19,6 +20,12 @@ import { AuthModule } from './modules/auth/index.js';
  *   internally; the database connection is opened lazily on the
  *   first query, so the API can boot without a database as long as
  *   no auth request occurs.
+ * - {@link SessionContextModule} for the session-context routes
+ *   under /api/v1/context. The session-context module reuses the
+ *   auth module's `AuthService` and `CsrfService` via Nest DI; it
+ *   does not duplicate authentication, CSRF, or Origin logic. The
+ *   module imports `DatabaseModule` internally for the session,
+ *   membership, and tenant repositories.
  *
  * No patient, billing, scheduling, inventory, or audit modules are
  * imported in this batch. Those arrive in subsequent batches.
@@ -35,6 +42,7 @@ import { AuthModule } from './modules/auth/index.js';
     }),
     HealthModule,
     AuthModule,
+    SessionContextModule,
   ],
 })
 export class AppModule {}

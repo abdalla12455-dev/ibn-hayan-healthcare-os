@@ -25,6 +25,7 @@
  */
 
 import type { UserId } from './user.js';
+import type { TenantMembershipId } from './membership.js';
 
 /**
  * Stable identifier for a Session. Branded so it cannot be confused
@@ -83,6 +84,18 @@ export interface CreateSessionInput {
  *   deleted — sessions must be revoked first).
  * - `tokenHash`: SHA-256 hash of the opaque session token. Unique.
  *   The raw token is never persisted.
+ * - `activeTenantMembershipId`: the TenantMembership this session has
+ *   selected as its active Tenant context, or `null` when no context
+ *   is selected. Per the fifth canonical batch specification, the
+ *   active context is session-specific (different sessions for the
+ *   same user have independent context), is selected by
+ *   TenantMembership ID (never by an arbitrary Tenant ID), and is
+ *   enforced at the database level to reference a membership that
+ *   belongs to this session's user. A `null` value means "no active
+ *   context"; the session remains valid. Per ADR-013 §1.3, the
+ *   session record carries active Tenant context; the fifth batch
+ *   introduces active Tenant context only (no active Organisation or
+ *   Facility context, no role or permission context).
  * - `expiresAt`: absolute expiry timestamp. Once `now >= expiresAt`,
  *   the session is no longer active.
  * - `lastSeenAt`: timestamp of the most recent session-validation
@@ -100,6 +113,7 @@ export interface Session {
   readonly id: SessionId;
   readonly userId: UserId;
   readonly tokenHash: SessionTokenHash;
+  readonly activeTenantMembershipId: TenantMembershipId | null;
   readonly expiresAt: Date;
   readonly lastSeenAt: Date;
   readonly rotatedAt: Date | null;

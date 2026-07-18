@@ -4,6 +4,7 @@ import type {
   SessionId,
   SessionTokenHash,
   UserId,
+  TenantMembershipId,
   CreateSessionInput,
   SessionRepository,
 } from '@ibn-hayan/domain';
@@ -20,17 +21,33 @@ import { sessionFromPrisma } from '../mappers/session.mapper.js';
  *   In practice a collision is astronomically unlikely (256 bits of
  *   entropy), but the unique constraint is the structural guarantee.
  * - Look up an active session by the SHA-256 hash of its opaque token.
- *   Revoked (`revokedAt IS NOT NULL`) and expired (`expiresAt <= now`)
+ *   Revoked (`revokedAt IS NOT NULL`) and expired (`expiresAt > now`)
  *   sessions are filtered out at the database level. The application
  *   layer re-checks expiry in case of clock skew between the database
  *   and the application process.
  * - Rotate the session token: replace the stored `tokenHash` and
  *   update `rotatedAt`. The previous token is invalidated immediately
- *   because its hash no longer matches any row.
- * - Touch the session's `lastSeenAt` timestamp.
- * - Revoke a single session (`revokedAt = revokedAt`).
+ *   because its hash no longer matches any row. Rotation preserves
+ *   `activeTenantMembershipId`: a token rotation is NOT a context
+ *   change. The session continues to operate within its previously
+ *   selected Tenant.
+ * - Touch the session's `lastSeenAt` timestamp. Touch preserves
+ *   `activeTenantMembershipId`.
+ * - Revoke a single session (`revokedAt = revokedAt`). Revocation
+ *   does NOT clear `activeTenantMembershipId` because the session
+ *   becomes unusable; the row is retained for audit and the
+ *   rotation history. A future batch may add a cleanup job that
+ *   clears context on long-expired sessions.
  * - Revoke all sessions for a user (used when a user is disabled, when
  *   a password is changed, or for "sign out everywhere").
+ * - Set the active TenantMembership for a session. Per the fifth
+ *   canonical batch specification, the active context is
+ *   session-specific and is selected by TenantMembership ID. The
+ *   database enforces (via a composite foreign key) that the
+ *   membership belongs to the session's user; the application layer
+ *   performs an additional defensive check before calling this port.
+ * - Clear the active TenantMembership for a session. Sets the column
+ *   to `null`; the session remains valid.
  *
  * Non-responsibilities:
  * - This adapter does NOT persist the raw session token. The
@@ -44,18 +61,33 @@ import { sessionFromPrisma } from '../mappers/session.mapper.js';
  * - This adapter does not log token hashes, user IDs, or any session
  *   metadata. Per CODING_STANDARDS.md §8, no credentials or session
  *   material may appear in logs.
+ * - This adapter does not accept an arbitrary Tenant ID for context
+ *   selection. The caller passes a branded `TenantMembershipId`; the
+ *   session cannot be forced into a Tenant for which the user has no
+ *   membership.
  *
  * Per ADR-013 §1.3 — the session record does not include the raw
  * session token, the password, the password hash, or any credential
  * material. This adapter is the structural enforcement of that rule
  * at the persistence boundary: the `create` and `rotateToken` methods
  * accept only hashes, never raw tokens.
+ *
+ * Per the fifth canonical batch specification, this adapter does NOT
+ * persist any active Organisation or Facility context. The fifth
+ * batch introduces active Tenant context only. The
+ * `activeTenantMembershipId` column on `auth_sessions` is the
+ * simplest correct representation; no separate context table is
+ * required.
  */
 @Injectable()
 export class PrismaSessionRepository implements SessionRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(input: CreateSessionInput): Promise<Session> {
+    // Session creation defaults to no active membership. The
+    // `activeTenantMembershipId` column is nullable; the caller does
+    // not pass it. Context selection is a separate, explicit
+    // operation through `setActiveTenantMembership`.
     const row = await this.prisma.authSession.create({
       data: {
         userId: input.userId,
@@ -73,6 +105,10 @@ export class PrismaSessionRepository implements SessionRepository {
   ): Promise<Session | null> {
     // Filter at the database level: revokedAt IS NULL AND expiresAt > now.
     // The application layer re-checks expiry in case of clock skew.
+    // The lookup returns the `activeTenantMembershipId` column so that
+    // session-lookup callers (e.g. the session-response builder) can
+    // include the active context in the response without an extra
+    // round-trip.
     const row = await this.prisma.authSession.findUnique({
       where: { tokenHash },
     });
@@ -93,6 +129,10 @@ export class PrismaSessionRepository implements SessionRepository {
     newTokenHash: SessionTokenHash,
     rotatedAt: Date,
   ): Promise<Session | null> {
+    // Rotation replaces only `tokenHash` and `rotatedAt`. The
+    // `activeTenantMembershipId` column is NOT touched: a token
+    // rotation is NOT a context change. The session continues to
+    // operate within its previously selected Tenant.
     const row = await this.prisma.authSession.update({
       where: { id: sessionId },
       data: {
@@ -104,6 +144,8 @@ export class PrismaSessionRepository implements SessionRepository {
   }
 
   async touch(sessionId: SessionId, lastSeenAt: Date): Promise<Session | null> {
+    // Touch updates only `lastSeenAt`. The `activeTenantMembershipId`
+    // column is NOT touched: an idle touch is NOT a context change.
     const row = await this.prisma.authSession.update({
       where: { id: sessionId },
       data: { lastSeenAt },
@@ -116,6 +158,11 @@ export class PrismaSessionRepository implements SessionRepository {
     // defence-in-depth measure: it prevents a revoked session from
     // having its `revokedAt` timestamp moved forward by a subsequent
     // revocation call (which could be confusing in audit logs).
+    //
+    // Revocation does NOT clear `activeTenantMembershipId`. The
+    // session is unusable once revoked; clearing the column would
+    // destroy audit history. A future batch may add a cleanup job
+    // that clears context on long-expired sessions.
     const row = await this.prisma.authSession.updateMany({
       where: { id: sessionId, revokedAt: null },
       data: { revokedAt },
@@ -135,5 +182,69 @@ export class PrismaSessionRepository implements SessionRepository {
       data: { revokedAt },
     });
     return result.count;
+  }
+
+  async setActiveTenantMembership(
+    sessionId: SessionId,
+    membershipId: TenantMembershipId,
+    _selectedAt: Date,
+  ): Promise<Session | null> {
+    // The `selectedAt` parameter is part of the domain port contract
+    // for deterministic testability. The persistence layer does not
+    // persist a separate `selectedAt` timestamp in this batch; the
+    // session's `updatedAt` column is updated by Prisma's `@updatedAt`
+    // mechanism and records the modification time. A future batch
+    // may add a dedicated `context_selected_at` column if audit
+    // requirements demand it.
+    //
+    // The composite foreign key on
+    // `auth_sessions(active_tenant_membership_id, user_id)` enforces
+    // at the database level that the membership belongs to the
+    // session's user. The application layer performs an additional
+    // defensive check before calling this port; the database
+    // constraint is the structural backstop.
+    //
+    // We do NOT pass `userId` in the `where` clause because the
+    // session row already carries `userId` and the composite FK
+    // validates the (membershipId, userId) pair against
+    // `tenant_memberships(id, user_id)`.
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeTenantMembershipId: membershipId },
+      });
+      return sessionFromPrisma(row);
+    } catch {
+      // Prisma throws P2003 (foreign key violation) if the
+      // membership does not exist, or if the composite FK rejects
+      // the (membershipId, userId) pair. The application layer
+      // interprets this as "the supplied membership is not valid
+      // for this session's user" and returns a generic forbidden
+      // response that does not reveal whether the membership
+      // exists for another user.
+      return null;
+    }
+  }
+
+  async clearActiveTenantMembership(
+    sessionId: SessionId,
+    _clearedAt: Date,
+  ): Promise<Session | null> {
+    // The `clearedAt` parameter is part of the domain port contract
+    // for deterministic testability. The persistence layer does not
+    // persist a separate `clearedAt` timestamp in this batch; the
+    // session's `updatedAt` column records the modification time.
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeTenantMembershipId: null },
+      });
+      return sessionFromPrisma(row);
+    } catch {
+      // The session does not exist or has been deleted. Return null
+      // so the application layer can return a 401 (session required)
+      // to the caller.
+      return null;
+    }
   }
 }

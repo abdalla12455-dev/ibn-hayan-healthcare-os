@@ -50,6 +50,23 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-unsafe-argument': 'error',
+      // Allow underscore-prefixed parameters to be unused. This is
+      // the standard convention for parameters that are required by
+      // an interface contract but are intentionally not consumed by
+      // the implementation. For example, the SessionRepository port
+      // declares `setActiveTenantMembership(sessionId, membershipId,
+      // selectedAt)`; the Prisma-backed implementation does not
+      // persist `selectedAt` separately because Prisma's
+      // `@updatedAt` mechanism records the modification time. The
+      // parameter is prefixed `_selectedAt` to signal intent.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
     },
   },

@@ -454,6 +454,46 @@ verify_count_zero \
   "no seed rows exist in tenancy or identity tables"
 
 # ---------------------------------------------------------------------------
+# Fifth canonical batch: session tenant context verification
+# ---------------------------------------------------------------------------
+
+echo "===VERIFYING SESSION TENANT CONTEXT OBJECTS==="
+
+# active_tenant_membership_id column exists on auth_sessions and is UUID
+verify_count_one \
+  "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'auth_sessions' AND column_name = 'active_tenant_membership_id' AND data_type = 'uuid';" \
+  "auth_sessions.active_tenant_membership_id is UUID"
+
+# active_tenant_membership_id is nullable (no NOT NULL constraint)
+verify_count_one \
+  "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'auth_sessions' AND column_name = 'active_tenant_membership_id' AND is_nullable = 'YES';" \
+  "auth_sessions.active_tenant_membership_id is nullable"
+
+# Composite unique constraint on tenant_memberships(id, user_id)
+verify_unique_exists "tenant_memberships_id_user_id_key" \
+  "tenant_memberships(id, user_id) composite unique constraint exists (required for composite FK)"
+
+# Normal foreign key: auth_sessions.active_tenant_membership_id -> tenant_memberships.id
+verify_count_one \
+  "SELECT COUNT(*) FROM pg_constraint WHERE contype = 'f' AND conname = 'auth_sessions_active_tenant_membership_id_fkey' AND pg_get_constraintdef(oid) LIKE '%ON DELETE RESTRICT%' AND pg_get_constraintdef(oid) LIKE '%ON UPDATE RESTRICT%';" \
+  "auth_sessions.active_tenant_membership_id FK exists with ON DELETE/UPDATE RESTRICT"
+
+# Composite foreign key: auth_sessions(active_tenant_membership_id, user_id) -> tenant_memberships(id, user_id)
+verify_count_one \
+  "SELECT COUNT(*) FROM pg_constraint WHERE contype = 'f' AND conname = 'auth_sessions_active_tenant_membership_id_user_id_fkey' AND pg_get_constraintdef(oid) LIKE '%ON DELETE RESTRICT%' AND pg_get_constraintdef(oid) LIKE '%ON UPDATE RESTRICT%';" \
+  "auth_sessions composite FK (active_tenant_membership_id, user_id) exists with ON DELETE/UPDATE RESTRICT"
+
+# Index on auth_sessions.active_tenant_membership_id
+verify_count_one \
+  "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'auth_sessions' AND indexname = 'auth_sessions_active_tenant_membership_id_idx';" \
+  "auth_sessions.active_tenant_membership_id index exists"
+
+# No Organisation or Facility context columns on auth_sessions
+verify_count_zero \
+  "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'auth_sessions' AND column_name IN ('active_organisation_id', 'active_facility_id', 'active_organisation_membership_id', 'active_facility_membership_id', 'active_tenant_slug', 'active_tenant_display_name', 'active_tenant_id', 'role', 'role_id', 'permissions', 'permission_ids');" \
+  "no Organisation/Facility/role/permission context columns exist on auth_sessions"
+
+# ---------------------------------------------------------------------------
 # Success
 # ---------------------------------------------------------------------------
 
