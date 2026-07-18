@@ -4,13 +4,17 @@ packages:
 
 # Native build dependencies that are allowed to run install scripts.
 # pnpm 11 uses an explicit `allowBuilds` object map keyed by package name.
+# - @prisma/engines: required by prisma CLI to run schema engine + query engine binaries
 # - @swc/core: required by @ibn-hayan/api Vitest config (unplugin-swc)
 # - esbuild: required by @ibn-hayan/web Vitest config and Next.js build
+# - prisma: required by prisma CLI preinstall hook
 # - sharp: required by Next.js image optimisation
 # - unrs-resolver: required by eslint-plugin-import resolution
 allowBuilds:
   '@scarf/scarf': false
+  '@prisma/engines': true
   '@swc/core': true
   esbuild: true
+  prisma: true
   sharp: true
   unrs-resolver: true

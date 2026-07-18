@@ -6,7 +6,12 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // The generated Prisma client is excluded from linting because it
+    // is machine-generated, ships with `// @ts-nocheck`, and is
+    // owned by Prisma rather than by this repository. The schema
+    // and migrations under `prisma/` ARE reviewed and committed; only
+    // the generated TypeScript client is excluded.
+    ignores: ['eslint.config.mjs', 'generated/**', 'dist/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

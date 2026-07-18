@@ -1,0 +1,156 @@
+// Prisma schema for the Ibn Hayan Healthcare Operating System API.
+//
+// This is the canonical persistence schema ratified by ADR-006 (Database
+// Strategy) and ADR-012 §1.4 (Prisma safeguards). It is PostgreSQL-first:
+// every type, constraint, and index is chosen to be expressible in
+// PostgreSQL-native SQL, and the generated migration SQL is reviewed
+// before being applied to any database.
+//
+// Per the third canonical batch specification:
+// - Only the tenancy foundation (Tenant, Organisation, Facility) is
+//   persisted in this batch. No patient, user, session, audit, billing,
+//   scheduling, inventory, or notification tables exist here yet.
+// - No row-level security policies exist yet. RLS and database-role
+//   separation arrive in a dedicated reviewed batch before any
+//   tenant-owned data is exposed through a public API endpoint.
+// - No cascading deletes. Tenant deletion is restricted while
+//   organisations exist; organisation deletion is restricted while
+//   facilities exist. This is the structural enforcement of the
+//   lifecycle: a tenant with active children cannot be silently
+//   destroyed.
+// - No soft-delete columns (`deletedAt`). Soft-delete is a future
+//   batch concern, governed by a separate ADR.
+// - No PostgreSQL extensions are enabled. The schema uses only
+//   built-in PostgreSQL features.
+//
+// Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
+// schema language cannot express a PostgreSQL concept that the design
+// requires, the design is PostgreSQL-correct first and the Prisma
+// schema is annotated or supplemented with raw SQL second. The
+// composite organisation foreign key —
+//   facilities(tenantId, organisationId) REFERENCES organisations(tenantId, id)
+// — is one such concept: Prisma 7 cannot express a composite foreign
+// key in the schema language. The schema below declares the columns
+// and the single-column indexes; the composite foreign key, the
+// composite unique constraint on `organisations(tenantId, id)`, and
+// the restricted-delete behaviour are added by the reviewed raw SQL
+// migration that accompanies the Prisma-generated migration.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Tenant
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+/// A Tenant is the top-level isolation boundary. Every Organisation,
+/// Facility, user, patient, and clinical record belongs to exactly one
+/// Tenant.
+model Tenant {
+  id          String       @id @default(uuid()) @db.Uuid
+  slug        String       @unique @db.VarChar(80)
+  displayName String       @map("display_name") @db.VarChar(200)
+  status      TenantStatus @default(active)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  organisations Organisation[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
+// Organisation
+// ---------------------------------------------------------------------------
+
+enum OrganisationStatus {
+  active
+  inactive
+}
+
+/// An Organisation is the second level of the tenancy hierarchy. Every
+/// Organisation belongs to exactly one Tenant; the foreign key below
+/// enforces that ownership. The unique constraint on `(tenantId, code)`
+/// enforces that an Organisation's code is unique within a Tenant but
+/// may be reused across Tenants.
+///
+/// The composite unique constraint on `(tenantId, id)` is required to
+/// support the composite foreign key from `facilities`. Prisma cannot
+/// express a composite foreign key in the schema language; the
+/// composite unique constraint here is supplemented by a reviewed raw
+/// SQL migration that adds the composite foreign key on `facilities`.
+model Organisation {
+  id          String             @id @default(uuid()) @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  code        String             @db.VarChar(50)
+  displayName String             @map("display_name") @db.VarChar(200)
+  status      OrganisationStatus @default(active)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facilities Facility[]
+
+  @@unique([tenantId, code], map: "organisations_tenant_id_code_key")
+  @@unique([tenantId, id], map: "organisations_tenant_id_id_key")
+  @@index([tenantId], map: "organisations_tenant_id_idx")
+  @@map("organisations")
+}
+
+// ---------------------------------------------------------------------------
+// Facility
+// ---------------------------------------------------------------------------
+
+enum FacilityStatus {
+  active
+  inactive
+}
+
+/// A Facility is the third level of the tenancy hierarchy. Every
+/// Facility belongs to exactly one Organisation, which in turn belongs
+/// to exactly one Tenant.
+///
+/// The `tenantId` column is persisted on the facility row so that
+/// tenant-scoped queries do not need to join through `organisations`.
+/// The composite foreign key
+///   facilities(tenantId, organisationId) REFERENCES organisations(tenantId, id)
+/// is added by a reviewed raw SQL migration because Prisma 7 cannot
+/// express a composite foreign key in the schema language. The
+/// composite foreign key enforces that a Facility cannot be attached
+/// to an Organisation in a different Tenant: the database rejects the
+/// insert.
+///
+/// The single-column `organisationId` relation below is declared for
+/// Prisma's query-builder convenience; the real referential integrity
+/// is enforced by the composite foreign key. The single-column
+/// relation is configured with `onDelete: Restrict` so that an
+/// organisation deletion that would orphan facilities is rejected
+/// even if the composite foreign key were ever dropped.
+model Facility {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organisationId String         @map("organisation_id") @db.Uuid
+  code           String         @db.VarChar(50)
+  displayName    String         @map("display_name") @db.VarChar(200)
+  status         FacilityStatus @default(active)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
+  @@index([tenantId], map: "facilities_tenant_id_idx")
+  @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
+  @@map("facilities")
+}

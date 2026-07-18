@@ -7,14 +7,16 @@
     "node": ">=24.0.0 <25.0.0"
   },
   "scripts": {
-    "build:contracts": "pnpm --filter @ibn-hayan/contracts build",
-    "dev:web": "pnpm run build:contracts && pnpm --filter @ibn-hayan/web dev",
-    "dev:api": "pnpm run build:contracts && pnpm --filter @ibn-hayan/api start:dev",
-    "build": "pnpm -r build",
-    "lint": "pnpm run build:contracts && pnpm -r lint",
-    "typecheck": "pnpm run build:contracts && pnpm -r typecheck",
-    "test": "pnpm run build:contracts && pnpm -r test",
-    "test:integration": "pnpm run build:contracts && pnpm --filter @ibn-hayan/api test:integration"
+    "build:shared": "pnpm --filter @ibn-hayan/contracts build && pnpm --filter @ibn-hayan/domain build",
+    "build:shared:clean": "pnpm --filter @ibn-hayan/contracts exec rm -rf dist && pnpm --filter @ibn-hayan/domain exec rm -rf dist && pnpm run build:shared",
+    "dev:web": "pnpm run build:shared && pnpm --filter @ibn-hayan/web dev",
+    "dev:api": "pnpm run build:shared && pnpm --filter @ibn-hayan/api start:dev",
+    "build": "pnpm run build:shared && pnpm -r build",
+    "lint": "pnpm run build:shared && pnpm -r lint",
+    "typecheck": "pnpm run build:shared && pnpm -r typecheck",
+    "test": "pnpm run build:shared && pnpm -r test",
+    "test:integration": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:integration",
+    "test:database": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:database"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

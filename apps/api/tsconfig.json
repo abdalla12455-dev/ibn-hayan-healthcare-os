@@ -19,8 +19,10 @@
   "exclude": [
     "node_modules",
     "dist",
+    "generated",
     "vitest.config.ts",
     "vitest.integration.config.ts",
+    "vitest.database.config.ts",
     "eslint.config.mjs"
   ]
 }
