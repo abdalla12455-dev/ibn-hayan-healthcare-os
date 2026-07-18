@@ -1,0 +1,2352 @@
+1:# Ibn Hayan Healthcare Operating System — System Architecture
+2:
+3:| Field | Value |
+4:|---|---|
+5:| Document Title | System Architecture |
+6:| Project | Ibn Hayan Healthcare Operating System |
+7:| Document Type | Canonical Architectural Reference |
+8:| Authority Level | Authoritative — Source of Truth |
+9:| Version | 2.0.0 |
+10:| Status | Ratified |
+11:| Owner | Office of the Chief Software Architect |
+12:| Custodian | Architecture Council |
+13:| Review Cadence | Quarterly, with off-cycle revision when an Architecture Decision Record is ratified |
+14:| Audience | Senior software architects, engineering leadership, module owners, integration architects, security architects, SRE leadership |
+15:| Scope | System-level architecture: principles, layers, contexts, configuration, modules, multi-tenancy, integration, security, scalability, extensibility, deployment, offline, localization, audit, reporting, AI readiness, evolution |
+16:| Out of Scope | Implementation details, source code, database schemas, API contracts, UI specifications, deployment runbooks, vendor selection, technology commits |
+17:| Conflict Resolution | This document prevails over every other architectural or module document. Any conflict between this document and a downstream document is resolved in favor of this document until this document is amended. |
+18:| Amendment Mechanism | Architecture Council ratification through an Architecture Decision Record (ADR); recorded in CHANGELOG with explicit version increment |
+19:| Predecessor | v1.0.0 (initial) |
+20:| Supersedes | All prior architectural drafts and internal memos |
+21:
+22:---
+23:
+24:## Table of Contents
+25:
+26:1. Architecture Overview
+27:2. Architectural Vision
+28:3. System Philosophy
+29:4. Architectural Principles
+30:5. High-Level Architecture
+31:6. Platform Layers
+32:7. Domain-Driven Architecture
+33:8. Configuration-Driven Architecture
+34:9. Modular Architecture
+35:10. Multi-Tenant Architecture
+36:11. Organization Hierarchy
+37:12. Clinic Hierarchy
+38:13. Module Architecture
+39:14. Feature Flag Strategy
+40:15. Configuration Strategy
+41:16. Workflow Engine Philosophy
+42:17. State Management Philosophy
+43:18. Event-Driven Concepts
+44:19. Integration Architecture
+45:20. Security Architecture
+46:21. Scalability Strategy
+47:22. Extensibility Strategy
+48:23. Deployment Models
+49:24. Offline-First Architecture
+50:25. Synchronization Strategy
+51:26. Localization Architecture
+52:27. Audit Architecture
+53:28. Reporting Architecture
+54:29. AI Readiness
+55:30. Future Evolution Strategy
+56:
+57:---
+58:
+59:## 1. Architecture Overview
+60:
+61:### 1.1 Purpose of This Document
+62:
+63:This document is the canonical architectural reference for the Ibn Hayan Healthcare Operating System. It defines what the platform is as an architectural artefact — its layers, its contexts, its contracts, its primitives, its commitments. Every downstream architectural document, every module specification, every Architecture Decision Record, every operational runbook, and every integration contract must align with this document. Where alignment is not possible, either the downstream artefact is incorrect or this document must be amended through the Architecture Council.
+64:
+65:This document is not an implementation guide. It contains no source code, no database schemas, no API endpoint specifications, no UI component catalogues, and no technology commitments. It describes the architectural decisions and commitments that implementations are expected to honour. Implementation choices are governed by `SOFTWARE_ARCHITECTURE.md` and `CODING_STANDARDS.md`; this document governs what those choices must produce.
+66:
+67:The document is written for senior software architects who already understand distributed systems, domain-driven design, multi-tenant SaaS delivery, healthcare-grade operational rigour, and decade-horizon architectural thinking. It does not explain what a bounded context is, what eventual consistency is, or why audit is a primitive. It assumes that literacy and focuses on the architectural decisions that distinguish Ibn Hayan from every other healthcare platform.
+68:
+69:### 1.2 Scope and Authority
+70:
+71:The scope of this document is the entire Ibn Hayan platform as an architectural artefact. The document holds authority over the following classes of downstream artefacts:
+72:
+73:- `SOFTWARE_ARCHITECTURE.md`, `MODULE_ARCHITECTURE.md`, `CONFIGURATION_ARCHITECTURE.md`, `CODING_STANDARDS.md`, `FOLDER_STRUCTURE.md` — these elaborate the system architecture into implementation-grade specifications.
+74:- All Architecture Decision Records under `docs/12_ADR/` — these ratify specific architectural decisions and must be consistent with the principles in Section 4.
+75:- All module specifications under `docs/11_MODULES/` — these define module internals and must align with the module architecture in Section 13.
+76:- All security documents under `docs/03_SECURITY/` — these define security controls and must align with the security architecture in Section 20.
+77:- All integration documents under `docs/04_INTEGRATIONS/` — these define integration contracts and must align with the integration architecture in Section 19.
+78:- All database documents under `docs/06_DATABASE/` — these define data architecture and must align with the bounded contexts in Section 7.
+79:- All deployment documents under `docs/09_DEPLOYMENT/` — these define deployment models and must align with the deployment models in Section 23.
+80:
+81:A downstream artefact that contradicts this document is, by definition, defective. The remedy is to either correct the downstream artefact or amend this document through an ADR. Silent contradiction is not permitted.
+82:
+83:### 1.3 Architectural Posture
+84:
+85:The Ibn Hayan platform is architected on the following non-negotiable posture:
+86:
+87:- **Healthcare-native, not healthcare-adapted.** The architecture begins from healthcare semantics. Generic enterprise patterns are borrowed only where they do not compromise healthcare fidelity.
+88:- **Configuration-driven, not customization-dependent.** The platform adapts to customer needs through declarative configuration. Source-level customization is excluded as a delivery mechanism.
+89:- **Multi-tenant SaaS as default.** The platform serves every customer from a single shared runtime. Customer-specific deployments are deployment choices, not code branches.
+90:- **Offline-first as primitive.** The platform operates locally by default, with synchronization to the central platform. Offline is not a fallback mode; it is the primary mode for client surfaces.
+91:- **Audit as primitive.** Every consequential action is recorded in an immutable audit trail. Audit is built into every module's contract, not added as a feature.
+92:- **Decade-horizon thinking.** Architectural decisions are made on a ten-year horizon, not on a quarter-by-quarter horizon. Decisions that optimize for the short term at the cost of the decade are rejected.
+93:
+94:These six posture commitments are not negotiable. They are the architectural expression of the product principles defined in `PRODUCT_BIBLE.md`, and they govern every architectural decision in this document.
+95:
+96:### 1.4 Technology-Agnostic Posture
+97:
+98:This document is deliberately technology-agnostic. It does not name specific programming languages, frameworks, databases, message brokers, or cloud vendors. Technology selection is an implementation choice governed by the criteria in `SOFTWARE_ARCHITECTURE.md`, not an architectural commitment.
+99:
+100:The technology-agnostic posture is a direct consequence of the decade-horizon thinking (Section 2.2). Technologies change on shorter cycles than the platform's viability horizon. An architecture that commits to a specific technology commits to that technology's lifecycle, which is typically shorter than the platform's required lifecycle. The architecture therefore commits to patterns, principles, and contracts — not to technologies.
+101:
+102:Where this document references a technology category (e.g., "transactional data store", "message broker", "object storage"), the reference is to the category, not to a specific product. The choice of product within a category is an implementation decision governed by selection criteria, not by architectural commitment.
+103:
+104:### 1.5 Relationship to Product Bible
+105:
+106:This document is the architectural expression of the product commitments defined in `PRODUCT_BIBLE.md`. The product principles (P-1 through P-9) and design principles (D-1 through D-10) defined in `PRODUCT_BIBLE.md` are the basis for the architectural principles (Section 4) defined here. The architectural principles translate product commitments into architectural decisions.
+107:
+108:Where this document and `PRODUCT_BIBLE.md` appear to conflict, the Product Bible prevails. The product is the source of truth; the architecture serves the product, not the reverse. A conflict between product and architecture is resolved by amending the architecture to serve the product, not by amending the product to fit the architecture.
+109:
+110:### 1.6 Document Structure
+111:
+112:The document is organized in six movements:
+113:
+114:1. **Architecture identity** (Sections 2 through 4) — establishes the architectural vision, philosophy, and principles that govern every decision.
+115:2. **Structural architecture** (Sections 5 through 13) — defines the platform's layers, bounded contexts, modules, and the hierarchies they serve.
+116:3. **Behavioural architecture** (Sections 14 through 18) — defines the configuration, feature flag, workflow, state, and event-driven behaviour of the platform.
+117:4. **Cross-cutting architecture** (Sections 19 through 22) — defines integration, security, scalability, and extensibility as cross-cutting concerns.
+118:5. **Operational architecture** (Sections 23 through 28) — defines deployment, offline, synchronization, localization, audit, and reporting as operational concerns.
+119:6. **Forward architecture** (Sections 29 and 30) — defines AI readiness and future evolution as forward-looking concerns.
+120:
+121:Each section is self-contained but cross-references other sections rather than restating their content. The architectural principles in Section 4 are referenced throughout the document as the basis for specific architectural decisions.
+122:
+123:### 1.7 How to Read This Document
+124:
+125:A first-time reader should read Sections 1 through 5 in order to internalize the architectural posture and principles, then jump to Section 7 (Domain-Driven Architecture) and Section 13 (Module Architecture) to understand the platform's structural decomposition. Sections 14 through 22 may be consulted as reference for specific behavioural and cross-cutting concerns. Sections 23 through 30 are essential for anyone responsible for deployment, operations, or long-term platform evolution.
+126:
+127:A reader looking for a specific architectural decision rule should consult Section 4 (Architectural Principles) first; this section is the decision framework that governs every architectural choice. A reader looking for structural decomposition should consult Section 5 (High-Level Architecture) and Section 7 (Domain-Driven Architecture). A reader looking for a specific module's architecture should consult `MODULE_ARCHITECTURE.md`. A reader looking for a specific architectural decision's rationale should consult the relevant ADR under `docs/12_ADR/`.
+128:
+129:---
+130:
+131:## 2. Architectural Vision
+132:
+133:### 2.1 Vision Statement
+134:
+135:The architectural vision of Ibn Hayan is to provide a durable, healthcare-native, configuration-driven, multi-tenant platform that serves every healthcare organization from a solo practitioner to a multinational hospital network, that remains viable across a ten-year horizon, and that absorbs unanticipated capability without architectural rework.
+136:
+137:The vision is not stated in terms of features or capabilities. It is stated in terms of architectural properties — durability, healthcare nativeness, configuration-driven behaviour, multi-tenancy, scale range, and future-proofness. These properties are the architectural expression of the product vision defined in `PRODUCT_BIBLE.md`.
+138:
+139:### 2.2 The Decade Horizon
+140:
+141:The architectural vision is stated on a ten-year horizon. This is not a marketing flourish; it is an architectural commitment that shapes every decision in this document. The decade horizon has the following architectural consequences:
+142:
+143:- **Stable bounded contexts.** The bounded contexts defined in Section 7 are designed to outlast any specific implementation. Contexts are not reorganized to accommodate features; features are accommodated within the existing context structure.
+144:- **Explicit contracts.** Every module boundary is governed by explicit contracts — commands, queries, events, configuration schemas. Contracts are versioned and evolve through documented deprecation, not through silent breaking change.
+145:- **First-class extension points.** The platform's extensibility surface (Section 22) is first-class. Extensions are not bolt-ons; they are governed by the same architectural rigour as core platform capabilities.
+146:- **Technology-agnostic posture.** The architecture does not commit to specific technologies. Technology selection is an implementation choice governed by architectural criteria, not by architectural identity.
+147:- **Conservative evolution.** The platform evolves deliberately, with each change justified against the architectural principles. Change that is fast but wrong on the decade horizon is rejected as debt.
+148:
+149:The decade horizon does not mean the architecture is static. It means the architecture evolves through amendable principles and explicit decisions, not through ad hoc adaptation. The architecture is the durable artefact; implementations are its stewards.
+150:
+151:### 2.3 The Three Architectural Vectors
+152:
+153:The architectural vision unfolds along three vectors that are pursued simultaneously and in tension with each other:
+154:
+155:- **Structural coherence.** The platform's structural decomposition — layers, contexts, modules — must be coherent enough that a new architect can understand the platform in a defined period. Coherence is measured by the clarity of boundaries, the explicitness of contracts, and the absence of circular dependencies.
+156:- **Behavioural richness.** The platform's behavioural surface — configuration, workflow, events, state — must be rich enough to express the operational reality of every supported clinic type without source-level modification. Richness is measured by configuration coverage of clinic types, workflow expressiveness, and event-driven completeness.
+157:- **Operational durability.** The platform's operational posture — deployment, offline, synchronization, audit, security, scalability — must be durable enough to meet healthcare-grade operational rigour across the decade horizon. Durability is measured by availability, recoverability, audit completeness, security posture, and scalability under load.
+158:
+159:Tension among the three vectors is intentional. Structural coherence without behavioural richness produces a clean architecture that cannot serve healthcare. Behavioural richness without structural coherence produces a feature pile that cannot be maintained. Operational durability without structural coherence or behavioural richness produces a stable platform that cannot evolve. Ibn Hayan pursues all three vectors simultaneously.
+160:
+161:### 2.4 What the Vision Excludes
+162:
+163:The architectural vision explicitly excludes the following ambitions, which are common in healthcare software architecture but incompatible with Ibn Hayan's posture:
+164:
+165:- **Technology lock-in.** The architecture does not commit to a specific technology as architectural identity. Technology choices are implementation decisions.
+166:- **Customization as adaptation.** The architecture does not support source-level customization as an adaptation mechanism. Configuration is the only adaptation mechanism.
+167:- **Single-tenant default.** The architecture does not default to single-tenant deployment. Multi-tenancy is the default; single-tenancy is a deployment choice.
+168:- **Online-only operation.** The architecture does not assume continuous network connectivity. Offline-first is the default for client surfaces.
+169:- **Feature-driven architecture.** The architecture is not organized around features. It is organized around bounded contexts and module boundaries that outlast features.
+170:- **Monolithic deployment.** The architecture does not require monolithic deployment. Deployment is decoupled from architecture; the same architecture supports multiple deployment models.
+171:
+172:### 2.5 Vision Alignment Test
+173:
+174:Every architectural decision is tested against the vision by asking four questions in sequence:
+175:
+176:1. Does this decision preserve the structural coherence of the platform?
+177:2. Does this decision extend the behavioural richness of the platform within the configuration surface?
+178:3. Does this decision maintain or improve the operational durability of the platform?
+179:4. Does this decision remain viable on the decade horizon?
+180:
+181:A decision that answers yes to all four questions is consistent with the vision. A decision that answers no to any question is rejected or escalated to the Architecture Council for adjudication, with the tension made explicit rather than hidden. This test is the operational expression of the architectural vision; it is not a checklist but a discipline.
+182:
+183:---
+184:
+185:## 3. System Philosophy
+186:
+187:### 3.1 Philosophy Overview
+188:
+189:The system philosophy is the set of architectural beliefs that shape every decision in this document. The philosophy is not derived from technology trends; it is the lens through which technology trends are evaluated. Where a trend contradicts the philosophy, the trend is regarded as wrong for Ibn Hayan until the philosophy is amended.
+190:
+191:The philosophy is stated as six beliefs, each with direct architectural consequences.
+192:
+193:### 3.2 Belief One — Architecture Serves the Product
+194:
+195:The architecture exists to serve the product, not the reverse. Architectural decisions are made in service of product commitments, not in service of architectural elegance. Where architectural elegance and product value conflict, product value prevails, and the architectural decision is recorded with the trade-off explicit.
+196:
+197:The consequence is that this document defers to `PRODUCT_BIBLE.md` on all product-level matters. The architecture does not define what the product should be; it defines how the product's commitments are honoured architecturally.
+198:
+199:### 3.3 Belief Two — Healthcare Semantics Are Primary
+200:
+201:Healthcare semantics — patients, encounters, orders, results, medications, observations — are the primary organizing principle of the architecture. Generic enterprise patterns are borrowed only where they do not compromise healthcare fidelity. The architecture does not adapt healthcare to enterprise patterns; it adapts enterprise patterns to healthcare.
+202:
+203:The consequence is that the bounded contexts (Section 7) are organized around healthcare work. The clinical encounter is the central organizing entity of the data model. The role and permission model reflects healthcare operational reality. The configuration surface is expressed in healthcare terms.
+204:
+205:### 3.4 Belief Three — Configuration Is the Adaptation Surface
+206:
+207:Configuration is the primary adaptation mechanism. The architecture is designed to express customer-specific behaviour through declarative, version-controlled, tenant-scoped configuration, not through source-level modification. The configuration surface is a first-class architectural concern with its own layer, its own validation framework, and its own audit trail.
+208:
+209:The consequence is that the configuration architecture (Section 8) is treated with the same rigour as the module architecture (Section 13). Configuration is not a settings file; it is a discipline that governs how the platform adapts without forking.
+210:
+211:### 3.5 Belief Four — The Platform Outlasts Every Implementation
+212:
+213:The platform's architecture outlasts every specific implementation, every specific technology choice, and every specific team. This requires that the architecture be larger than any implementation's preferences, that decisions be recorded rather than carried in heads, and that the architecture's evolution be governed by amendable principles rather than by personal authority.
+214:
+215:The consequence is that every architectural decision of consequence is recorded in an ADR. The ADR is the durable artefact; the implementation is its steward. An implementation that contradicts a ratified ADR is defective.
+216:
+217:### 3.6 Belief Five — Audit Is a Primitive, Not a Feature
+218:
+219:Audit is not a feature added to the platform; it is a primitive that the platform is built upon. Every consequential action — clinical, financial, operational, configurational — is recorded in an immutable audit trail. Audit is built into every module's contract, enforced at the platform layer, and protected against tampering.
+220:
+221:The consequence is that audit is non-negotiable. A module that does not audit its consequential actions is defective and is not shipped. An implementation that compromises audit completeness for performance or convenience is defective.
+222:
+223:### 3.7 Belief Six — Open Contracts Beat Closed Implementations
+224:
+225:The platform's contracts — module contracts, integration contracts, configuration schemas, event schemas — are open and documented. Closed implementations that hide behaviour behind undocumented interfaces are rejected. The platform's behaviour is visible to its users, its integrators, and its future maintainers.
+226:
+227:The consequence is that every module's contract is documented as part of the definition of done. Every integration surface is documented as a contract. Every configuration schema is documented. Undocumented behaviour is defective behaviour.
+228:
+229:### 3.8 Philosophy in Practice
+230:
+231:The six beliefs are applied as decision tests. When an architectural decision is unclear, the architect asks which belief governs and what that belief requires. When two beliefs appear to conflict, the conflict is named explicitly and resolved through the architectural principles (Section 4), which provide precedence. When a belief is shown to be wrong, the belief is amended through the Architecture Council, and the amendment is recorded in this document with explicit reasoning.
+232:
+233:---
+234:
+235:## 4. Architectural Principles
+236:
+237:### 4.1 Purpose of Architectural Principles
+238:
+239:Architectural Principles are the decision rules that govern architectural choices. They are not aspirations; they are operating constraints. Every architectural decision of consequence is justifiable by reference to one or more Architectural Principles. A decision that cannot be justified by reference to a principle is, by definition, out of scope for the architecture.
+240:
+241:Architectural Principles are distinguished from the Product Principles in `PRODUCT_BIBLE.md` as follows: Product Principles state *what* the product commits to; Architectural Principles state *how* the architecture honours those commitments. Architectural Principles are derived from Product Principles and from the system philosophy (Section 3).
+242:
+243:### 4.2 Principle P1 — Healthcare Safety Overrides All Others
+244:
+245:Healthcare safety — patient safety, clinical safety, medication safety, data safety — is the highest architectural principle. When a decision pits healthcare safety against any other principle — performance, convenience, simplicity, cost — healthcare safety prevails.
+246:
+247:**Applies to:** every architectural decision with potential patient-safety implications, including data integrity, audit completeness, offline operation, synchronization conflict resolution, and access control.
+248:
+249:**Precedence:** absolute. No other principle overrides P1.
+250:
+251:### 4.3 Principle P2 — Configuration Before Customization
+252:
+253:The platform adapts to customer needs through configuration, not through source-level customization. Customization is rejected as an architectural mechanism. Configuration is the primary adaptation surface and is treated as a first-class architectural concern.
+254:
+255:**Applies to:** every customer-specific adaptation request, every module extension decision, every integration scope decision.
+256:
+257:**Precedence:** P2 is co-equal with P3 and P4. Conflicts among them are resolved by the Architecture Council.
+258:
+259:### 4.4 Principle P3 — One Platform, Many Organizations
+260:
+261:The platform is a single code base, a single configuration model, and a single operational runtime serving every customer. Variations between customers are expressed as configuration, not as forks. The platform does not maintain customer-specific branches.
+262:
+263:**Applies to:** release management, tenant isolation strategy, configuration inheritance, module packaging.
+264:
+265:**Precedence:** P3 is co-equal with P2 and P4.
+266:
+267:### 4.5 Principle P4 — Loose Coupling, High Cohesion
+268:
+269:Modules are loosely coupled and highly cohesive. Coupling is through explicit contracts — commands, queries, events, configuration schemas — never through direct data access. Cohesion is achieved by organizing modules around bounded contexts. Circular dependencies are forbidden.
+270:
+271:**Applies to:** module boundary design, dependency management, communication patterns.
+272:
+273:**Precedence:** P4 is co-equal with P2 and P3. P4 prevails over P9 when loose coupling conflicts with reversibility, because coupling debt is harder to repay than reversibility debt.
+274:
+275:### 4.6 Principle P5 — Consistency Over Availability for Clinical Data
+276:
+277:For clinical data — patient records, encounters, orders, results, medications — consistency prevails over availability in the event of a partition. The platform prefers to be unavailable for a write than to accept a write that may conflict with patient safety. For non-clinical data — operational telemetry, analytics, notifications — availability may prevail over consistency.
+278:
+279:**Applies to:** data store selection, synchronization strategy, conflict resolution, partition tolerance.
+280:
+281:**Precedence:** P5 prevails over P9 (reversibility) when clinical correctness is at stake.
+282:
+283:### 4.7 Principle P6 — Reversibility Over Permanence
+284:
+285:Architectural decisions should be reversible where reversibility does not compromise healthcare safety, consistency, or audit completeness. Reversibility is achieved through explicit contracts, versioned evolution, and conservative commitment. Decisions that are difficult to reverse are made deliberately, with the irreversibility acknowledged.
+286:
+287:**Applies to:** technology selection, contract design, data model evolution, deployment topology.
+288:
+289:**Precedence:** P6 is subordinate to P1, P5, and P13. Reversibility is valuable but not at the cost of safety, consistency, or audit.
+290:
+291:### 4.7.1 Principle P7 — Documented Before Implemented
+292:
+293:No architectural decision is implemented until it is documented. Documentation includes the decision, the alternatives considered, the rationale, the consequences, and the amendment mechanism. Documentation is the durable artefact; the implementation is its expression.
+294:
+295:**Applies to:** every architectural decision of consequence, recorded as an ADR.
+296:
+297:**Precedence:** P7 is subordinate to P1 but prevails over schedule pressure.
+298:
+299:### 4.8 Principle P8 — Bounded Contexts Are Stable
+300:
+301:Bounded contexts (Section 7) are stable. Contexts are not reorganized to accommodate features. Features are accommodated within the existing context structure, or new contexts are added through deliberate architectural decision. Context boundaries are designed to outlast any specific implementation.
+302:
+303:**Applies to:** domain decomposition, module boundary design, data model evolution.
+304:
+305:**Precedence:** P8 is subordinate to P1 but prevails over feature-driven reorganization.
+306:
+307:### 4.9 Principle P9 — Extensibility Through Defined Points
+308:
+309:Extension is through defined extension points, not through ad hoc modification. Extension points are first-class architectural concerns with their own contracts, their own validation, and their own lifecycle. Extensions that bypass defined points are defective.
+310:
+311:**Applies to:** plugin architecture, integration architecture, customization requests that exceed configuration surface.
+312:
+313:**Precedence:** P9 is subordinate to P1, P4, and P13.
+314:
+315:### 4.10 Principle P10 — Multi-Tenancy as Default
+316:
+317:Multi-tenancy is the default delivery and isolation model. Single-tenancy is a deployment choice, not an architectural choice. Every module's contract is multi-tenant by default. Single-tenant deployment runs the same code paths as multi-tenant deployment.
+318:
+319:**Applies to:** module design, data partitioning, query scoping, audit scoping.
+320:
+321:**Precedence:** P10 is co-equal with P2 and P3.
+322:
+323:### 4.11 Principle P11 — Offline-First as Default
+324:
+325:Offline-first is the default operational mode for client surfaces. The platform operates locally by default, with synchronization to the central platform. Online-only operation is a special case, not the general case.
+326:
+327:**Applies to:** client architecture, synchronization strategy, conflict resolution, audit recording.
+328:
+329:**Precedence:** P11 is subordinate to P1 and P5 but prevails over P14 (simplicity) when offline operation adds complexity.
+330:
+331:### 4.12 Principle P12 — Open Standards Over Proprietary
+332:
+333:The platform prefers open standards over proprietary ones for integration, data formats, and protocols. Proprietary approaches are used only where open standards are not yet viable, and the use is documented with a transition path to open standards when they mature.
+334:
+335:**Applies to:** integration architecture, data exchange, protocol selection, format selection.
+336:
+337:**Precedence:** P12 is subordinate to P1, P5, and P13.
+338:
+339:### 4.13 Principle P13 — Auditability as Primitive
+340:
+341:Audit is a primitive, not a feature. Every consequential action is recorded in an immutable audit trail. Audit is built into every module's contract, enforced at the platform layer, and protected against tampering. Audit completeness is non-negotiable.
+342:
+343:**Applies to:** every module, every integration, every configuration change, every security-relevant action.
+344:
+345:**Precedence:** P13 is co-equal with P1 and P5 for consequential actions. Audit completeness prevails over performance, convenience, and cost.
+346:
+347:### 4.14 Principle P14 — Simplicity Over Complexity
+348:
+349:Architectural choices should be as simple as the requirements allow, and no simpler. Complexity is added only when justified by a documented requirement. Unjustified complexity is debt and is rejected.
+350:
+351:**Applies to:** pattern selection, technology selection, module boundary design, dependency management.
+352:
+353:**Precedence:** P14 is subordinate to P1, P5, P11, and P13. Simplicity is valuable but not at the cost of safety, consistency, offline operation, or audit.
+354:
+355:### 4.15 Principle P15 — Observability as Primitive
+356:
+357:Observability is a primitive, not a feature. Every operational component is observable through telemetry. Every consequential action is auditable. Every architectural decision is documented. The platform is observable, auditable, and accountable by design.
+358:
+359:**Applies to:** every operational component, every module, every integration.
+360:
+361:**Precedence:** P15 is co-equal with P13.
+362:
+363:### 4.16 Principle P16 — Composable, Not Monolithic
+364:
+365:The platform is composed of modules with explicit boundaries, explicit contracts, and explicit dependencies. Composition is governed by bounded contexts, not by feature catalogues. The platform is not a monolith in which everything is always present, and it is not a marketplace in which anything goes.
+366:
+367:**Applies to:** module architecture, dependency management, deployment topology.
+368:
+369:**Precedence:** P16 is co-equal with P4.
+370:
+371:### 4.17 Principle P17 — Regional Adaptation Without Forking
+372:
+373:The platform is built for global use, with regional adaptation as a configuration surface. Regional adaptation does not require code branching. Multiple regulatory regimes, clinical coding systems, and payment models coexist within a single tenant.
+374:
+375:**Applies to:** localization architecture, regulatory compliance, data residency, multi-region operation.
+376:
+377:**Precedence:** P17 is co-equal with P3.
+378:
+379:### 4.18 Principle P18 — Decade-Horizon Viability
+380:
+381:Architectural decisions are made on a ten-year horizon. Decisions that optimize for the short term at the cost of decade-horizon viability are rejected. The architecture favours choices that remain viable across technology shifts, market cycles, and leadership transitions.
+382:
+383:**Applies to:** every architectural decision of consequence.
+384:
+385:**Precedence:** P18 is the temporal expression of P1. Decade-horizon viability prevails over short-term optimization when the two conflict.
+386:
+387:### 4.19 Precedence Hierarchy
+388:
+389:The architectural principles have the following precedence hierarchy, in descending order:
+390:
+391:1. **P1 (Healthcare Safety)** — absolute; overrides all others.
+392:2. **P5 (Consistency for Clinical Data)** and **P13 (Auditability)** — co-equal; override P6, P9, P11, P14, P18 when clinical correctness or audit completeness is at stake.
+393:3. **P18 (Decade-Horizon Viability)** — overrides short-term optimization principles.
+394:4. **P2 (Configuration Before Customization)**, **P3 (One Platform)**, **P4 (Loose Coupling)**, **P10 (Multi-Tenancy)**, **P16 (Composability)**, **P17 (Regional Adaptation)** — co-equal structural principles; conflicts among them are resolved by the Architecture Council.
+395:5. **P7 (Documented)**, **P8 (Bounded Contexts Stable)**, **P11 (Offline-First)**, **P12 (Open Standards)**, **P14 (Simplicity)**, **P15 (Observability)** — operating principles; subordinate to the structural principles but prev over schedule pressure and ad hoc preferences.
+396:6. **P6 (Reversibility)** and **P9 (Extensibility)** — valuable but subordinate; do not override safety, consistency, audit, or structural principles.
+397:
+398:Conflicts are not hidden. When a decision requires precedence, the precedence applied is recorded in the ADR's rationale.
+399:
+400:### 4.20 Principles Are Not a Checklist
+401:
+402:Architectural principles are not invoked mechanically. They are the lens through which decisions are made. A decision that requires no principle to justify it is usually a decision that is out of scope or insufficiently considered. A decision that requires three principles to justify is usually a decision that is tension-laden and requires explicit Architecture Council attention. The principles exist to make tensions visible, not to resolve them by rote.
+403:
+404:---
+405:
+406:## 5. High-Level Architecture
+407:
+408:### 5.1 Purpose of This Section
+409:
+410:This section presents the high-level architecture of the Ibn Hayan platform. It identifies the major layers that compose the platform, the responsibilities of each layer, and the dependency direction among layers. The detailed treatment of each layer is in Section 6.
+411:
+412:The high-level architecture is the single load-bearing structural diagram of the platform. Every downstream architectural decision must be consistent with this structure. A decision that does not fit the layered structure is either out of scope or requires an architectural amendment.
+413:
+414:### 5.2 Architectural Layers Diagram
+415:
+416:The platform is composed of eight layers, organized from the user-facing edge to the durable data and offline substrates. The layers and their dependency direction are shown in the following diagram.
+417:
+418:```mermaid
+419:flowchart TB
+420:    subgraph EXP[Experience Layer]
+421:        direction LR
+422:        WebUI[Web Client]
+423:        MobileUI[Mobile Client]
+424:        DesktopUI[Desktop Client]
+425:        IntegratorUI[Integrator Console]
+426:    end
+427:    subgraph EDGE[Edge Layer]
+428:        direction LR
+429:        Gateway[API Gateway]
+430:        AuthN[Authentication]
+431:        AuthZ[Authorization]
+432:        RateLimit[Rate Limiting]
+433:    end
+434:    subgraph ORCH[Orchestration Layer]
+435:        direction LR
+436:        Workflow[Workflow Engine]
+437:        Saga[Saga Coordinator]
+438:        Process[Process Manager]
+439:        Scheduler[Task Scheduler]
+440:    end
+441:    subgraph DOMAIN[Domain Layer]
+442:        direction LR
+443:        Patient[Patient Context]
+444:        Encounter[Encounter Context]
+445:        Orders[Orders & Results]
+446:        Pharmacy[Pharmacy Context]
+447:        Billing[Billing Context]
+448:        OtherCtx[Other Bounded Contexts]
+449:    end
+450:    subgraph PLAT[Platform Services Layer]
+451:        direction LR
+452:        IAM[Identity & Access]
+453:        Config[Configuration]
+454:        AuditSvc[Audit]
+455:        Flags[Feature Flags]
+456:        L10n[Localization]
+457:        Notify[Notifications]
+458:    end
+459:    subgraph INT[Integration Layer]
+460:        direction LR
+461:        Connectors[Integration Connectors]
+462:        Partners[Partner Surfaces]
+463:        Standards[Healthcare Standards]
+464:        External[External Systems]
+465:    end
+466:    subgraph DATA[Data Layer]
+467:        direction LR
+468:        TxnStore[Transactional Store]
+469:        AnalyticStore[Analytical Store]
+470:        CacheStore[Cache Store]
+471:        ObjectStore[Object Store]
+472:        AuditStore[Audit Store]
+473:    end
+474:    subgraph OFF[Offline Substrate]
+475:        direction LR
+476:        LocalStore[Local Store]
+477:        SyncEngine[Sync Engine]
+478:        ConflictRes[Conflict Resolution]
+479:        OfflineAudit[Offline Audit]
+480:    end
+481:
+482:    EXP --> EDGE
+483:    EDGE --> ORCH
+484:    ORCH --> DOMAIN
+485:    DOMAIN --> PLAT
+486:    DOMAIN --> INT
+487:    PLAT --> DATA
+488:    DOMAIN --> DATA
+489:    OFF <--> DOMAIN
+490:    OFF <--> PLAT
+491:```
+492:
+493:The dependency direction is downward for synchronous request flow (Experience → Edge → Orchestration → Domain → Platform Services → Data) and bidirectional for offline synchronization (Offline Substrate ↔ Domain and Platform Services). The Integration Layer is consumed by the Domain Layer through defined contracts, not directly by the Experience Layer.
+494:
+495:### 5.3 Layer Responsibilities
+496:
+497:Each layer has a defined responsibility. Layers do not cross responsibilities; a layer that takes on another layer's responsibility is architecturally defective.
+498:
+499:| Layer | Responsibility |
+500:|---|---|
+501:| Experience | User-interface surfaces for practitioners, administrators, integrators |
+502:| Edge | Request ingress, authentication, authorization, rate limiting, request routing |
+503:| Orchestration | Workflow coordination, saga management, process management, task scheduling |
+504:| Domain | Bounded contexts implementing clinical, operational, financial, administrative logic |
+505:| Platform Services | Cross-cutting services: identity, configuration, audit, feature flags, localization, notifications |
+506:| Integration | Connectors to external systems, partner-facing surfaces, healthcare standard support |
+507:| Data | Transactional, analytical, cache, object, and audit stores |
+508:| Offline Substrate | Local stores, synchronization engine, conflict resolution, offline audit |
+509:
+510:### 5.4 Layer Communication Rules
+511:
+512:Layers communicate according to the following rules:
+513:
+514:| Rule | Description |
+515:|---|---|
+516:| Downward only for synchronous flow | Synchronous request flow proceeds downward through layers; upward flow is forbidden for synchronous requests |
+517:| Bidirectional for events | Events flow bidirectionally through the Event-Driven Concepts (Section 18) |
+518:| No layer skipping | A layer may not bypass an intermediate layer to access a lower layer directly |
+519:| Contract-based | Cross-layer communication is through explicit contracts, not through shared state |
+520:| Tenant-scoped | Every cross-layer communication carries tenant context; tenant-agnostic communication is forbidden |
+521:
+522:### 5.5 Cross-Cutting Concerns
+523:
+524:Certain concerns cross all layers and are not the responsibility of any single layer:
+525:
+526:| Concern | Cross-Cutting Implementation |
+527:|---|---|
+528:| Security | Authentication, authorization, encryption enforced at every layer |
+529:| Audit | Audit recording at every layer where consequential actions occur |
+530:| Observability | Telemetry emission at every layer |
+531:| Tenant Context | Tenant context propagation through every layer |
+532:| Localization | Localization applied at the Experience Layer and respected by all layers |
+533:| Configuration | Configuration consumed at every layer that has configurable behaviour |
+534:
+535:Cross-cutting concerns are implemented as platform-level primitives (Section 6, Platform Services Layer) and consumed by all layers through defined contracts.
+536:
+537:### 5.6 Architecture and Deployment
+538:
+539:The layered architecture is independent of deployment topology. The same architecture supports multi-tenant SaaS deployment, single-tenant dedicated deployment, hybrid deployment, air-gapped deployment, and region-specific deployment. The deployment model (Section 23) determines how layers are distributed across infrastructure, not how layers are organized.
+540:
+541:This independence is a direct consequence of Principle P3 (One Platform, Many Organizations) and Principle P18 (Decade-Horizon Viability). An architecture that is tied to a specific deployment model is an architecture that cannot adapt to deployment evolution across the decade horizon.
+542:
+543:---
+544:
+545:## 6. Platform Layers
+546:
+547:### 6.1 Purpose of This Section
+548:
+549:This section defines each of the eight platform layers in detail. For each layer, the section identifies the layer's responsibilities, its internal components, its contracts with other layers, and the architectural principles that govern it. The treatment is structural; behavioural aspects of specific components are treated in later sections.
+550:
+551:### 6.2 Experience Layer
+552:
+553:The Experience Layer is the user-facing surface of the platform. It comprises the clients that practitioners, administrators, and integrators use to interact with the platform. The Experience Layer is thin; it contains no business logic and holds no durable state beyond what is required for offline operation (Section 24).
+554:
+555:**Components:**
+556:- Web client — browser-based client for practitioners and administrators
+557:- Mobile client — native mobile client for practitioners
+558:- Desktop client — desktop client for facilities requiring richer client capability
+559:- Integrator console — browser-based console for integrators and system administrators
+560:
+561:**Contracts:**
+562:- Consumes: Edge Layer contracts (request-response, events, file transfer)
+563:- Produces: user actions translated into Edge Layer requests
+564:- Does not: access Domain Layer directly, access Data Layer directly, hold business state
+565:
+566:**Governing principles:** P5 (Practitioner Experience, from Product Bible), P11 (Offline-First), P14 (Simplicity)
+567:
+568:### 6.3 Edge Layer
+569:
+570:The Edge Layer is the platform's request ingress and policy enforcement point. It terminates external connections, authenticates requests, authorizes requests against the tenant and user context, applies rate limiting, and routes requests to the appropriate Orchestration or Domain component.
+571:
+572:**Components:**
+573:- API gateway — request ingress, routing, protocol termination
+574:- Authentication service — identity verification, session management
+575:- Authorization service — permission checks against tenant, user, and resource context
+576:- Rate limiting service — tenant-scoped rate limiting to preserve tenant operational isolation
+577:
+578:**Contracts:**
+579:- Consumes: Experience Layer requests; Platform Services (IAM) for authentication and authorization
+580:- Produces: authenticated, authorized, rate-limited requests to Orchestration and Domain
+581:- Does not: contain business logic, hold business state, access Data Layer directly
+582:
+583:**Governing principles:** P1 (Healthcare Safety, through access control), P10 (Multi-Tenancy), P13 (Auditability), P15 (Observability)
+584:
+585:### 6.4 Orchestration Layer
+586:
+587:The Orchestration Layer coordinates multi-step workflows that span multiple bounded contexts. It is responsible for saga management (long-running transactions across contexts), process management (stateful workflow coordination), and task scheduling (deferred and recurring tasks).
+588:
+589:**Components:**
+590:- Workflow engine — executes configured workflows across bounded contexts
+591:- Saga coordinator — manages long-running transactions with compensation
+592:- Process manager — coordinates stateful processes that span multiple contexts
+593:- Task scheduler — schedules deferred and recurring tasks
+594:
+595:**Contracts:**
+596:- Consumes: Edge Layer requests; Domain Layer commands; Platform Services (Configuration, Audit)
+597:- Produces: coordinated commands to Domain Layer; events to Event-Driven Concepts
+598:- Does not: hold business state beyond workflow state; access Data Layer directly except for workflow state
+599:
+600:**Governing principles:** P4 (Loose Coupling), P5 (Consistency for Clinical Data), P13 (Auditability), P16 (Composability)
+601:
+602:### 6.5 Domain Layer
+603:
+604:The Domain Layer contains the bounded contexts that implement clinical, operational, financial, and administrative logic. This is the core of the platform — where healthcare semantics live. The Domain Layer is organized around bounded contexts (Section 7), each of which is a cohesive area of domain responsibility.
+605:
+606:**Components:**
+607:- Bounded contexts — 19 contexts covering clinical, operational, financial, administrative, and platform domains (detailed in Section 7)
+608:- Each context exposes commands, queries, events, and configuration schemas as contracts
+609:- Contexts communicate through contracts, not through direct data access
+610:
+611:**Contracts:**
+612:- Consumes: Orchestration Layer commands; Platform Services; Integration Layer adapters
+613:- Produces: domain events; query results; audit records
+614:- Does not: access other contexts' data directly; bypass Platform Services for cross-cutting concerns
+615:
+616:**Governing principles:** P1 (Healthcare Safety), P2 (Configuration Before Customization), P4 (Loose Coupling), P8 (Bounded Contexts Stable), P16 (Composability)
+617:
+618:### 6.6 Platform Services Layer
+619:
+620:The Platform Services Layer contains cross-cutting services consumed by all other layers. These services are primitives, not features — they are the foundation on which the rest of the platform is built. Platform Services are multi-tenant by default and are governed by the same architectural rigour as the Domain Layer.
+621:
+622:**Components:**
+623:- Identity & Access (IAM) — authentication, authorization, identity, session management
+624:- Configuration — configuration management, validation, versioning, audit
+625:- Audit — audit trail, audit query, audit reporting
+626:- Feature Flags — flag management, evaluation, lifecycle
+627:- Localization — language, calendar, regulatory framework adaptation
+628:- Notifications — notification dispatch across channels
+629:
+630:**Contracts:**
+631:- Consumes: Data Layer for state; Configuration for service configuration
+632:- Produces: cross-cutting services consumed by all other layers
+633:- Does not: contain domain logic; access Domain Layer directly
+634:
+635:**Governing principles:** P1 (Healthcare Safety), P10 (Multi-Tenancy), P13 (Auditability), P15 (Observability)
+636:
+637:### 6.7 Integration Layer
+638:
+639:The Integration Layer connects the platform to external systems — laboratory systems, imaging systems, pharmacy systems, insurance systems, government systems, medical devices, and other healthcare software. The Integration Layer is consumed by the Domain Layer through defined contracts; it does not expose external systems directly to the Experience Layer.
+640:
+641:**Components:**
+642:- Integration connectors — adapters to specific external systems
+643:- Partner surfaces — surfaces exposed by the platform for partner consumption
+644:- Healthcare standards support — support for recognized healthcare integration standards
+645:- External system registry — registry of integrated external systems per tenant
+646:
+647:**Contracts:**
+648:- Consumes: Domain Layer requests for external system interaction; Platform Services (Audit, Configuration)
+649:- Produces: external system responses to Domain Layer; events from external systems
+650:- Does not: contain business logic; bypass Platform Services for audit and configuration
+651:
+652:**Governing principles:** P4 (Loose Coupling), P9 (Extensibility), P12 (Open Standards), P13 (Auditability)
+653:
+654:### 6.8 Data Layer
+655:
+656:The Data Layer contains the durable state of the platform. It is segmented by data class — transactional, analytical, cache, object, and audit — with each class served by an appropriate store type. The segmentation is a direct consequence of Principle P5 (Consistency Over Availability for Clinical Data) and Principle P13 (Auditability), which require different store characteristics for different data classes.
+657:
+658:**Components:**
+659:- Transactional store — clinical, operational, financial data with strong consistency
+660:- Analytical store — aggregated, historical data for reporting and analytics
+661:- Cache store — ephemeral data for performance
+662:- Object store — documents, images, exports
+663:- Audit store — immutable audit trail
+664:
+665:**Contracts:**
+666:- Consumes: queries and commands from Domain Layer and Platform Services
+667:- Produces: query results; persistence confirmations; audit records
+668:- Does not: contain business logic; expose data outside its tenant scope
+669:
+670:**Governing principles:** P1 (Healthcare Safety), P5 (Consistency for Clinical Data), P13 (Auditability), P10 (Multi-Tenancy)
+671:
+672:### 6.9 Offline Substrate
+673:
+674:The Offline Substrate is the platform's local-first foundation. It enables client surfaces to operate offline, with synchronization to the central platform when connectivity is available. The Offline Substrate is a first-class architectural concern, not a fallback mode.
+675:
+676:**Components:**
+677:- Local store — durable local state on client devices
+678:- Sync engine — bidirectional synchronization with the central platform
+679:- Conflict resolution — resolution of conflicts between local and central state
+680:- Offline audit — local audit trail that synchronizes with the central audit trail
+681:
+682:**Contracts:**
+683:- Consumes: client actions; central platform state when available
+684:- Produces: local query results; synchronization events to central platform
+685:- Does not: bypass conflict resolution; compromise audit completeness
+686:
+687:**Governing principles:** P1 (Healthcare Safety), P5 (Consistency for Clinical Data), P11 (Offline-First), P13 (Auditability)
+688:
+689:### 6.10 Layer Independence
+690:
+691:The eight layers are independent in responsibility but coupled in execution. The independence is what allows each layer to evolve without forcing evolution of the others — the Edge Layer can adopt new authentication mechanisms without changing the Domain Layer; the Data Layer can adopt new store technologies without changing the Domain Layer; the Offline Substrate can adopt new sync strategies without changing the Experience Layer.
+692:
+693:The coupling is through contracts. Each layer's contracts are versioned and evolve through documented deprecation. Breaking contract changes are architectural decisions ratified through ADRs, not casual implementation choices.
+694:
+695:### 6.11 Layer Evolution
+696:
+697:Layers evolve at different rates. The Experience Layer evolves quickly, as user-experience expectations shift. The Domain Layer evolves slowly, as healthcare semantics are stable. The Data Layer evolves at the pace of data infrastructure, which is faster than domain semantics but slower than user-experience fashion. The Offline Substrate evolves at the pace of connectivity infrastructure.
+698:
+699:The varying evolution rates are why the layered architecture exists. A monolithic architecture forces uniform evolution; a layered architecture allows each layer to evolve at its natural rate. This is a direct consequence of Principle P18 (Decade-Horizon Viability) — the architecture must absorb evolution without rework.
+700:
+701:---
+702:
+703:## 7. Domain-Driven Architecture
+704:
+705:### 7.1 Purpose of This Section
+706:
+707:This section defines the platform's domain-driven architecture. It identifies the bounded contexts that organize the platform's domain logic, the responsibilities of each context, and the relationships among contexts. Bounded contexts are the primary structural organizing principle of the Domain Layer (Section 6.5) and are governed by Principle P8 (Bounded Contexts Are Stable).
+708:
+709:### 7.2 Bounded Context Catalogue
+710:
+711:The platform is organized into 19 bounded contexts. The contexts are stable; they are not reorganized to accommodate features. New contexts are added only through deliberate architectural decision ratified by an ADR.
+712:
+713:| Code | Bounded Context | Category | Responsibility |
+714:|---|---|---|---|
+715:| BC01 | Patient | Clinical | Patient identity, demographics, consent, medical record lifecycle |
+716:| BC02 | Encounter | Clinical | Encounter management across outpatient, inpatient, emergency, telehealth |
+717:| BC03 | Clinical Documentation | Clinical | Clinical notes, structured documentation, templates, assessments |
+718:| BC04 | Orders & Results | Clinical | Order entry, result management, decision support, result reporting |
+719:| BC05 | Pharmacy | Clinical | Medication management, dispensing, inventory, clinical pharmacy |
+720:| BC06 | Scheduling | Operational | Appointment scheduling, resource scheduling, queue management |
+721:| BC07 | Billing | Financial | Billing, claims, payments, insurance submission |
+722:| BC08 | Accounting | Financial | General ledger, accounts payable, accounts receivable, financial reporting |
+723:| BC09 | Inventory | Operational | Inventory management, supply chain, stock movement |
+724:| BC10 | Workforce | Administrative | Workforce scheduling, time and attendance, credentials |
+725:| BC11 | CRM | Administrative | Patient relationships, outreach, communications |
+726:| BC12 | HR | Administrative | Human resources, payroll, employee records |
+727:| BC13 | Documents | Operational | Document management, document templates, document workflow |
+728:| BC14 | Notifications | Operational | Notifications, reminders, alerts across channels |
+729:| BC15 | Identity & Access | Platform | Authentication, authorization, identity, session management |
+730:| BC16 | Configuration | Platform | Configuration management, validation, versioning, audit |
+731:| BC17 | Audit | Platform | Audit trail, audit query, audit reporting |
+732:| BC18 | Feature Flags | Platform | Flag management, evaluation, lifecycle |
+733:| BC19 | Localization | Platform | Language, calendar, regulatory framework adaptation |
+734:
+735:### 7.3 Context Relationships
+736:
+737:Contexts relate to each other through defined relationships. The relationships are governed by the dependency rules in Section 13.4 and by the following principles:
+738:
+739:- **Customer-Supplier.** Where one context consumes another context's data or capability, the consuming context is the customer and the providing context is the supplier. The supplier defines the contract; the customer consumes it.
+740:- **Conformist.** Where one context must conform to another context's model (e.g., a context that consumes a standard healthcare coding system conforms to the coding system's model).
+741:- **Anticorruption Layer.** Where one context consumes an external system's data, an anticorruption layer translates the external model to the platform's model, preventing external model leakage.
+742:- **Shared Kernel.** Where multiple contexts share a small, explicit, versioned kernel of common concepts (e.g., patient identity), the kernel is governed by joint ownership and explicit change control.
+743:
+744:### 7.4 Context Contracts
+745:
+746:Each context exposes four contract types:
+747:
+748:| Contract Type | Description |
+749:|---|---|
+750:| Commands | Requests to perform an action that changes state |
+751:| Queries | Requests to retrieve state without changing it |
+752:| Events | Notifications that something has happened in the context |
+753:| Configuration Schemas | Declarative definitions of the context's configurable behaviour |
+754:
+755:Contracts are versioned. Breaking changes follow the platform's deprecation policy, with old versions supported through a defined transition window. Contracts are documented as part of the definition of done for a context; undocumented contracts are defective.
+756:
+757:### 7.5 Context Internals
+758:
+759:Within a context, the internal structure follows domain-driven design patterns. The internals are not constrained by this document; they are constrained by `MODULE_ARCHITECTURE.md` and `SOFTWARE_ARCHITECTURE.md`. The constraint at this level is that the internals must honour the context's contracts and must not bypass the platform's cross-cutting concerns (security, audit, observability, configuration).
+760:
+761:Contexts own their data. A context's data is not accessed directly by other contexts; it is accessed through the context's query contracts. Direct data access across context boundaries is a defect and is rejected at code review.
+762:
+763:### 7.6 Context Stability
+764:
+765:Contexts are stable (Principle P8). Stability is achieved by organizing contexts around enduring domain responsibilities rather than around features. A feature is accommodated within the existing context structure; a context is not created or reorganized to accommodate a feature.
+766:
+767:New contexts are added only when an enduring domain responsibility is identified that does not fit any existing context. The addition is ratified by an ADR, with the rationale explicit and the alternatives considered recorded. Context removal is rare and is undertaken only with multi-year transition support for affected modules.
+768:
+769:### 7.7 Context and Module Alignment
+770:
+771:Bounded contexts and modules (Section 13) are related but distinct. A bounded context is a domain responsibility area; a module is a deployable unit that implements one or more bounded contexts. In Ibn Hayan, the typical mapping is one-to-one — one module implements one bounded context — but the architecture allows for one-to-many and many-to-one mappings where justified by deployment or evolution requirements.
+772:
+773:The current module catalogue (Section 19 of `PRODUCT_BIBLE.md`) is aligned one-to-one with the bounded context catalogue, with two exceptions: the Inventory context (BC09) is implemented within the Pharmacy module (M05) for pharmacy inventory and as a separate module for non-pharmacy inventory; and the Notifications context (BC14) is implemented as a dedicated module (M08) with consumption by all other modules.
+774:
+775:### 7.8 Context Evolution
+776:
+777:Contexts evolve through contract versioning, not through reorganization. A context's contracts evolve to accommodate new capability; the context's boundaries remain stable. Contract evolution is governed by the platform's deprecation policy, with old contracts supported through a defined transition window.
+778:
+779:Where a context's responsibility has materially changed — for example, through the emergence of a new sub-domain that warrants its own context — the change is ratified by an ADR, with the new context's boundaries explicitly defined and the transition plan documented.
+780:
+781:---
+782:
+783:## 8. Configuration-Driven Architecture
+784:
+785:### 8.1 Purpose of This Section
+786:
+787:This section defines the platform's configuration-driven architecture. Configuration is the platform's primary adaptation mechanism (Principle P2) and is a first-class architectural concern with its own layer, its own validation framework, and its own audit trail. The detailed treatment of configuration internals is in `CONFIGURATION_ARCHITECTURE.md`; this section defines the architectural commitments that govern configuration.
+788:
+789:### 8.2 Configuration as Architectural Concern
+790:
+791:Configuration is not a settings file; it is an architectural concern. The platform's behaviour is, in principle, configurable — every behavioural decision of consequence can be expressed through declarative configuration without source-level modification. The configuration surface is large, versioned, validated, and audited.
+792:
+793:The configuration-driven architecture has the following consequences:
+794:
+795:- The platform has a layered configuration model with explicit precedence (Section 15).
+796:- Every module exposes its configuration surface as a documented contract.
+797:- Configuration changes are validated before application, with five validation rule categories (Section 15.6).
+798:- Configuration changes are versioned and audited, with rollback supported.
+799:- Configuration governance is a customer-scoped practice supported by platform tooling.
+800:
+801:### 8.3 Configuration Surface
+802:
+803:The configuration surface is the complete set of configurable behaviours exposed by the platform. The surface is organized by module, by capability, and by scope. Each module's configuration surface is documented as part of the module's contract (Section 13).
+804:
+805:The configuration surface is bounded by what can be expressed without source-level modification. Behaviours that would require source modification are either out of scope or candidates for platform evolution through the extension surface (Section 22). The boundary between configuration and source is explicit and is governed by the platform's extensibility strategy.
+806:
+807:### 8.4 Configuration and Bounded Contexts
+808:
+809:Each bounded context exposes its own configuration schema as part of its contract. The configuration schema defines what aspects of the context's behaviour are configurable, what the configuration keys are, what the valid values are, and what the precedence rules are.
+810:
+811:Configuration schemas are versioned alongside the context's other contracts. Breaking changes to configuration schemas follow the platform's deprecation policy, with old schemas supported through a defined transition window.
+812:
+813:### 8.5 Configuration and Multi-Tenancy
+814:
+815:Configuration is tenant-scoped. Each tenant has its own configuration, layered on top of the platform default and the edition configuration. The layered model (Section 15) ensures that tenant configuration inherits from higher-scope layers, with tenant-specific overrides applied at the tenant layer.
+816:
+817:Multi-tenancy and configuration together produce the platform's adaptation model: one code base, one configuration framework, many tenants, each with their own configuration that adapts the platform to their operational reality without forking the code.
+818:
+819:### 8.6 Configuration and Audit
+820:
+821:Every configuration change is audited. The audit record includes the configurator, the time, the scope, the previous value, the new value, and the validation result. Configuration audit records are immutable and are the basis for compliance reporting and incident investigation.
+822:
+823:Configuration audit is distinct from operational audit (Section 27). Operational audit records what users did; configuration audit records how the platform was configured to behave. Both are required for accountability, and both are governed by Principle P13 (Auditability as Primitive).
+824:
+825:### 8.7 Configuration Governance
+826:
+827:Configuration governance is the practice of managing configuration change over time. Governance includes change approval workflows, compliance review for regulatory-impacting changes, sandbox testing before production application, and change communication to affected users.
+828:
+829:Governance is customer-scoped. The platform provides the tooling and the audit trail; the customer defines the governance workflow within the platform's framework. The platform does not impose a specific governance workflow; it imposes the framework within which governance is exercised.
+830:
+831:---
+832:
+833:## 9. Modular Architecture
+834:
+835:### 9.1 Purpose of This Section
+836:
+837:This section defines the platform's modular architecture at the system level. Modules are the unit of composition, the unit of enablement, and the unit of dependency management. The detailed treatment of module internals is in `MODULE_ARCHITECTURE.md`; this section defines the architectural commitments that govern modules.
+838:
+839:### 9.2 Module Definition
+840:
+841:A module is a deployable unit that implements one or more bounded contexts. A module has:
+842:
+843:- Explicit boundaries that align with bounded contexts
+844:- Explicit contracts (commands, queries, events, configuration schemas)
+845:- Explicit dependencies on other modules
+846:- Independent enablement per tenant, subject to dependency constraints
+847:- Versioned evolution with documented deprecation
+848:
+849:Modules are not microservices by default. The platform's default deployment is a modular monolith — modules are deployed together, communicating through in-process contracts. Modules may be extracted to separate services when justified by operational requirements, but extraction is a deployment choice, not an architectural commitment.
+850:
+851:### 9.3 Module Catalogue
+852:
+853:The module catalogue is defined in Section 19 of `PRODUCT_BIBLE.md`. The catalogue comprises 19 modules aligned with the 19 bounded contexts defined in Section 7 of this document. The alignment is one-to-one in most cases, with documented exceptions for contexts that span multiple modules or modules that span multiple contexts.
+854:
+855:### 9.4 Module Dependency Rules
+856:
+857:Module dependencies follow the bounded context dependencies and are governed by the following rules:
+858:
+859:| Rule | Description |
+860:|---|---|
+861:| Acyclic | Module dependencies are acyclic; circular dependencies are forbidden |
+862:| Explicit | Dependencies are explicit, documented, and validated at build time |
+863:| Contract-based | Modules communicate through contracts, not through direct data access |
+864:| Hierarchical | Platform modules may be depended upon by all other modules; category-specific modules depend on Platform modules and on Patient (M01) where appropriate |
+865:| Versioned | Dependencies are versioned; breaking changes follow the deprecation policy |
+866:
+867:The dependency graph is documented in `MODULE_ARCHITECTURE.md`. The graph is validated continuously; violations are treated as build failures.
+868:
+869:### 9.5 Module Communication
+870:
+871:Modules communicate through four mechanisms:
+872:
+873:| Mechanism | Description | When Used |
+874:|---|---|---|
+875:| In-process commands | Synchronous command invocation within the same deployment | Default for modular monolith deployment |
+876:| Events | Asynchronous event publication and subscription | When the consuming module does not need synchronous response |
+877:| Queries | Synchronous query invocation | When the consuming module needs to read another module's state |
+878:| Integration contracts | Communication through the Integration Layer | When the consuming module is an external system |
+879:
+880:Direct data access across module boundaries is forbidden. A module that accesses another module's data store directly is defective and is rejected at code review.
+881:
+882:### 9.6 Module Lifecycle
+883:
+884:Modules have a lifecycle that governs their evolution:
+885:
+886:| Stage | Code | Description |
+887:|---|---|---|
+888:| Candidate | LC1 | Module under design; not available to customers |
+889:| Pilot | LC2 | Module deployed to pilot customers for validation |
+890:| General Availability | LC3 | Module available to all customers per edition packaging |
+891:| Mature | LC4 | Module in steady-state; long-term support commitment |
+892:| Deprecation Candidate | LC5 | Module considered for deprecation; transition planning underway |
+893:| Deprecated | LC6 | Module deprecated; new customers cannot enable; existing customers supported through transition window |
+894:| Retired | LC7 | Module removed from the platform; transition window closed |
+895:
+896:Lifecycle transitions are ratified by the Architecture Council. Transitions are recorded in the module's documentation and in the platform's CHANGELOG.
+897:
+898:### 9.7 Module and Edition Packaging
+899:
+900:Modules are packaged into editions per Section 16 of `PRODUCT_BIBLE.md`. Edition packaging determines which modules are enabled by default for a customer; it does not modify module internals. All editions run the same code; editions differ only in configuration.
+901:
+902:A module that is not in a customer's edition is not enabled for that customer, but it is still present in the code base. Edition packaging is a configuration concern, not a code branching concern. This is a direct consequence of Principle P3 (One Platform, Many Organizations).
+903:
+904:### 9.8 Module Extension
+905:
+906:Modules are extended through the platform's extension surface (Section 22), not through source-level modification. Extension points are first-class architectural concerns with their own contracts, their own validation, and their own lifecycle.
+907:
+908:An extension that requires modifying a module's source is, by definition, customization, and is rejected by Principle P2. Extensions that cannot be expressed through the extension surface are candidates for platform evolution, not for customer-specific customization.
+909:
+910:---
+911:
+912:## 10. Multi-Tenant Architecture
+913:
+914:### 10.1 Purpose of This Section
+915:
+916:This section defines the platform's multi-tenant architecture. Multi-tenancy is the default delivery model (Principle P10) and is the architectural expression of Principle P3 (One Platform, Many Organizations). The detailed treatment of multi-tenant operations is in the operational documentation; this section defines the architectural commitments that govern multi-tenancy.
+917:
+918:### 10.2 Tenant Isolation Levels
+919:
+920:The platform supports three isolation levels, available as deployment choices but never as code branches:
+921:
+922:| Isolation Level | Code | Description | Typical Use |
+923:|---|---|---|---|
+924:| Logical | IL1 | Shared compute, shared storage, logical tenant separation | Default; serves the majority of customers |
+925:| Logical with Dedicated Compute | IL2 | Shared storage, dedicated compute per tenant | Customers with specific performance or compliance needs |
+926:| Physical | IL3 | Dedicated infrastructure, single-tenant deployment | Customers with regulatory or contractual physical-separation requirements |
+927:
+928:All three isolation levels run the same code, the same configuration model, and the same operational runtime. The choice of isolation level is a deployment decision (Section 23), not a product or architectural decision.
+929:
+930:### 10.3 Tenant Isolation Enforcement
+931:
+932:Tenant isolation is enforced at every layer of the platform:
+933:
+934:| Layer | Isolation Enforcement |
+935:|---|---|
+936:| Experience | User sessions are scoped to a single tenant; cross-tenant access is forbidden |
+937:| Edge | Every request is tenant-scoped; requests without tenant context are rejected |
+938:| Orchestration | Workflows are tenant-scoped; cross-tenant workflow steps are forbidden |
+939:| Domain | Every command, query, and event carries tenant context; cross-tenant data access is forbidden |
+940:| Platform Services | Tenant context is propagated through all service calls |
+941:| Integration | Integration credentials are tenant-scoped; cross-tenant integration is forbidden |
+942:| Data | Data is partitioned by tenant; queries are scoped to a single tenant |
+943:| Offline Substrate | Local stores are tenant-scoped; cross-tenant offline operation is forbidden |
+944:
+945:A module or component that does not enforce tenant isolation is defective and is not shipped. Tenant isolation is not a feature; it is a primitive (Principle P10).
+946:
+947:### 10.4 Tenant Lifecycle
+948:
+949:Tenants have a lifecycle that governs their creation, operation, and decommissioning:
+950:
+951:| Stage | Code | Description |
+952:|---|---|---|
+953:| Provisioned | TL1 | Tenant created; default configuration applied |
+954:| Onboarding | TL2 | Customer-specific configuration applied; first encounter targeted |
+955:| Active | TL3 | Tenant in steady-state operation |
+956:| Expansion | TL4 | Tenant expanding scope — additional facilities, modules, specialties |
+957:| Suspension | TL5 | Tenant suspended; data preserved |
+958:| Offboarding | TL6 | Tenant being decommissioned; data export executed |
+959:| Decommissioned | TL7 | Tenant removed; data retention period observed |
+960:
+961:Tenant lifecycle transitions are governed by documented processes. Transitions are auditable, with the audit trail showing who initiated the transition, when, and with what authorization.
+962:
+963:### 10.5 Tenant Configuration Inheritance
+964:
+965:Tenant configuration inherits from the platform default and from the edition, with tenant-level configuration overriding as defined in Section 15. Tenants within a customer may inherit from a customer-level baseline, enabling a customer to define common configuration once and apply it across multiple tenants.
+966:
+967:Inheritance is explicit and documented. A customer's multi-tenant configuration is auditable end-to-end; the audit trail shows which configuration was applied at which layer for any given tenant at any given time.
+968:
+969:### 10.6 Tenant Data Residency
+970:
+971:Tenant data residency is governed by the customer's contract and by the regulatory framework in force for the tenant's region. The platform supports regional data residency — a tenant's data is stored in the region specified by the customer's contract, and is not moved across regions without explicit authorization.
+972:
+973:Data residency is enforced at the storage layer. A tenant's data is partitioned by region, and access to data is governed by the tenant's region. Cross-region data access is permitted only for documented operational reasons (e.g., disaster recovery) and is auditable.
+974:
+975:### 10.7 Tenant Operational Isolation
+976:
+977:Tenant operational isolation ensures that one tenant's operational behaviour does not affect another tenant. A tenant that generates high load does not degrade service for other tenants; a tenant that experiences an operational incident does not cause incidents for other tenants. Operational isolation is achieved through resource partitioning, rate limiting, and graceful degradation under load.
+978:
+979:Operational isolation is not absolute. The platform shares infrastructure across tenants, and shared infrastructure has finite capacity. The platform's scalability strategy (Section 21) is designed to maintain operational isolation under normal and peak load, with documented degradation behaviour under extreme load.
+980:
+981:---
+982:
+983:## 11. Organization Hierarchy
+984:
+985:### 11.1 Purpose of This Section
+986:
+987:This section defines the organizational hierarchy that the platform supports. The hierarchy governs how a customer's organizational structure is represented in the platform, how configuration inherits through the hierarchy, and how permissions are scoped through the hierarchy. The hierarchy is the structural backbone for multi-facility and multi-region operation.
+988:
+989:### 11.2 Hierarchy Levels
+990:
+991:The platform supports a five-level organizational hierarchy:
+992:
+993:| Level | Code | Description |
+994:|---|---|---|
+995:| Customer | H1 | The organizational entity that holds the commercial relationship with Ibn Hayan |
+996:| Organization Unit | H2 | A major division within the customer (e.g., a regional health authority, a hospital network) |
+997:| Facility | H3 | A physical or logical facility where healthcare is delivered (e.g., a clinic, a hospital) |
+998:| Department | H4 | A department within a facility (e.g., cardiology department, emergency department) |
+999:| Care Team | H5 | A care team within a department (e.g., a primary care team, an intensive care team) |
+1000:
+1001:The hierarchy is not mandatory in full. A solo practitioner operates with only the Customer and Facility levels. A small practice operates with Customer, Facility, and Department levels. A hospital network operates with all five levels. The platform's configuration surface accommodates partial hierarchy use.
+1002:
+1003:### 11.3 Hierarchy and Configuration Inheritance
+1004:
+1005:Configuration inherits through the organizational hierarchy, with higher levels providing defaults and lower levels overriding as needed. The inheritance is governed by the configuration layer model (Section 15) and is documented in `CONFIGURATION_ARCHITECTURE.md`.
+1006:
+1007:The hierarchy provides natural configuration layers:
+1008:
+1009:- Customer-level configuration applies to all organization units, facilities, departments, and care teams within the customer.
+1010:- Organization-unit-level configuration applies to all facilities, departments, and care teams within the organization unit.
+1011:- Facility-level configuration applies to all departments and care teams within the facility.
+1012:- Department-level configuration applies to all care teams within the department.
+1013:- Care-team-level configuration applies to the care team.
+1014:
+1015:Inheritance is explicit. A configuration applied at a higher level propagates to lower levels unless overridden. Overrides are validated, versioned, and auditable.
+1016:
+1017:### 11.4 Hierarchy and Permission Scoping
+1018:
+1019:Permissions are scoped through the organizational hierarchy. A role assigned at a higher level applies to lower levels unless restricted; a role assigned at a lower level does not propagate upward. Scoping is governed by the permission philosophy (Section 21 of `PRODUCT_BIBLE.md`) and is implemented by the Identity & Access module (M14).
+1020:
+1021:Permission scoping is critical for healthcare operations. A clinician seeing patients in clinic A does not automatically have access to patients in clinic B, even within the same organization. The permission framework enforces scoping at the action level, not at the page level; a clinician without read permission on a patient cannot access that patient's record through any surface.
+1022:
+1023:### 11.5 Hierarchy and Data Residency
+1024:
+1025:The organizational hierarchy interacts with data residency for multi-region customers. A facility in one region operates under that region's regulatory framework, with data residency enforced at the storage layer. A facility in another region operates under its own regulatory framework.
+1026:
+1027:The hierarchy allows a customer to operate across regions within a single tenant, with regional variation expressed through facility-level configuration and facility-level data residency. This is a direct consequence of Principle P17 (Regional Adaptation Without Forking).
+1028:
+1029:### 11.6 Hierarchy Evolution
+1030:
+1031:Organizational hierarchies evolve as customers grow, merge, reorganize, or divest. The platform's hierarchy supports evolution through:
+1032:
+1033:- **Addition** of new organization units, facilities, departments, or care teams
+1034:- **Reorganization** of the hierarchy (e.g., moving a facility from one organization unit to another)
+1035:- **Merge** of hierarchies (e.g., when two customers merge)
+1036:- **Divestiture** of hierarchy portions (e.g., when a customer divests a facility)
+1037:
+1038:Hierarchy evolution is a configuration operation, not a code change. Evolution is auditable, with the audit trail showing who initiated the change, when, and with what authorization. Evolution may trigger data migration (e.g., when a facility moves to a different region), with migration governed by documented processes.
+1039:
+1040:### 11.7 Hierarchy and Reporting
+1041:
+1042:Reporting respects the organizational hierarchy. Reports can be generated at any hierarchy level, with roll-up to higher levels and drill-down to lower levels. Reporting at the customer level includes all organization units, facilities, departments, and care teams within the customer. Reporting at the facility level includes all departments and care teams within the facility.
+1043:
+1044:Hierarchy-respecting reporting is critical for healthcare operations. A clinical leader needs to see reporting across their scope of authority; a facility administrator needs to see reporting for their facility; a care-team lead needs to see reporting for their care team. The platform's reporting architecture (Section 28) supports hierarchy-respecting reporting as a first-class capability.
+1045:
+1046:---
+1047:
+1048:## 12. Clinic Hierarchy
+1049:
+1050:### 12.1 Purpose of This Section
+1051:
+1052:This section defines the clinic hierarchy that the platform supports. The clinic hierarchy governs how clinical work is organized within a facility, distinct from the organizational hierarchy (Section 11) which governs administrative structure. The clinic hierarchy is the operational expression of healthcare delivery within the platform.
+1053:
+1054:### 12.2 Clinic Hierarchy Levels
+1055:
+1056:The clinic hierarchy operates within the facility level of the organizational hierarchy and comprises three levels:
+1057:
+1058:| Level | Code | Description |
+1059:|---|---|---|
+1060:| Clinic Type | CH1 | The type of clinical service delivered (e.g., general practice, cardiology, emergency) |
+1061:| Service Line | CH2 | A grouping of related clinic types (e.g., primary care service line, specialty care service line) |
+1062:| Care Episode | CH3 | A discrete clinical episode for a patient within a clinic type (e.g., a cardiology consultation, an emergency visit) |
+1063:
+1064:The clinic hierarchy is orthogonal to the organizational hierarchy. A single facility may operate multiple clinic types, organized into service lines, with care episodes occurring within each clinic type. The clinic hierarchy is governed by the clinic type catalogue (Section 18 of `PRODUCT_BIBLE.md`).
+1065:
+1066:### 12.3 Clinic Type Configuration Overlays
+1067:
+1068:Each clinic type has a configuration overlay that adjusts the platform's default configuration to match the clinic type's operational reality. Overlays cover encounter templates, documentation structure, order sets, role definitions, permission defaults, and reporting views.
+1069:
+1070:Overlays are layered on top of the organizational hierarchy configuration. The precedence is:
+1071:
+1072:1. Platform default (lowest)
+1073:2. Edition
+1074:3. Customer
+1075:4. Organization unit
+1076:5. Facility
+1077:6. Department
+1078:7. Care team
+1079:8. Clinic type overlay
+1080:9. User
+1081:10. Session (highest)
+1082:
+1083:The clinic type overlay is applied between the care-team level and the user level, ensuring that clinic-type-specific configuration applies regardless of the organizational position, but can be overridden at the user and session levels for individual practitioner preferences.
+1084:
+1085:### 12.4 Service Lines
+1086:
+1087:Service lines group related clinic types for operational and reporting purposes. A primary care service line may include general practice, family medicine, and internal medicine clinic types. A specialty care service line may include cardiology, dermatology, and endocrinology clinic types. An emergency service line may include emergency department and urgent care clinic types.
+1088:
+1089:Service lines are not a structural level of the organizational hierarchy; they are a clinical grouping within a facility. Service lines are used for reporting, for resource allocation, and for clinical governance. Service lines do not affect permission scoping, which is governed by the organizational hierarchy.
+1090:
+1091:### 12.5 Care Episodes
+1092:
+1093:Care episodes are discrete clinical events within a clinic type. A care episode may be a routine consultation, an emergency visit, an inpatient admission, a surgical procedure, or a telehealth encounter. Care episodes are the primary unit of clinical work and are governed by the Encounter bounded context (BC02).
+1094:
+1095:Care episodes are linked to patients through the Patient bounded context (BC01), to orders and results through the Orders & Results bounded context (BC04), and to documentation through the Clinical Documentation bounded context (BC03). The relationships among these contexts are governed by the bounded context relationships defined in Section 7.3.
+1096:
+1097:### 12.6 Clinic Hierarchy and the Encounter
+1098:
+1099:The encounter is the central organizing entity of the platform's clinical data model. Every clinical action — assessment, order, result, medication, observation — is associated with an encounter, which is associated with a patient, which is associated with a facility, which is associated with a customer. The encounter-centred data model is a direct consequence of Design Principle D-1 (Healthcare First, Architecture Second) and is the architectural expression of healthcare-native design.
+1100:
+1101:The encounter's position in the clinic hierarchy determines the configuration overlay applied, the encounter template used, the order sets available, and the documentation structure required. The encounter's position in the organizational hierarchy determines the permission scope applied and the reporting roll-up applied.
+1102:
+1103:---
+1104:
+1105:## 13. Module Architecture
+1106:
+1107:### 13.1 Purpose of This Section
+1108:
+1109:This section defines the platform's module architecture at the system level. The detailed treatment of module internals — contracts, dependencies, communication patterns, versioning, extension points — is in `MODULE_ARCHITECTURE.md`. This section defines the architectural commitments that govern module architecture and the relationships among modules.
+1110:
+1111:### 13.2 Module Boundary Principles
+1112:
+1113:Module boundaries are governed by the following principles:
+1114:
+1115:| Principle | Description |
+1116:|---|---|
+1117:| Bounded context alignment | Module boundaries align with bounded context boundaries |
+1118:| Single responsibility | Each module has a single, cohesive responsibility |
+1119:| Explicit contracts | Module boundaries are defined by explicit contracts, not by implementation |
+1120:| Independent evolution | Modules evolve independently, subject to contract compatibility |
+1121:| Acyclic dependencies | Module dependencies are acyclic; circular dependencies are forbidden |
+1122:
+1123:Module boundaries are not determined by feature catalogues, by team organization, or by deployment convenience. They are determined by domain decomposition, which is the basis of the bounded context catalogue (Section 7).
+1124:
+1125:### 13.3 Module Contract Surface
+1126:
+1127:Each module exposes a contract surface that defines how other modules interact with it. The contract surface comprises:
+1128:
+1129:| Contract Type | Description |
+1130:|---|---|
+1131:| Commands | Requests to perform an action that changes state |
+1132:| Queries | Requests to retrieve state without changing it |
+1133:| Events | Notifications that something has happened in the module |
+1134:| Configuration Schemas | Declarative definitions of the module's configurable behaviour |
+1135:
+1136:Contracts are versioned. Breaking changes follow the platform's deprecation policy, with old contracts supported through a defined transition window. Contracts are documented as part of the definition of done for a module; undocumented contracts are defective.
+1137:
+1138:### 13.4 Module Dependency Graph
+1139:
+1140:Module dependencies follow the bounded context dependencies and are governed by the rules in Section 9.4. The high-level dependency direction is:
+1141:
+1142:- Platform modules (M14–M19) depend on each other in defined ways but not on category-specific modules.
+1143:- Administrative modules (M11–M13) depend on Platform modules and on Patient (M01).
+1144:- Financial modules (M09–M10) depend on Platform modules and on Patient (M01) and Encounter (M02).
+1145:- Operational modules (M06–M08) depend on Platform modules and on Patient (M01) and Encounter (M02).
+1146:- Clinical modules (M01–M05) depend on Platform modules; Clinical modules may depend on each other in defined ways.
+1147:
+1148:The full dependency graph is documented in `MODULE_ARCHITECTURE.md` and is validated continuously. Dependency violations are treated as build failures.
+1149:
+1150:### 13.5 Module Communication Patterns
+1151:
+1152:Modules communicate through four patterns, each appropriate to different use cases:
+1153:
+1154:| Pattern | Description | When Used |
+1155:|---|---|---|
+1156:| Synchronous command | The consuming module invokes a command on the providing module and waits for response | When the consuming module needs immediate confirmation |
+1157:| Synchronous query | The consuming module queries the providing module for state | When the consuming module needs to read state |
+1158:| Asynchronous event | The providing module publishes an event that the consuming module subscribes to | When the consuming module does not need immediate response |
+1159:| Outbox pattern | The providing module writes events to an outbox that is reliably delivered to consumers | When event delivery must be reliable, even across failures |
+1160:
+1161:The choice of pattern is governed by the use case's latency requirements, reliability requirements, and coupling tolerance. The platform's module architecture supports all four patterns, with the pattern selected per interaction through architectural decision.
+1162:
+1163:### 13.6 Module Versioning
+1164:
+1165:Modules are versioned independently. Versioning follows semantic versioning principles, with major versions indicating breaking changes, minor versions indicating backward-compatible additions, and patch versions indicating backward-compatible fixes.
+1166:
+1167:Module versioning interacts with contract versioning. A module's contracts may evolve independently of the module's version, with contract versions tracked separately. A module that has multiple contract versions in production must support all of them through their deprecation windows.
+1168:
+1169:### 13.7 Module Extension Points
+1170:
+1171:Modules expose extension points that allow capability to be added without modifying the module's source. Extension points are first-class architectural concerns with their own contracts, their own validation, and their own lifecycle. Extension points are governed by the platform's extensibility strategy (Section 22).
+1172:
+1173:An extension point that requires source modification of the extended module is, by definition, customization, and is rejected by Principle P2. Extensions that cannot be expressed through extension points are candidates for platform evolution, not for customer-specific customization.
+1174:
+1175:### 13.8 Module Isolation Strategy
+1176:
+1177:Modules are isolated from each other through three isolation dimensions:
+1178:
+1179:| Dimension | Description |
+1180:|---|---|
+1181:| Contract isolation | Modules interact only through documented contracts; internal implementation is private |
+1182:| State isolation | Modules own their state; direct data access across module boundaries is forbidden |
+1183:| Failure isolation | A module's failure does not cascade to other modules, except where dependency requires |
+1184:
+1185:Failure isolation is achieved through bulkheading, circuit breaking, and graceful degradation. A module that fails should degrade its own capability without bringing down dependent modules. Dependent modules should handle the failure through fallback behaviour, retry, or user-visible notification.
+1186:
+1187:### 13.9 Module Testing Strategy
+1188:
+1189:Modules are tested at multiple levels:
+1190:
+1191:| Test Level | Description |
+1192:|---|---|
+1193:| Unit tests | Tests of individual module components in isolation |
+1194:| Contract tests | Tests that verify the module's contracts behave as documented |
+1195:| Integration tests | Tests that verify the module's interaction with other modules |
+1196:| End-to-end tests | Tests that verify complete workflows spanning multiple modules |
+1197:| Operational tests | Tests that verify the module's behaviour under operational stress |
+1198:
+1199:Testing strategy is detailed in the testing documentation. The architectural commitment is that modules are testable at all five levels, with contract tests being mandatory for contract evolution.
+1200:
+1201:---
+1202:
+1203:## 14. Feature Flag Strategy
+1204:
+1205:### 14.1 Purpose of This Section
+1206:
+1207:This section defines the platform's feature flag strategy. Feature flags are a first-class architectural concern that enables controlled capability exposure, controlled rollout, and controlled experimentation. The strategy is governed by the configuration-driven architecture (Section 8) and is implemented by the Feature Flags bounded context (BC18).
+1208:
+1209:### 14.2 Feature Flag Types
+1210:
+1211:The platform supports five feature flag types, each with its own use case and lifecycle:
+1212:
+1213:| Flag Type | Code | Description | When Used |
+1214:|---|---|---|---|
+1215:| Release Flag | FF1 | Controls visibility of new capability during rollout | Gradual rollout of new features |
+1216:| Experiment Flag | FF2 | Controls variant assignment for experimentation | A/B testing, multivariate testing |
+1217:| Operational Flag | FF3 | Controls operational behaviour (e.g., enabling a circuit breaker) | Operational response to incidents, degradation control |
+1218:| Permission Flag | FF4 | Controls access to capability for specific tenants or users | Beta access, early access, restricted features |
+1219:| Migration Flag | FF5 | Controls behaviour during data or contract migration | Phased migration between contract versions |
+1220:
+1221:Feature flags are not a substitute for configuration. Flags control binary or near-binary capability exposure; configuration controls continuous behavioural parameters. The distinction is important: a behaviour that should be a configuration key is defective as a feature flag, and vice versa.
+1222:
+1223:### 14.3 Feature Flag Lifecycle
+1224:
+1225:Feature flags have a lifecycle that prevents flag accumulation:
+1226:
+1227:| Stage | Code | Description |
+1228:|---|---|---|
+1229:| Defined | FFL1 | Flag defined; not yet evaluated |
+1230:| Active | FFL2 | Flag in use; evaluation produces a result |
+1231:| Static-True | FFL3 | Flag permanently true; scheduled for removal |
+1232:| Static-False | FFL4 | Flag permanently false; scheduled for removal |
+1233:| Removed | FFL5 | Flag removed from the platform |
+1234:
+1235:The transition from Active to Static-True or Static-False is critical for preventing flag accumulation. A flag that has been at the same value for a defined period is transitioned to static status and scheduled for removal. A flag that has been at Static status for a defined period is removed.
+1236:
+1237:### 14.4 Feature Flag Evaluation
+1238:
+1239:Feature flag evaluation is governed by the following rules:
+1240:
+1241:| Rule | Description |
+1242:|---|---|
+1243:| Tenant-scoped | Flag evaluation produces a result per tenant, not globally |
+1244:| User-scoped | Some flags (FF4) evaluate per user within a tenant |
+1245:| Session-scoped | Some flags (FF2) evaluate per session for experimentation consistency |
+1246:| Deterministic | Flag evaluation is deterministic for a given tenant, user, and session |
+1247:| Auditable | Flag evaluation is auditable, with the result recorded for consequential actions |
+1248:
+1249:Flag evaluation is fast. The evaluation path is optimized to minimize latency impact, as flags may be evaluated on every request. Flags that cannot be evaluated quickly are re-architected or moved to configuration.
+1250:
+1251:### 14.5 Feature Flag Governance
+1252:
+1253:Feature flags are governed by the platform's configuration governance framework (Section 22.7 of `PRODUCT_BIBLE.md`). Flag changes are auditable, with the audit trail showing who changed the flag, when, and with what authorization.
+1254:
+1255:Flag governance distinguishes between flag definition (a platform-level decision) and flag evaluation (a tenant-scoped decision). Flag definition is owned by the platform team; flag evaluation is owned by the customer's system administrator, within the constraints defined by the flag type.
+1256:
+1257:### 14.6 Feature Flag and Configuration Distinction
+1258:
+1259:Feature flags and configuration are distinct architectural concerns:
+1260:
+1261:| Dimension | Feature Flag | Configuration |
+1262:|---|---|---|
+1263:| Cardinality | Binary or near-binary | Continuous |
+1264:| Lifetime | Temporary (until removal) | Permanent |
+1265:| Change frequency | High (per rollout, per experiment) | Low (per operational change) |
+1266:| Use case | Capability exposure | Behavioural parameter |
+1267:| Governance | Platform team primarily | Customer primarily |
+1268:
+1269:A capability that requires continuous parameterization is a configuration key, not a feature flag. A capability that requires binary exposure is a feature flag, not a configuration key. The distinction is enforced at architectural review.
+1270:
+1271:---
+1272:
+1273:## 15. Configuration Strategy
+1274:
+1275:### 15.1 Purpose of This Section
+1276:
+1277:This section defines the platform's configuration strategy. Configuration is the platform's primary adaptation mechanism (Principle P2) and is treated as a first-class architectural concern. The detailed treatment of configuration internals is in `CONFIGURATION_ARCHITECTURE.md`; this section defines the architectural commitments that govern configuration.
+1278:
+1279:### 15.2 Configuration Layer Model
+1280:
+1281:The platform's configuration layer model defines eight layers with explicit precedence:
+1282:
+1283:| Layer | Code | Scope | Typical Owner |
+1284:|---|---|---|---|
+1285:| Platform default | L1 | All customers, all tenants | Ibn Hayan product team |
+1286:| Edition | L2 | All customers on an edition | Ibn Hayan product team |
+1287:| Tenant | L3 | A single customer's tenant | Customer system administrator |
+1288:| Facility | L4 | A facility within a customer | Customer facility administrator |
+1289:| Department | L5 | A department within a facility | Customer department administrator |
+1290:| Care team | L6 | A care team within a department | Customer care team lead |
+1291:| User | L7 | A single user | The user or their delegate |
+1292:| Session | L8 | A single session | The user, transient |
+1293:
+1294:Precedence is from L1 (lowest) to L8 (highest). A configuration at a higher layer overrides a configuration at a lower layer. Overrides are validated, versioned, and auditable. Not all configuration keys are overridable at all layers; some keys are fixed at lower layers for safety or regulatory reasons.
+1295:
+1296:### 15.3 Configuration Key Catalogue
+1297:
+1298:The platform maintains a configuration key catalogue that lists every configuration key exposed by the platform. The catalogue is the canonical reference for what is configurable, what the valid values are, and what the precedence rules are. The catalogue is documented as part of the platform's contract surface.
+1299:
+1300:Configuration keys are namespaced by module and by capability. A key's namespace reflects its owning module and its semantic grouping. The namespace is stable; keys are not renamed casually, and renaming follows the platform's deprecation policy.
+1301:
+1302:### 15.4 Configuration Validation
+1303:
+1304:Every configuration change is validated before it is applied. Validation covers five rule categories:
+1305:
+1306:| Rule Category | Code | Description |
+1307:|---|---|---|
+1308:| Structural | V1 | Configuration conforms to the schema (types, required fields, formats) |
+1309:| Referential | V2 | Configuration references resolve (e.g., a referenced module exists, a referenced role is defined) |
+1310:| Semantic | V3 | Configuration is internally consistent (e.g., a workflow's steps form a valid graph) |
+1311:| Contextual | V4 | Configuration is consistent with its scope (e.g., a facility-level configuration does not contradict a tenant-level invariant) |
+1312:| Regulatory | V5 | Configuration is consistent with the regulatory framework in force for the tenant's region |
+1313:
+1314:A configuration that fails validation is not applied. The validation failure is reported to the configurator with diagnostic information. Validation failures are auditable.
+1315:
+1316:### 15.5 Configuration Versioning
+1317:
+1318:Every configuration change is versioned. The version history is immutable and is the basis for configuration audit, rollback, and change review. Configuration changes can be rolled back to any prior version, with the rollback itself versioned and auditable.
+1319:
+1320:Configuration versioning is the configuration-surface equivalent of source-code versioning. It enables controlled evolution, controlled experimentation, and controlled recovery. A customer that applies a configuration change that produces undesired behaviour can roll back without engineering intervention.
+1321:
+1322:### 15.6 Configuration Audit
+1323:
+1324:Every configuration change is recorded in the audit trail, including the configurator, the time, the scope, the previous value, the new value, and the validation result. Configuration audit records are immutable and are the basis for compliance reporting and for incident investigation.
+1325:
+1326:Configuration audit is distinct from operational audit (Section 27). Operational audit records what users did; configuration audit records how the platform was configured to behave. Both are required for accountability, and both are governed by Principle P13 (Auditability as Primitive).
+1327:
+1328:### 15.7 Configuration Sandbox
+1329:
+1330:The platform supports configuration sandboxes — non-production tenants where configuration changes can be tested before application to production tenants. Sandbox tenants inherit from production tenants, ensuring that sandbox testing reflects production reality.
+1331:
+1332:Configuration sandbox is a critical governance tool. A configuration change that has not been tested in a sandbox is not applied to production, except for emergency changes that follow a documented expedited pathway. The sandbox requirement is a direct consequence of Principle P1 (Healthcare Safety) — untested configuration changes can compromise clinical safety.
+1333:
+1334:### 15.8 Configuration Hot-Reload
+1335:
+1336:The platform supports configuration hot-reload for configuration keys that do not require module restart. Hot-reload enables configuration changes to take effect without service interruption, supporting operational agility.
+1337:
+1338:Hot-reload is not universal. Some configuration keys require module restart, either because the key affects module initialization or because hot-reload would compromise consistency. Keys that require restart are documented as such, and changes to those keys follow a documented deployment pathway.
+1339:
+1340:---
+1341:
+1342:## 16. Workflow Engine Philosophy
+1343:
+1344:### 16.1 Purpose of This Section
+1345:
+1346:This section defines the platform's workflow engine philosophy. The workflow engine is the platform's mechanism for coordinating multi-step processes that span bounded contexts. The philosophy governs how workflows are defined, how they execute, and how they evolve.
+1347:
+1348:### 16.2 Workflow Definition
+1349:
+1350:Workflows are defined declaratively through configuration. A workflow definition specifies the steps, the conditions, the actors, the inputs, the outputs, and the exception handling. Workflow definitions are versioned, validated, and auditable, in keeping with the configuration-driven architecture (Section 8).
+1351:
+1352:Workflow definitions are not code. A workflow that requires source-level implementation is not a workflow; it is a feature. The workflow engine is designed to execute configured workflows, not to host custom code.
+1353:
+1354:### 16.3 Workflow Execution
+1355:
+1356:Workflow execution is governed by the Orchestration Layer (Section 6.4). The workflow engine coordinates the execution of steps across bounded contexts, handling state management, error handling, compensation, and audit.
+1357:
+1358:Workflow execution is:
+1359:
+1360:| Property | Description |
+1361:|---|---|
+1362:| Stateful | Workflow state is durable across execution steps |
+1363:| Auditable | Every workflow step is recorded in the audit trail |
+1364:| Recoverable | Workflows recover from failures, with compensation or retry as configured |
+1365:| Observable | Workflow execution is observable through telemetry |
+1366:| Tenant-scoped | Workflows execute within a single tenant |
+1367:
+1368:### 16.4 Workflow Patterns
+1369:
+1370:The workflow engine supports the following patterns:
+1371:
+1372:| Pattern | Description | When Used |
+1373:|---|---|---|
+1374:| Sequential | Steps execute in sequence | Linear processes (e.g., patient registration) |
+1375:| Parallel | Steps execute in parallel | Concurrent processes (e.g., order placement and insurance verification) |
+1376:| Conditional | Steps execute based on conditions | Decision-driven processes (e.g., triage-driven care pathway) |
+1377:| Looping | Steps repeat based on conditions | Iterative processes (e.g., treatment cycle) |
+1378:| Saga | Long-running transactions with compensation | Multi-step transactions with rollback (e.g., billing workflow) |
+1379:
+1380:The choice of pattern is governed by the workflow's requirements. The workflow engine supports all five patterns, with the pattern selected per workflow through configuration.
+1381:
+1382:### 16.5 Workflow and Bounded Contexts
+1383:
+1384:Workflows coordinate activity across bounded contexts. A workflow step typically invokes a command on a bounded context, waits for the result, and proceeds based on the result. Workflows do not bypass bounded context contracts; they orchestrate contract invocation.
+1385:
+1386:The relationship between workflows and bounded contexts is governed by Principle P4 (Loose Coupling, High Cohesion). Workflows depend on bounded context contracts, not on bounded context internals. A bounded context's contract evolution may affect workflows that depend on it, with the effect managed through the platform's deprecation policy.
+1387:
+1388:### 16.6 Workflow and State Management
+1389:
+1390:Workflow state is managed by the workflow engine, not by the bounded contexts that the workflow coordinates. This separation is critical: bounded contexts do not hold workflow state, and workflows do not hold domain state. The separation preserves bounded context cohesion and workflow engine focus.
+1391:
+1392:Workflow state is durable. A workflow that is interrupted (e.g., by a system failure) can resume from its last durable state. The durability is governed by Principle P5 (Consistency Over Availability for Clinical Data) — workflow state is treated as clinical data when the workflow affects clinical outcomes.
+1393:
+1394:### 16.7 Workflow Evolution
+1395:
+1396:Workflows evolve through configuration versioning. A workflow definition can be revised, with the revision versioned and auditable. Revisions can be rolled back, with rollback itself versioned and auditable.
+1397:
+1398:Workflow evolution interacts with bounded context contract evolution. A bounded context contract change may require workflow definition changes, with the dependency managed through the platform's deprecation policy. The workflow engine supports multiple contract versions, allowing workflows to migrate to new contract versions at their own pace.
+1399:
+1400:---
+1401:
+1402:## 17. State Management Philosophy
+1403:
+1404:### 17.1 Purpose of This Section
+1405:
+1406:This section defines the platform's state management philosophy. State management governs how the platform stores, accesses, and evolves the state that represents its operation. The philosophy is the basis for the data architecture defined in the database documentation.
+1407:
+1408:### 17.2 State Categories
+1409:
+1410:The platform's state is categorized by its characteristics and is stored in different stores accordingly:
+1411:
+1412:| State Category | Characteristics | Store Type |
+1413:|---|---|---|
+1414:| Transactional | Strong consistency, low latency, high write rate | Transactional store |
+1415:| Analytical | Eventual consistency, query-optimized, low write rate | Analytical store |
+1416:| Cache | Ephemeral, low latency, replaceable | Cache store |
+1417:| Object | Large binary, immutable or append-only | Object store |
+1418:| Audit | Immutable, append-only, query-optimized for investigation | Audit store |
+1419:
+1420:The categorization is a direct consequence of Principle P5 (Consistency Over Availability for Clinical Data) and Principle P13 (Auditability). Different state categories have different requirements, and treating them uniformly produces either over-engineered infrastructure or under-rigorous controls.
+1421:
+1422:### 17.3 State and Bounded Contexts
+1423:
+1424:State is owned by bounded contexts. Each bounded context owns its state, and other contexts access that state only through the context's query contracts. Direct data access across context boundaries is a defect.
+1425:
+1426:State ownership is the basis for the platform's modular architecture (Section 9). A bounded context that owns its state can evolve independently of other contexts, subject to contract compatibility. A bounded context that does not own its state is coupled to other contexts' implementations and cannot evolve independently.
+1427:
+1428:### 17.4 State Consistency
+1429:
+1430:State consistency is governed by the state category:
+1431:
+1432:| State Category | Consistency Model |
+1433:|---|---|
+1434:| Transactional | Strong consistency within a bounded context; eventual consistency across contexts |
+1435:| Analytical | Eventual consistency (typically delayed by ETL pipeline) |
+1436:| Cache | Eventual consistency (cache invalidation is best-effort) |
+1437:| Object | Strong consistency for immutable objects; append-only for mutable objects |
+1438:| Audit | Strong consistency (audit records are immutable once written) |
+1439:
+1440:Strong consistency across bounded contexts is achieved through saga coordination (Section 16.4), not through distributed transactions. Distributed transactions are avoided because they introduce coupling and availability constraints that are incompatible with the platform's bounded context model.
+1441:
+1442:### 17.5 State and Multi-Tenancy
+1443:
+1444:State is tenant-scoped. Every state record belongs to a tenant, and access to state is governed by tenant context. State stores enforce tenant scoping at the storage layer; queries that attempt to access state across tenants are rejected.
+1445:
+1446:Tenant scoping is critical for tenant isolation (Section 10.3). A state store that does not enforce tenant scoping is defective and is not shipped.
+1447:
+1448:### 17.6 State and Audit
+1449:
+1450:State changes are auditable. Every consequential state change — a clinical record update, a financial transaction, a configuration change — is recorded in the audit trail, with the audit record capturing the previous state, the new state, the actor, and the time.
+1451:
+1452:The relationship between state and audit is governed by Principle P13 (Auditability as Primitive). Audit is not optional; it is enforced at the platform layer. A state change that is not audited is defective, regardless of the operational convenience of skipping audit.
+1453:
+1454:### 17.7 State Evolution
+1455:
+1456:State evolves through schema migration. Schema migrations are versioned, tested, and applied through documented processes. Migrations that affect production state are exercised in sandbox environments before production application.
+1457:
+1458:State evolution interacts with bounded context contract evolution. A contract change may require a state schema migration, with the migration planned and executed alongside the contract change. The platform's deprecation policy governs the transition window during which both old and new schemas are supported.
+1459:
+1460:---
+1461:
+1462:## 18. Event-Driven Concepts
+1463:
+1464:### 18.1 Purpose of This Section
+1465:
+1466:This section defines the platform's event-driven concepts. Events are a first-class communication mechanism that enables loose coupling, asynchronous processing, and eventual consistency across bounded contexts. The detailed treatment of event internals is in `MODULE_ARCHITECTURE.md`; this section defines the architectural commitments that govern events.
+1467:
+1468:### 18.2 Event Types
+1469:
+1470:The platform supports three event types:
+1471:
+1472:| Event Type | Description | When Used |
+1473:|---|---|---|
+1474:| Domain Event | Notification that something has happened in a bounded context | Default event type for cross-context communication |
+1475:| Integration Event | Notification intended for external system consumption | When external systems need to react to platform events |
+1476:| Audit Event | Notification of an auditable action | When audit recording is event-driven |
+1477:
+1478:Events are categorized by their purpose, not by their content. A domain event and an integration event may carry the same payload but have different consumers and different lifecycle governance.
+1479:
+1480:### 18.3 Event Lifecycle
+1481:
+1482:Events have a lifecycle that governs their production, distribution, and consumption:
+1483:
+1484:| Stage | Code | Description |
+1485:|---|---|---|
+1486:| Produced | EL1 | Event produced by a bounded context |
+1487:| Persisted | EL2 | Event persisted to the event log (outbox pattern) |
+1488:| Distributed | EL3 | Event distributed to subscribers |
+1489:| Consumed | EL4 | Event consumed by a subscriber |
+1490:| Archived | EL5 | Event archived for long-term retention |
+1491:
+1492:The lifecycle is governed by the platform's reliability commitments. An event that is produced must be persisted before the producing transaction is considered complete. An event that is persisted must be distributed to all subscribers. An event that is distributed must be consumed by all subscribers, with consumption failures retried.
+1493:
+1494:### 18.4 Event Reliability
+1495:
+1496:Event reliability is governed by the outbox pattern. A bounded context that produces an event writes the event to an outbox as part of the producing transaction. The outbox is then reliably delivered to subscribers, with delivery guaranteed by the platform's event distribution infrastructure.
+1497:
+1498:The outbox pattern ensures that events are not lost, even in the event of producer failure. A producer that crashes after committing its transaction but before distributing its events will have its events distributed by the outbox processor. This is a direct consequence of Principle P5 (Consistency Over Availability for Clinical Data) — event loss is unacceptable for clinical events.
+1499:
+1500:### 18.5 Event Ordering
+1501:
+1502:Event ordering is governed by the following rules:
+1503:
+1504:| Ordering | Description | When Used |
+1505:|---|---|---|
+1506:| Per-aggregate ordering | Events for the same aggregate are delivered in order | Default for domain events |
+1507:| Per-stream ordering | Events for the same stream are delivered in order | When stream semantics are required |
+1508:| Global ordering | Events are delivered in global order | Rarely used; introduces coupling and performance constraints |
+1509:
+1510:Per-aggregate and per-stream ordering are sufficient for most use cases. Global ordering is avoided because it introduces coupling among unrelated events and constrains performance.
+1511:
+1512:### 18.6 Event Schema Evolution
+1513:
+1514:Event schemas evolve through versioning. A new event version is produced alongside the old version during a transition window, with subscribers migrating to the new version at their own pace. After the transition window, the old version is deprecated and eventually retired.
+1515:
+1516:Event schema evolution is governed by the platform's deprecation policy. Breaking changes to event schemas are architectural decisions ratified through ADRs, with the transition window and migration plan documented.
+1517:
+1518:### 18.7 Event and Audit
+1519:
+1520:Events are auditable. Every event production and consumption is recorded in the audit trail, with the audit record capturing the event type, the producer, the consumer, and the time. Event audit records are immutable and are the basis for compliance reporting and incident investigation.
+1521:
+1522:The relationship between events and audit is governed by Principle P13 (Auditability as Primitive). Events are not a substitute for audit; they are a communication mechanism. Audit captures what happened, including what events were produced and consumed.
+1523:
+1524:---
+1525:
+1526:## 19. Integration Architecture
+1527:
+1528:### 19.1 Purpose of This Section
+1529:
+1530:This section defines the platform's integration architecture. Integration is a first-class architectural concern that connects the platform to external systems. The detailed treatment of integration contracts is in `docs/04_INTEGRATIONS/`; this section defines the architectural commitments that govern integration.
+1531:
+1532:### 19.2 Integration Patterns
+1533:
+1534:The platform supports four integration patterns:
+1535:
+1536:| Pattern | Description | When Used |
+1537:|---|---|---|
+1538:| Synchronous request-response | The platform calls an external system and waits for response | Real-time queries (e.g., insurance eligibility check) |
+1539:| Asynchronous messaging | The platform exchanges messages with an external system through a queue | High-volume, low-latency-tolerant exchanges (e.g., laboratory orders and results) |
+1540:| Event-based | The platform publishes events that external systems consume | Notifications to external systems (e.g., patient registration event) |
+1541:| Batch file exchange | The platform exchanges batch files with an external system on a schedule | Regulatory reporting, bulk data exchange |
+1542:
+1543:The choice of pattern is governed by the integration's latency requirements, volume characteristics, and the external system's capabilities. The platform's integration framework supports all four patterns, with the pattern selected per integration through architectural decision.
+1544:
+1545:### 19.3 Integration Standards
+1546:
+1547:The platform supports recognized healthcare integration standards. The platform's posture is to support open healthcare integration standards as they emerge and mature, with proprietary integration supported where open standards are not yet viable. Specific standards are referenced in the integration documentation; this document does not commit to specific standards, as standards evolve and the platform's support is maintained continuously.
+1548:
+1549:The preference for open standards is a direct consequence of Principle P12 (Open Standards Over Proprietary). A proprietary integration that could be replaced by an open standard is a candidate for migration, with the migration planned when the open standard reaches sufficient maturity.
+1550:
+1551:### 19.4 Integration and Bounded Contexts
+1552:
+1553:Integrations are consumed by bounded contexts through anticorruption layers. An anticorruption layer translates the external system's model to the platform's model, preventing external model leakage. The anticorruption layer is part of the Integration Layer (Section 6.7), not part of the bounded context.
+1554:
+1555:The anticorruption layer pattern is critical for integration evolution. An external system that changes its model affects the anticorruption layer, not the bounded context. A bounded context that depends directly on an external system's model is coupled to that model and cannot evolve independently.
+1556:
+1557:### 19.5 Integration and Multi-Tenancy
+1558:
+1559:Integrations are tenant-scoped. Each tenant configures its own integrations, with integration credentials stored securely per tenant. Cross-tenant integration is forbidden; an integration configured for one tenant cannot access another tenant's data.
+1560:
+1561:Tenant scoping is enforced at the Integration Layer. Integration requests carry tenant context, and the Integration Layer rejects requests that lack valid tenant context. A tenant's integration configuration is auditable, with changes recorded in the audit trail.
+1562:
+1563:### 19.6 Integration and Audit
+1564:
+1565:Integration actions are audited with the same completeness as direct user actions. Every integration request and response is recorded in the audit trail, with the audit record capturing the external system, the operation, the tenant, and the time. Integration audit records are immutable.
+1566:
+1567:The relationship between integration and audit is governed by Principle P13 (Auditability as Primitive). Integration is not a way to bypass audit; integration actions are audited with the same rigour as direct user actions.
+1568:
+1569:### 19.7 Integration Reliability
+1570:
+1571:Integration reliability is governed by the integration pattern:
+1572:
+1573:| Pattern | Reliability Mechanism |
+1574:|---|---|
+1575:| Synchronous request-response | Retry with backoff; circuit breaker for external system failures |
+1576:| Asynchronous messaging | Queue-based delivery; dead-letter queue for undeliverable messages |
+1577:| Event-based | Outbox pattern (Section 18.4); reliable event distribution |
+1578:| Batch file exchange | File delivery confirmation; retry for failed deliveries |
+1579:
+1580:Integration reliability is critical because external systems are outside the platform's control. A failed integration can affect clinical operations (e.g., a failed laboratory result delivery) and must be handled with the same rigour as internal failures.
+1581:
+1582:---
+1583:
+1584:## 20. Security Architecture
+1585:
+1586:### 20.1 Purpose of This Section
+1587:
+1588:This section defines the platform's security architecture. Security is a primitive (Principle P1, Principle P13) that governs every architectural and operational decision. The detailed treatment of security controls is in `docs/03_SECURITY/`; this section defines the architectural commitments that govern security.
+1589:
+1590:### 20.2 Security Posture
+1591:
+1592:The platform's security posture is stated as the following commitments:
+1593:
+1594:| Commitment | Description |
+1595:|---|---|
+1596:| Defence in depth | Security is layered; no single layer is relied upon exclusively |
+1597:| Zero-trust | No implicit trust based on network location; every request is authenticated and authorized |
+1598:| Least privilege | Users and systems receive the minimum permissions required for their function |
+1599:| Encryption everywhere | Data is encrypted in transit and at rest; key management is governed |
+1600:| Continuous monitoring | Security events are monitored continuously; anomalies are investigated |
+1601:| Incident readiness | Incident response is documented, tested, and improved |
+1602:| Customer sovereignty | Customers retain control of their data; the platform is custodian, not owner |
+1603:
+1604:### 20.3 Security as Primitive
+1605:
+1606:Security is a primitive, not a feature. Every module's contract enforces security requirements. Every query, every command, every event is authenticated, authorized, and audited. A module that does not enforce security is defective and is not shipped.
+1607:
+1608:Security primitives are implemented at the platform layer (Section 6.6), not at the module layer. Modules consume security primitives; they do not implement their own. This ensures consistency across the platform and prevents security gaps from emerging as modules evolve independently.
+1609:
+1610:### 20.4 Authentication and Authorization
+1611:
+1612:Authentication and authorization are governed by the Identity & Access bounded context (BC15). Authentication verifies identity; authorization verifies permission. The two are distinct and are not conflated.
+1613:
+1614:| Concern | Description |
+1615:|---|---|
+1616:| Authentication | Verification that a principal is who they claim to be |
+1617:| Authorization | Verification that an authenticated principal has permission to perform an action |
+1618:| Session management | Management of authenticated sessions, including lifecycle and revocation |
+1619:| Identity lifecycle | Management of identities, including creation, modification, and decommissioning |
+1620:
+1621:Authentication and authorization are enforced at the Edge Layer (Section 6.3). Every request passes through authentication and authorization before reaching the Orchestration or Domain layers. Requests that fail authentication or authorization are rejected at the Edge.
+1622:
+1623:### 20.5 Encryption
+1624:
+1625:Encryption is applied to data in transit and at rest. Data in transit is encrypted using recognized protocols. Data at rest is encrypted using recognized algorithms, with key management governed by a key management service.
+1626:
+1627:| Encryption Surface | Description |
+1628:|---|---|
+1629:| Data in transit | Encrypted using recognized transport protocols |
+1630:| Data at rest | Encrypted using recognized algorithms; keys managed by KMS |
+1631:| Backup data | Encrypted using recognized algorithms; keys managed separately from production keys |
+1632:| Audit data | Encrypted and integrity-protected; tamper-evident |
+1633:
+1634:Key management is governed by documented processes, with key rotation practiced regularly. Keys are not embedded in source code, not stored in plain text, and not accessible to unauthorized personnel.
+1635:
+1636:### 20.6 Security and Audit
+1637:
+1638:Security and audit are tightly coupled. Every security-relevant action is recorded in the audit trail, and every audit record is protected against tampering. The audit trail is itself a security control — it enables incident investigation, compliance demonstration, and accountability.
+1639:
+1640:The relationship between security and audit is governed by Principle P13 (Auditability as Primitive). Security protects against unauthorized action; audit records what action was taken, by whom, and with what authorization. The two together provide defence in depth against both unauthorized action and undetected action.
+1641:
+1642:### 20.7 Security Incident Response
+1643:
+1644:The platform's security incident response is documented, tested, and improved. The response process covers detection, triage, containment, eradication, recovery, post-incident review, and customer notification. The detailed process is documented in the security incident response plan.
+1645:
+1646:Incident response is tested periodically through tabletop exercises and through simulated incidents. Test results are recorded and used to improve the response process.
+1647:
+1648:### 20.8 Security and Compliance
+1649:
+1650:The platform's security posture is designed to meet the compliance requirements of the regions in which it operates. Compliance is not a separate activity from security; it is a consequence of the platform's security posture. Where a region's compliance requirements exceed the platform's default posture, the platform's configuration surface and deployment choices accommodate the additional requirements without architectural change.
+1651:
+1652:Compliance is documented per region in the platform's compliance documentation. The documentation is updated as regulatory frameworks evolve, with changes communicated to affected customers through the platform's change-management channel.
+1653:
+1654:---
+1655:
+1656:## 21. Scalability Strategy
+1657:
+1658:### 21.1 Purpose of This Section
+1659:
+1660:This section defines the platform's scalability strategy. Scalability is the operational expression of Design Principle D-5 (Enterprise Scalability) in `PRODUCT_BIBLE.md` and is a product-level commitment, not an engineering afterthought. The strategy defines how the platform grows to accommodate increasing customers, increasing users, increasing data volume, and increasing geographic distribution.
+1661:
+1662:### 21.2 Scalability Dimensions
+1663:
+1664:The platform scales along five dimensions, each with its own strategy:
+1665:
+1666:| Dimension | Description | Scaling Strategy |
+1667:|---|---|---|
+1668:| Tenant count | Number of customers served | Horizontal scaling of stateless components; partitioning of stateful components by tenant |
+1669:| User count | Number of concurrent users per tenant | Horizontal scaling of stateless components; rate limiting per tenant; graceful degradation |
+1670:| Data volume | Volume of data per tenant | Partitioning by tenant and by bounded context; archival of cold data; tiered storage |
+1671:| Transaction rate | Rate of transactions per tenant | Horizontal scaling of transaction processing; queueing for non-critical transactions; prioritization of clinical transactions |
+1672:| Geographic distribution | Number of regions served | Regional deployment with data residency; cross-region replication for disaster recovery |
+1673:
+1674:The five dimensions are independent but interrelated. Scaling decisions are made per dimension, with the interdependencies considered. A scaling decision that optimizes one dimension at the cost of another is recorded with the trade-off explicit.
+1675:
+1676:### 21.3 Scalability Posture
+1677:
+1678:The platform's scalability posture is stated as the following commitments:
+1679:
+1680:| Commitment | Description |
+1681:|---|---|
+1682:| Linear scaling within a tenant | Adding users to a tenant produces proportional load without architectural change |
+1683:| Sub-linear scaling across tenants | Adding tenants produces sub-proportional infrastructure cost due to shared platform services |
+1684:| No architectural change across customer spectrum | A solo practitioner and a hospital network run on the same architecture |
+1685:| Graceful degradation under extreme load | The platform degrades gracefully, preserving clinical safety over convenience |
+1686:| Regional scaling without forking | The platform scales to new regions through deployment, not through code branching |
+1687:
+1688:### 21.4 Stateless Component Scaling
+1689:
+1690:Stateless components — the Edge Layer, Orchestration Layer, and Platform Services Layer components without durable state — scale horizontally. Additional instances are added as load increases, with a load balancer distributing requests across instances. Stateless components do not hold session state; session state is externalized to a session store.
+1691:
+1692:Horizontal scaling of stateless components is the primary scaling mechanism for tenant count and user count. The platform's architecture is designed to maximize the stateless surface, with state pushed to stateful components only where required by consistency or durability constraints.
+1693:
+1694:### 21.5 Stateful Component Scaling
+1695:
+1696:Stateful components — the Data Layer, the Offline Substrate, and Platform Services components with durable state — scale through partitioning. Partitioning is by tenant and by bounded context, with each partition owning a defined subset of state.
+1697:
+1698:Partitioning strategy is documented per component. The strategy defines the partition key, the partition count, the rebalancing mechanism, and the cross-partition query strategy. Partitioning decisions are architectural decisions ratified through ADRs, with the trade-offs documented.
+1699:
+1700:### 21.6 Data Volume Scaling
+1701:
+1702:Data volume scales through partitioning, archival, and tiered storage. Hot data — data accessed frequently — is stored in high-performance storage. Warm data — data accessed occasionally — is stored in standard storage. Cold data — data accessed rarely — is archived to low-cost storage, with access through a documented retrieval pathway.
+1703:
+1704:Archival is governed by retention policies, with retention periods defined per data class. Retention policies are regionally configurable, accommodating regulatory variation in retention requirements. Archival is auditable, with audit records capturing what was archived, when, and by whom.
+1705:
+1706:### 21.7 Geographic Distribution Scaling
+1707:
+1708:Geographic distribution scales through regional deployment. Each region operates an independent deployment of the platform, with data residency enforced at the storage layer. Cross-region communication is minimized, with each region operating autonomously for routine operations.
+1709:
+1710:Cross-region replication is used for disaster recovery, with replication governed by documented recovery objectives. Replication is one-way for disaster recovery (primary to secondary); bidirectional replication for active-active operation is supported where justified by latency and availability requirements, with the complexity acknowledged.
+1711:
+1712:### 21.8 Scalability and the Decade Horizon
+1713:
+1714:Scalability decisions are made on the decade horizon (Principle P18). A scaling strategy that optimizes for the current quarter at the cost of decade-horizon scalability is rejected. Specifically:
+1715:
+1716:- The platform does not adopt scaling strategies that require architectural rework to absorb 10x growth.
+1717:- The platform does not adopt scaling strategies that lock in a specific infrastructure vendor.
+1718:- The platform does not adopt scaling strategies that compromise tenant isolation under load.
+1719:- The platform does not adopt scaling strategies that compromise audit completeness under load.
+1720:
+1721:### 21.9 Scalability Measurement
+1722:
+1723:Scalability is measured continuously through operational telemetry. The primary scalability metrics are:
+1724:
+1725:| Metric | Description | Target |
+1726:|---|---|---|
+1727:| Practitioner-felt latency | Latency as experienced by practitioners at the point of care | Sub-second for routine actions; documented targets for complex actions |
+1728:| Tenant isolation integrity | Degree to which one tenant's load affects another's performance | Measurable impact below defined threshold |
+1729:| Audit completeness under load | Percentage of consequential actions audited, measured under peak load | 100% — no degradation under load |
+1730:| Regional parity | Degree to which the platform performs equivalently across regions | Regional performance within defined parity threshold |
+1731:| Cost per tenant | Infrastructure cost per tenant, normalized by tenant size | Sub-linear with tenant count growth |
+1732:
+1733:Scalability metrics are reviewed quarterly. Erosion in any metric is treated as a strategic risk and addressed through architectural or operational response.
+1734:
+1735:---
+1736:
+1737:## 22. Extensibility Strategy
+1738:
+1739:### 22.1 Purpose of This Section
+1740:
+1741:This section defines the platform's extensibility strategy. Extensibility is the architectural mechanism by which capability is added to the platform without source-level modification of existing modules. Extensibility is governed by Principle P9 (Extensibility Through Defined Points) and is a first-class architectural concern.
+1742:
+1743:### 22.2 Extension Point Categories
+1744:
+1745:The platform defines four categories of extension points:
+1746:
+1747:| Category | Code | Description | When Used |
+1748:|---|---|---|---|
+1749:| Configuration Extension | EP1 | Extension through configuration of existing modules | When the capability can be expressed through configuration of existing bounded contexts |
+1750:| Module Extension | EP2 | Extension through addition of new modules | When the capability requires a new bounded context |
+1751:| Integration Extension | EP3 | Extension through integration with external systems | When the capability is delivered by an external system |
+1752:| UI Extension | EP4 | Extension through configuration of user-interface surfaces | When the capability requires user-interface changes that can be expressed through configuration |
+1753:
+1754:Extension points are not customization. Customization modifies existing module source; extension points add capability through defined surfaces without modifying existing source. The distinction is critical and is enforced at architectural review.
+1755:
+1756:### 22.3 Configuration Extension Points
+1757:
+1758:Configuration extension points allow capability to be added through configuration of existing modules. Examples include new workflow definitions, new encounter templates, new order sets, new report definitions, and new role definitions. Configuration extensions are governed by the configuration strategy (Section 15) and are the most common extension mechanism.
+1759:
+1760:Configuration extensions are tenant-scoped. A configuration extension defined by one tenant is not available to other tenants, unless the extension is promoted to platform default through the platform's evolution process.
+1761:
+1762:### 22.4 Module Extension Points
+1763:
+1764:Module extension points allow new modules to be added to the platform. New modules follow the module lifecycle (Section 9.6), starting as Candidate modules and progressing through Pilot to General Availability. New modules must align with the bounded context catalogue (Section 7), either implementing an existing context or defining a new context through architectural decision.
+1765:
+1766:Module extensions are platform-level, not tenant-scoped. A new module is available to all tenants subject to edition packaging. Customer-specific modules are not supported; the platform's one-platform principle (Principle P3) forbids customer-specific code.
+1767:
+1768:### 22.5 Integration Extension Points
+1769:
+1770:Integration extension points allow the platform to integrate with external systems, extending the platform's capability through external capability. Integration extensions follow the integration architecture (Section 19) and are governed by the platform's integration standards.
+1771:
+1772:Integration extensions are tenant-scoped. Each tenant configures its own integrations, with integration credentials stored securely per tenant. Integration extensions do not modify platform source; they configure the Integration Layer to consume external system capability.
+1773:
+1774:### 22.6 UI Extension Points
+1775:
+1776:UI extension points allow user-interface surfaces to be extended through configuration. Examples include configurable dashboards, configurable form layouts, configurable report layouts, and configurable navigation. UI extensions do not modify platform source; they configure the Experience Layer to present information differently.
+1777:
+1778:UI extensions are tenant-scoped, with user-level overrides supported. A UI extension defined at the tenant level applies to all users within the tenant, with users able to override within the bounds defined by the tenant configuration.
+1779:
+1780:### 22.7 Extension Governance
+1781:
+1782:Extensions are governed by the platform's configuration governance framework. Extension changes are auditable, with the audit trail showing who created the extension, when, and with what authorization. Extensions that affect regulatory compliance are reviewed by compliance officers before activation.
+1783:
+1784:Extension governance distinguishes between extension definition (a tenant-level decision) and extension consumption (a user-level decision). Extension definition is owned by the customer's system administrator; extension consumption is owned by the user, within the constraints defined by the extension definition.
+1785:
+1786:### 22.8 Extension and Customization Distinction
+1787:
+1788:The boundary between extension and customization is explicit:
+1789:
+1790:| Dimension | Extension | Customization |
+1791:|---|---|---|
+1792:| Source modification | No | Yes |
+1793:| Tenant-scoped | Yes (typically) | N/A (rejected) |
+1794:| Platform evolution path | May promote to platform default | N/A |
+1795:| Lifecycle governance | Yes | N/A |
+1796:| Audit | Yes | N/A |
+1797:
+1798:An extension that requires source modification is, by definition, customization, and is rejected by Principle P2. Extensions that cannot be expressed through the four extension point categories are candidates for platform evolution, not for customer-specific customization.
+1799:
+1800:---
+1801:
+1802:## 23. Deployment Models
+1803:
+1804:### 23.1 Purpose of This Section
+1805:
+1806:This section defines the platform's deployment models. Deployment is decoupled from architecture; the same architecture supports multiple deployment models. The choice of deployment model is a customer decision, governed by the customer's regulatory, contractual, and operational requirements.
+1807:
+1808:### 23.2 Deployment Model Catalogue
+1809:
+1810:The platform supports five deployment models:
+1811:
+1812:| Model | Code | Description | Typical Use |
+1813:|---|---|---|---|
+1814:| Multi-Tenant SaaS | DM1 | Shared infrastructure, logical tenant isolation | Default; serves the majority of customers |
+1815:| Single-Tenant Dedicated | DM2 | Dedicated infrastructure, single-tenant deployment | Customers with regulatory or contractual physical-separation requirements |
+1816:| Hybrid | DM3 | Combination of multi-tenant and single-tenant deployment | Customers with mixed requirements across facilities or regions |
+1817:| Air-Gapped | DM4 | Isolated deployment with no external network connectivity | Customers with extreme security or regulatory requirements |
+1818:| Region-Specific | DM5 | Deployment in a specific region for data residency | Customers with regional data residency requirements |
+1819:
+1820:All five deployment models run the same code, the same configuration model, and the same operational runtime. The choice of deployment model is a deployment decision, not a product or architectural decision.
+1821:
+1822:### 23.3 Multi-Tenant SaaS Deployment
+1823:
+1824:Multi-Tenant SaaS deployment is the default. Customers operate as tenants within a shared platform, with logical isolation of data, configuration, and operational state. The platform's multi-tenant architecture (Section 10) governs this deployment model.
+1825:
+1826:Multi-Tenant SaaS deployment offers the lowest operational cost, the fastest onboarding, and the most consistent operational posture. It is the recommended deployment model for customers whose regulatory and contractual requirements permit it.
+1827:
+1828:### 23.4 Single-Tenant Dedicated Deployment
+1829:
+1830:Single-Tenant Dedicated deployment provides dedicated infrastructure for a single customer. The customer's tenant runs on infrastructure that is not shared with other customers, providing physical separation in addition to logical separation.
+1831:
+1832:Single-Tenant Dedicated deployment offers stronger isolation guarantees and supports customer-specific operational practices (e.g., customer-managed encryption keys, customer-managed network controls). It is more expensive than Multi-Tenant SaaS and requires longer onboarding. It is recommended for customers whose regulatory or contractual requirements demand physical separation.
+1833:
+1834:### 23.5 Hybrid Deployment
+1835:
+1836:Hybrid deployment combines Multi-Tenant SaaS and Single-Tenant Dedicated deployment for a single customer. The customer may operate some facilities on the shared platform and other facilities on dedicated infrastructure, with synchronization between the two where required.
+1837:
+1838:Hybrid deployment is complex and is undertaken only when justified by specific customer requirements. The platform supports hybrid deployment through its integration architecture (Section 19), with the customer's facilities connected through documented integration contracts.
+1839:
+1840:### 23.6 Air-Gapped Deployment
+1841:
+1842:Air-Gapped deployment provides complete network isolation from external networks, including the Internet. The platform operates entirely within the customer's isolated network, with no external connectivity. Updates are delivered through physical media or documented secure pathways.
+1843:
+1844:Air-Gapped deployment is the most restrictive and the most expensive. It is undertaken only for customers with extreme security or regulatory requirements, typically military, intelligence, or highly classified healthcare operations. The platform's offline-first architecture (Section 24) is particularly relevant for Air-Gapped deployment, as it is designed for operation without continuous external connectivity.
+1845:
+1846:### 23.7 Region-Specific Deployment
+1847:
+1848:Region-Specific deployment provides deployment in a specific geographic region for data residency. The customer's tenant operates entirely within the specified region, with no data crossing regional boundaries except for documented disaster recovery purposes.
+1849:
+1850:Region-Specific deployment is undertaken for customers whose regulatory framework requires data residency within a specific region. The platform's localization architecture (Section 26) and data residency enforcement (Section 10.6) support Region-Specific deployment.
+1851:
+1852:### 23.8 Deployment and Architecture Independence
+1853:
+1854:The five deployment models are independent of the platform's architecture. The architecture does not change based on deployment model; only the infrastructure topology changes. This independence is a direct consequence of Principle P3 (One Platform, Many Organizations) and Principle P18 (Decade-Horizon Viability).
+1855:
+1856:A customer that begins on Multi-Tenant SaaS deployment and later transitions to Single-Tenant Dedicated deployment does not face a migration project. The transition is a deployment operation, not an architectural change. The customer's configuration, data, and operational state transfer to the new deployment without rework.
+1857:
+1858:### 23.9 Deployment and Operational Posture
+1859:
+1860:Deployment model affects operational posture:
+1861:
+1862:| Deployment Model | Operational Posture |
+1863:|---|---|
+1864:| Multi-Tenant SaaS | Platform-managed operations; customer has limited operational responsibility |
+1865:| Single-Tenant Dedicated | Shared operational responsibility; customer may manage some infrastructure aspects |
+1866:| Hybrid | Complex operational responsibility; customer manages dedicated infrastructure aspects |
+1867:| Air-Gapped | Customer-managed operations; platform team provides updates and remote support |
+1868:| Region-Specific | Platform-managed operations within the region; customer has limited operational responsibility |
+1869:
+1870:Operational posture is documented per deployment model in the operational documentation. Customers select a deployment model that matches their operational capacity as well as their regulatory requirements.
+1871:
+1872:---
+1873:
+1874:## 24. Offline-First Architecture
+1875:
+1876:### 24.1 Purpose of This Section
+1877:
+1878:This section defines the platform's offline-first architecture. Offline-first is a primitive (Principle P11) that governs the platform's operational mode for client surfaces. The architecture is the basis for the offline strategy defined in Section 28 of `PRODUCT_BIBLE.md`.
+1879:
+1880:### 24.2 Offline-First Posture
+1881:
+1882:The platform is offline-first. This means that the platform's default behaviour is to operate locally, with synchronization to the central platform occurring when connectivity is available. Offline-first is not a fallback mode; it is the primary mode of operation for client surfaces.
+1883:
+1884:Offline-first has the following architectural consequences:
+1885:
+1886:- Client surfaces operate locally, with local stores holding durable state
+1887:- Synchronization is bidirectional, with conflict resolution handling divergent state
+1888:- Audit is recorded locally and synchronized with the central audit trail
+1889:- Configuration is cached locally, with periodic refresh when connectivity is available
+1890:- Read operations prefer local state; write operations are queued for synchronization
+1891:
+1892:### 24.3 Local Store
+1893:
+1894:The local store is the client's durable state. It holds the patient records, encounters, orders, results, and other data that the client has accessed or produced. The local store is query-optimized, supporting the client's read operations without network round-trips.
+1895:
+1896:The local store is tenant-scoped. A client that operates across multiple tenants (rare, but possible for some integrator roles) maintains separate local stores per tenant. Cross-tenant local state is forbidden.
+1897:
+1898:The local store is encrypted at rest, with encryption keys managed by the platform's key management service. A lost or stolen client device does not compromise patient data, as the local store is encrypted and the encryption keys are not accessible without authentication.
+1899:
+1900:### 24.4 Synchronization Engine
+1901:
+1902:The synchronization engine reconciles local state with central platform state. Synchronization is bidirectional — local changes are pushed to the central platform, and central changes are pulled to the local store. Synchronization is governed by the conflict resolution strategy (Section 25).
+1903:
+1904:The synchronization engine operates continuously when connectivity is available, with changes propagated in near-real-time. When connectivity is not available, the engine queues changes for synchronization when connectivity is restored. The queue is durable, surviving client restarts.
+1905:
+1906:### 24.5 Offline Scope
+1907:
+1908:Offline operation covers the following capabilities:
+1909:
+1910:| Capability | Offline Behaviour |
+1911:|---|---|
+1912:| Patient registration | Supported offline; synchronized when connectivity is restored |
+1913:| Encounter documentation | Supported offline; synchronized when connectivity is restored |
+1914:| Order entry | Supported offline; orders are queued and submitted when connectivity is restored |
+1915:| Result viewing | Supported offline for previously synchronized results; new results require connectivity |
+1916:| Medication administration | Supported offline; synchronized when connectivity is restored |
+1917:| Scheduling | Supported offline; synchronized when connectivity is restored |
+1918:| Billing | Supported offline for charge capture; claim submission requires connectivity |
+1919:| Configuration | Not supported offline; configuration changes require connectivity to the central platform |
+1920:| Reporting | Limited offline support for pre-cached reports; full reporting requires connectivity |
+1921:
+1922:Capabilities marked as supported offline are designed to operate fully offline, with synchronization handling data integrity. Capabilities marked as not supported offline require connectivity because they involve central platform state that cannot be safely cached locally.
+1923:
+1924:### 24.6 Offline and Audit
+1925:
+1926:Offline actions are audited locally with the same completeness as online actions. The local audit trail is synchronized with the central audit trail when connectivity is restored, with conflict resolution ensuring audit completeness.
+1927:
+1928:Audit records are immutable, including offline audit records. An offline audit record cannot be modified before synchronization; the local audit store is append-only and tamper-evident. Synchronization preserves audit record integrity, with conflicts resolved in favour of the original record.
+1929:
+1930:### 24.7 Offline and Multi-Tenancy
+1931:
+1932:Offline operation is tenant-scoped. A client operates within a single tenant, with the local store holding only that tenant's data. Cross-tenant offline operation is forbidden.
+1933:
+1934:Tenant scoping is enforced at the local store. A client that attempts to access another tenant's data is rejected, regardless of whether the client is online or offline. Tenant scoping is a primitive, not a configuration choice.
+1935:
+1936:### 24.8 Offline and Configuration
+1937:
+1938:Configuration is cached locally for offline operation. The cache is refreshed when connectivity is available, with the refresh frequency governed by configuration. Configuration changes made at the central platform are propagated to clients on the next refresh.
+1939:
+1940:Configuration changes cannot be made offline. Configuration changes require connectivity to the central platform, ensuring that configuration versioning and audit are centralized. A client that attempts to make configuration changes offline is rejected.
+1941:
+1942:---
+1943:
+1944:## 25. Synchronization Strategy
+1945:
+1946:### 25.1 Purpose of This Section
+1947:
+1948:This section defines the platform's synchronization strategy. Synchronization is the process by which offline state is reconciled with central platform state. The strategy is governed by Principle P5 (Consistency Over Availability for Clinical Data) and is implemented by the Offline Substrate (Section 6.9).
+1949:
+1950:### 25.2 Conflict Resolution Strategies
+1951:
+1952:The platform supports three conflict resolution strategies:
+1953:
+1954:| Strategy | Code | Description | When Used |
+1955:|---|---|---|---|
+1956:| Last-Write-Wins | CR1 | The most recent write prevails; earlier writes are recorded in audit history | Non-clinical data where recency is the primary concern |
+1957:| Field-Level Merge | CR2 | Conflicts are resolved at the field level; non-conflicting fields are merged | Clinical documentation where multiple practitioners may edit different parts |
+1958:| Manual Resolution | CR3 | Conflicts are flagged for manual resolution by a designated role | High-stakes conflicts where automated resolution is unsafe |
+1959:
+1960:The choice of strategy is governed by the data type, the clinical context, and the regulatory framework. The platform's synchronization framework supports all three strategies, with the strategy selected per data type through configuration.
+1961:
+1962:### 25.3 Last-Write-Wins Strategy
+1963:
+1964:The Last-Write-Wins (LWW) strategy resolves conflicts in favour of the most recent write, based on timestamp. The earlier write is preserved in the audit history, ensuring traceability, but the current state reflects the most recent write.
+1965:
+1966:LWW is appropriate for non-clinical data where recency is the primary concern and where the cost of conflict is low. Examples include operational metadata, user preferences, and non-clinical configuration. LWW is not appropriate for clinical data, where the cost of conflict may be patient safety.
+1967:
+1968:### 25.4 Field-Level Merge Strategy
+1969:
+1970:The Field-Level Merge (FLM) strategy resolves conflicts at the field level. If two practitioners edit different fields of the same record, both edits are preserved. If two practitioners edit the same field, the conflict is resolved by LWW for that field, with the earlier value preserved in audit history.
+1971:
+1972:FLM is appropriate for clinical documentation where multiple practitioners may edit different parts of a record concurrently. Examples include clinical notes, where one practitioner may edit the assessment while another edits the plan. FLM preserves both edits, with conflicts only on overlapping fields.
+1973:
+1974:### 25.5 Manual Resolution Strategy
+1975:
+1976:The Manual Resolution (MR) strategy flags conflicts for resolution by a designated role. The conflict is recorded with both values, and the designated role is notified to resolve the conflict. The conflict remains unresolved until manual resolution occurs.
+1977:
+1978:MR is appropriate for high-stakes conflicts where automated resolution is unsafe. Examples include medication dosage conflicts, where two practitioners may record different dosages for the same medication. MR ensures that the conflict is reviewed by a qualified role before resolution.
+1979:
+1980:### 25.6 Synchronization and Audit
+1981:
+1982:Synchronization is auditable. Every synchronization event is recorded in the audit trail, with the audit record capturing the data synchronized, the conflict resolution strategy applied, and the result. Synchronization audit records are immutable and are the basis for compliance reporting and incident investigation.
+1983:
+1984:The relationship between synchronization and audit is governed by Principle P13 (Auditability as Primitive). Synchronization is not a way to bypass audit; synchronization events are audited with the same rigour as direct user actions.
+1985:
+1986:### 25.7 Synchronization and Consistency
+1987:
+1988:Synchronization is governed by Principle P5 (Consistency Over Availability for Clinical Data). For clinical data, the platform prefers to delay synchronization than to accept a synchronization that may compromise patient safety. For non-clinical data, the platform may accept eventual consistency.
+1989:
+1990:The consistency model per data type is documented in the data architecture documentation. The model is selected per data type through architectural decision, with the trade-offs documented in the relevant ADR.
+1991:
+1992:### 25.8 Synchronization and Performance
+1993:
+1994:Synchronization is designed for performance. The synchronization engine operates incrementally, synchronizing only the data that has changed. Full synchronization is rare, undertaken only for initial setup or for recovery from corruption.
+1995:
+1996:Synchronization performance is measured through operational telemetry. The primary metrics are:
+1997:
+1998:| Metric | Description | Target |
+1999:|---|---|---|
+2000:| Synchronization latency | Time from local change to central platform update | Sub-minute for routine changes |
+2001:| Conflict rate | Percentage of synchronization events that result in conflicts | Below defined threshold per data type |
+2002:| Synchronization failure rate | Percentage of synchronization events that fail | Below defined threshold |
+2003:| Local store size | Size of the local store on client devices | Bounded by defined limits |
+2004:
+2005:Synchronization metrics are reviewed quarterly. Erosion in any metric is treated as a strategic risk and addressed through architectural or operational response.
+2006:
+2007:---
+2008:
+2009:## 26. Localization Architecture
+2010:
+2011:### 26.1 Purpose of This Section
+2012:
+2013:This section defines the platform's localization architecture. Localization is a first-class architectural concern (Design Principle D-6 in `PRODUCT_BIBLE.md`) that governs how the platform adapts to regional and linguistic contexts. The architecture is the basis for the localization strategy defined in Section 25 of `PRODUCT_BIBLE.md`.
+2014:
+2015:### 26.2 Localization Dimensions
+2016:
+2017:The platform localizes along eight dimensions:
+2018:
+2019:| Dimension | Description | Adaptation Mechanism |
+2020:|---|---|---|
+2021:| Language | User-interface language, content language, document language | Translation catalogues; multi-language content per tenant |
+2022:| Calendar | Calendar system (Gregorian, Hijri, others as required) | Calendar adapters; configurable default per tenant |
+2023:| Date and time | Date format, time format, timezone | Locale-aware formatting; tenant-configured defaults |
+2024:| Number and currency | Number format, currency symbol, decimal separator | Locale-aware formatting; tenant-configured defaults |
+2025:| Regulatory framework | Regional regulatory requirements (data protection, clinical records, prescribing) | Regulatory framework adapters; per-region compliance packs |
+2026:| Clinical coding system | Regional clinical coding (diagnosis, procedure, medication) | Coding system adapters; per-region coding packs |
+2027:| Payment model | Regional payment models (insurance, single-payer, out-of-pocket, hybrid) | Payment model adapters; per-region billing packs |
+2028:| Cultural workflow | Cultural expectations about clinical workflow (e.g., consent, communication, family involvement) | Configuration overlays per region |
+2029:
+2030:The eight dimensions are independent but interrelated. Localization decisions are made per dimension, with the interdependencies considered.
+2031:
+2032:### 26.3 Localization as Configuration
+2033:
+2034:Localization is a configuration surface, not a code branch. The platform's configuration framework (Section 15) supports regional configuration overlays that adapt the platform's behaviour to a specific region without source-level modification.
+2035:
+2036:Localization configuration is layered on top of the standard configuration layers (Section 15.2). A regional overlay applies at the tenant level (or at the facility level for multi-region tenants), with the overlay's precedence documented in the configuration layer model.
+2037:
+2038:### 26.4 Localization and Bounded Contexts
+2039:
+2040:Each bounded context exposes its own localization surface as part of its configuration schema. The localization surface defines what aspects of the context's behaviour are regionally configurable, what the configuration keys are, and what the valid values are.
+2041:
+2042:The Localization bounded context (BC19) provides cross-cutting localization services consumed by all other contexts. These services include translation catalogue lookup, calendar conversion, date and time formatting, number and currency formatting, and regulatory framework query. Other contexts consume these services through defined contracts, rather than implementing their own localization.
+2043:
+2044:### 26.5 Multi-Region Tenants
+2045:
+2046:A customer operating across multiple regions receives a multi-region tenant configuration. The tenant has a customer-level baseline configuration, with regional overlays applied per facility or per organizational unit. A facility in Baghdad and a facility in Riyadh within the same customer operate with different localization packs but share the customer's baseline configuration.
+2047:
+2048:Multi-region tenancy does not require multiple tenants. The platform's configuration surface allows regional variation within a single tenant, with data residency enforced at the storage layer (Section 10.6). A customer that requires strict data segregation between regions may operate multiple tenants, but this is a customer choice, not a platform requirement.
+2049:
+2050:### 26.6 Localization and Clinical Safety
+2051:
+2052:Localization is a clinical safety concern, not a cosmetic concern. A clinician who reads a medication dosage in the wrong number format, or who records a date in the wrong calendar system, may make a clinical error with patient safety consequences. Localization is therefore subject to the same rigour as clinical safety, with validation including clinical workflow testing by practitioners of the target region.
+2053:
+2054:Localization packs are validated by regional clinical informatics specialists, not by translators. A localization pack that has been validated linguistically but not clinically is not validated. The platform's localization governance requires both linguistic validation and clinical validation before a localization pack achieves Validated status.
+2055:
+2056:### 26.7 Localization and Audit
+2057:
+2058:Localization is auditable. Every localization configuration change is recorded in the audit trail, with the audit record capturing the previous value, the new value, the configurator, and the time. Localization audit records are immutable.
+2059:
+2060:Audit records themselves are localized. An audit record generated in a region displays in that region's language and format when viewed by a user in that region. The underlying audit data is invariant; only the presentation is localized.
+2061:
+2062:### 26.8 Localization Evolution
+2063:
+2064:Localization packs evolve as regions' regulatory frameworks, clinical coding systems, and payment models evolve. The platform's configuration versioning (Section 15.5) supports localization pack evolution, with old versions supported through defined transition windows.
+2065:
+2066:Localization pack evolution is governed by the platform's regional adaptation roadmap (Section 31 of `PRODUCT_BIBLE.md`). New regions are added to the roadmap as candidate regions, with localization packs developed and validated through the intake process.
+2067:
+2068:---
+2069:
+2070:## 27. Audit Architecture
+2071:
+2072:### 27.1 Purpose of This Section
+2073:
+2074:This section defines the platform's audit architecture. Audit is a primitive (Principle P13) that governs how the platform records consequential actions. The architecture is the basis for the audit commitments defined throughout this document and in `PRODUCT_BIBLE.md`.
+2075:
+2076:### 27.2 Audit as Primitive
+2077:
+2078:Audit is a primitive, not a feature. Every consequential action — clinical, financial, operational, configurational — is recorded in an immutable audit trail. Audit is built into every module's contract, enforced at the platform layer, and protected against tampering.
+2079:
+2080:The audit primitive has the following architectural consequences:
+2081:
+2082:- Audit is non-negotiable. A module that does not audit its consequential actions is defective and is not shipped.
+2083:- Audit is enforced at the platform layer. Modules consume audit services; they do not implement their own.
+2084:- Audit records are immutable. Once written, an audit record cannot be modified or deleted.
+2085:- Audit is complete. Every consequential action is audited, regardless of the surface through which it was performed.
+2086:
+2087:### 27.3 Audit Surface
+2088:
+2089:Audit covers the following surfaces:
+2090:
+2091:| Surface | Description |
+2092:|---|---|
+2093:| Clinical actions | Patient registration, encounter documentation, order entry, result viewing, medication administration |
+2094:| Financial actions | Billing, claim submission, payment posting, accounting entries |
+2095:| Operational actions | Scheduling, document management, notification dispatch |
+2096:| Configuration actions | Configuration changes, feature flag changes, role and permission changes |
+2097:| Security actions | Authentication, authorization, emergency access, integration actions |
+2098:| Administrative actions | User management, tenant management, integration management |
+2099:
+2100:Every action of consequence on every surface is audited. There is no audit gap for actions performed through integrations, through administrative tools, or through edge-case workflows.
+2101:
+2102:### 27.4 Audit Record Structure
+2103:
+2104:An audit record captures:
+2105:
+2106:| Field | Description |
+2107:|---|---|
+2108:| Timestamp | When the action occurred |
+2109:| Actor | Who performed the action (user, system, integration) |
+2110:| Action | What action was performed |
+2111:| Resource | What resource was affected |
+2112:| Tenant | Which tenant the action belongs to |
+2113:| Scope | Organizational hierarchy scope (customer, facility, department, care team) |
+2114:| Previous state | The state before the action (for state-changing actions) |
+2115:| New state | The state after the action (for state-changing actions) |
+2116:| Authorization | The authorization basis for the action (role, permission, emergency access) |
+2117:| Result | The outcome of the action (success, failure, partial) |
+2118:| Context | Additional context (session, IP address, user agent) |
+2119:
+2120:The audit record structure is stable. New fields may be added, but existing fields are not removed or renamed, ensuring backward compatibility of audit queries.
+2121:
+2122:### 27.5 Audit Store
+2123:
+2124:The audit store is a dedicated store for audit records, separate from the transactional store. The separation is a direct consequence of Principle P13 (Auditability as Primitive) — audit records have different retention, query, and integrity requirements than transactional data.
+2125:
+2126:The audit store is:
+2127:
+2128:| Property | Description |
+2129:|---|---|
+2130:| Immutable | Records cannot be modified or deleted once written |
+2131:| Append-only | New records are appended; existing records are not changed |
+2132:| Tamper-evident | Records are integrity-protected; tampering is detectable |
+2133:| Query-optimized | Records are indexed for investigation queries |
+2134:| Retention-managed | Records are retained per regulatory requirements |
+2135:
+2136:### 27.6 Audit Query
+2137:
+2138:Audit query is the mechanism by which audit records are retrieved for investigation, compliance reporting, and operational review. Audit query is governed by the permission framework — only authorized roles can query audit records, and queries are scoped to the querier's authority.
+2139:
+2140:Audit query supports:
+2141:
+2142:| Query Type | Description |
+2143:|---|---|
+2144:| Time-range query | Retrieve records within a time range |
+2145:| Actor query | Retrieve records for a specific actor |
+2146:| Resource query | Retrieve records for a specific resource |
+2147:| Action query | Retrieve records for a specific action type |
+2148:| Tenant query | Retrieve records for a specific tenant (platform-level only) |
+2149:| Composite query | Combine multiple query types |
+2150:
+2151:Audit queries are themselves auditable. A query for audit records is recorded in the audit trail, ensuring that audit investigation is itself auditable.
+2152:
+2153:### 27.7 Audit and Offline
+2154:
+2155:Offline actions are audited locally with the same completeness as online actions. The local audit trail is synchronized with the central audit trail when connectivity is restored, with conflict resolution ensuring audit completeness.
+2156:
+2157:Audit records are immutable, including offline audit records. An offline audit record cannot be modified before synchronization; the local audit store is append-only and tamper-evident. Synchronization preserves audit record integrity, with conflicts resolved in favour of the original record.
+2158:
+2159:### 27.8 Audit and Compliance
+2160:
+2161:Audit is the basis for compliance demonstration. Compliance reporting is generated from audit records, with reports tailored to specific regulatory requirements. Compliance reports are themselves auditable, with report generation recorded in the audit trail.
+2162:
+2163:The platform's compliance documentation defines, per region, what audit records are required, how they are retained, and how they are made available to regulators. The platform's audit architecture is designed to meet these requirements without architectural change, with regional variation expressed through configuration.
+2164:
+2165:---
+2166:
+2167:## 28. Reporting Architecture
+2168:
+2169:### 28.1 Purpose of This Section
+2170:
+2171:This section defines the platform's reporting architecture. Reporting is a first-class architectural concern that governs how the platform generates, distributes, and consumes reports. The architecture is the basis for the reporting commitments defined in `PRODUCT_BIBLE.md` and is implemented by the Reporting bounded context.
+2172:
+2173:### 28.2 Reporting Categories
+2174:
+2175:The platform supports three reporting categories, each with its own characteristics:
+2176:
+2177:| Category | Description | Latency | Data Source |
+2178:|---|---|---|---|
+2179:| Operational | Reports for daily operational use | Real-time to near-real-time | Transactional store |
+2180:| Analytical | Reports for trend analysis and decision support | Near-real-time to delayed | Analytical store |
+2181:| Regulatory | Reports for regulatory compliance | Defined by regulatory framework | Audit store, transactional store |
+2182:
+2183:The three categories have different requirements. Operational reports prioritize freshness and availability; analytical reports prioritize query performance and historical depth; regulatory reports prioritize completeness, accuracy, and auditability.
+2184:
+2185:### 28.3 Operational Reporting
+2186:
+2187:Operational reporting supports daily operational use. Examples include patient lists, encounter summaries, order status, queue status, and daily operational dashboards. Operational reports are generated from the transactional store, with minimal latency between data change and report availability.
+2188:
+2189:Operational reports are tenant-scoped and respect the organizational hierarchy. A clinician sees reports for their patients; a facility administrator sees reports for their facility; a customer executive sees reports for their customer. Permission scoping is enforced at the reporting layer.
+2190:
+2191:### 28.4 Analytical Reporting
+2192:
+2193:Analytical reporting supports trend analysis and decision support. Examples include patient outcome trends, financial performance trends, operational efficiency trends, and population health analytics. Analytical reports are generated from the analytical store, which is populated from the transactional store through an ETL pipeline.
+2194:
+2195:The analytical store is optimized for query performance, with denormalized data structures and pre-computed aggregates. The ETL pipeline introduces latency between transactional data change and analytical data availability, with the latency documented per data type.
+2196:
+2197:### 28.5 Regulatory Reporting
+2198:
+2199:Regulatory reporting supports compliance with regulatory requirements. Examples include adverse event reporting, controlled substance reporting, financial reporting to regulators, and audit trail reporting. Regulatory reports are generated from the audit store and the transactional store, with the report format defined by the regulatory framework.
+2200:
+2201:Regulatory reports are immutable once generated. A regulatory report that has been submitted to a regulator cannot be modified, even if subsequent data changes would produce a different report. The immutability is a compliance requirement and is enforced at the reporting layer.
+2202:
+2203:### 28.6 Report Definition
+2204:
+2205:Reports are defined declaratively through configuration. A report definition specifies the data source, the query, the layout, the distribution, and the retention. Report definitions are versioned, validated, and auditable, in keeping with the configuration-driven architecture (Section 8).
+2206:
+2207:Report definitions are not code. A report that requires source-level implementation is not a report; it is a feature. The reporting engine is designed to execute configured report definitions, not to host custom code.
+2208:
+2209:### 28.7 Report Distribution
+2210:
+2211:Report distribution is governed by the report definition. Distribution mechanisms include:
+2212:
+2213:| Mechanism | Description |
+2214:|---|---|
+2215:| On-demand | Report generated on user request |
+2216:| Scheduled | Report generated on a defined schedule |
+2217:| Event-driven | Report generated in response to a defined event |
+2218:| Subscription | Report delivered to subscribers on a defined schedule |
+2219:
+2220:Distribution is auditable. Every report generation and distribution is recorded in the audit trail, with the audit record capturing the report, the recipients, and the time.
+2221:
+2222:### 28.8 Reporting and Audit
+2223:
+2224:Reporting is auditable. Every report generation is recorded in the audit trail, with the audit record capturing the report definition, the parameters, the data sources, and the recipients. Report audit records are immutable.
+2225:
+2226:The relationship between reporting and audit is governed by Principle P13 (Auditability as Primitive). Reporting is not a way to bypass audit; reporting is audited with the same rigour as direct user actions. Regulatory reports that are submitted to regulators are themselves auditable, with submission recorded.
+2227:
+2228:---
+2229:
+2230:## 29. AI Readiness
+2231:
+2232:### 29.1 Purpose of This Section
+2233:
+2234:This section defines the platform's AI readiness. AI readiness is the architectural posture that enables the platform to absorb AI-assisted capability — clinical decision support, predictive analytics, workflow automation — without architectural rework. The section is governed by Principle P1 (Healthcare Safety Overrides All Others) and by Belief Four (the patient as ultimate stakeholder) in `PRODUCT_BIBLE.md`.
+2235:
+2236:### 29.2 AI Readiness Posture
+2237:
+2238:The platform's AI readiness posture is stated as the following commitments:
+2239:
+2240:| Commitment | Description |
+2241:|---|---|
+2242:| Data is structured for AI consumption | The platform's data model and event architecture support AI-assisted analysis |
+2243:| Contracts are explicit | AI capability consumes platform contracts, not internal implementation |
+2244:| Audit extends to AI actions | AI-assisted actions are audited with the same completeness as direct user actions |
+2245:| Human oversight is preserved | AI assists clinicians; it does not replace them |
+2246:| Patient data sovereignty is preserved | Patient data is not used to train public AI models without explicit consent |
+2247:
+2248:### 29.3 Data Architecture for AI
+2249:
+2250:The platform's data architecture is structured for AI consumption. Bounded contexts expose their state through query contracts that support both operational and analytical access. The analytical store (Section 17.2) is designed for analytical query, including AI-assisted analysis.
+2251:
+2252:The event-driven architecture (Section 18) supports AI consumption through event subscription. AI services can subscribe to domain events and process them in near-real-time, enabling AI-assisted decision support that is informed by current operational state.
+2253:
+2254:### 29.4 AI as Extension
+2255:
+2256:AI capability is added to the platform through the extension surface (Section 22), not through source-level modification of existing modules. AI services consume platform contracts and produce recommendations, predictions, or automations that are consumed by the platform through defined contracts.
+2257:
+2258:AI as extension preserves the platform's modular architecture. An AI service that becomes obsolete can be replaced without modifying the platform's core. An AI service that becomes strategic can be promoted to a first-class module through the module lifecycle (Section 9.6).
+2259:
+2260:### 29.5 AI and Audit
+2261:
+2262:AI-assisted actions are audited with the same completeness as direct user actions. The audit record captures that the action was AI-assisted, which AI service provided the assistance, what input the AI service received, and what output the AI service produced.
+2263:
+2264:AI audit records are the basis for AI accountability. An AI-assisted action that produces an undesired outcome can be investigated through the audit trail, with the AI service's contribution visible. The auditability is a direct consequence of Principle P13 (Auditability as Primitive) and is non-negotiable.
+2265:
+2266:### 29.6 AI and Human Oversight
+2267:
+2268:AI assists clinicians; it does not replace them. The platform's AI capabilities are designed to provide recommendations, predictions, and automations that are reviewed and acted upon by qualified human practitioners. The platform does not support fully autonomous AI action for clinical decisions.
+2269:
+2270:Human oversight is preserved through the platform's workflow architecture (Section 16). AI recommendations are surfaced to practitioners through workflow steps that require human action. A practitioner may accept, modify, or reject an AI recommendation, with the decision recorded in the audit trail.
+2271:
+2272:### 29.7 AI and Patient Data Sovereignty
+2273:
+2274:Patient data is not used to train public AI models without explicit consent. The platform's data custody model (Section 12.4 of `PRODUCT_BIBLE.md`) governs AI training data use, with patient consent required for any use of patient data for AI training that is not strictly necessary for the patient's care.
+2275:
+2276:AI services that operate on patient data are tenant-scoped. A tenant's patient data is not shared with AI services that operate on other tenants' data, unless the customer has explicitly authorized such sharing. Cross-tenant AI training is forbidden by default.
+2277:
+2278:### 29.8 AI Evolution
+2279:
+2280:AI capability evolves through the platform's extension surface and through the platform's evolution process. New AI services are added as extensions, with promotion to first-class modules through the module lifecycle. AI capability that becomes obsolete is deprecated and retired through the documented deprecation process.
+2281:
+2282:AI evolution is governed by the same architectural rigour as other platform capability. AI services must honour the platform's contracts, the platform's audit requirements, the platform's security posture, and the platform's patient data sovereignty commitments. An AI service that cannot meet these requirements is not integrated, regardless of its capability.
+2283:
+2284:---
+2285:
+2286:## 30. Future Evolution Strategy
+2287:
+2288:### 30.1 Purpose of This Section
+2289:
+2290:This section defines the platform's future evolution strategy. The strategy is the architectural expression of the decade-horizon thinking (Principle P18) and the future vision defined in Section 30 of `PRODUCT_BIBLE.md`. The strategy governs how the platform evolves over the decade horizon without architectural rework.
+2291:
+2292:### 30.2 Evolution Principles
+2293:
+2294:The platform's evolution is governed by the following principles:
+2295:
+2296:| Principle | Description |
+2297:|---|---|
+2298:| Bounded context stability | Bounded contexts are stable; evolution occurs within contexts, not through reorganization |
+2299:| Contract versioning | Contracts evolve through versioning, with old versions supported through transition windows |
+2300:| Extension before modification | Capability is added through extension surfaces, not through modification of existing modules |
+2301:| Deprecation discipline | Old capability is deprecated and retired through documented processes, not through neglect |
+2302:| Architectural decision records | Evolution decisions are ratified through ADRs, with rationale explicit |
+2303:
+2304:### 30.3 Evolution Vectors
+2305:
+2306:The platform evolves along four vectors, matching the future vision pillars defined in `PRODUCT_BIBLE.md`:
+2307:
+2308:| Vector | Description | Architectural Consequence |
+2309:|---|---|---|
+2310:| Depth expansion | Deepening specialty coverage | New specialty-specific module extensions; deeper configuration overlays |
+2311:| Breadth expansion | Broadening organizational function coverage | New bounded contexts and modules; broader integration catalogue |
+2312:| Reach expansion | Extending regional coverage | New localization packs; regional deployment expansion |
+2313:| Intelligence integration | Integrating operational intelligence | AI extension surface; AI-assisted capability through defined contracts |
+2314:
+2315:The four vectors are pursued simultaneously and in tension with each other, in keeping with the architectural vision's three vectors (Section 2.3). Tension among the vectors is expected and is not avoided.
+2316:
+2317:### 30.4 Evolution and Backward Compatibility
+2318:
+2319:Evolution preserves backward compatibility. Existing contracts continue to operate as documented, even as new contracts are added. Breaking changes to existing contracts follow the platform's deprecation policy, with old contracts supported through defined transition windows.
+2320:
+2321:Backward compatibility is critical for customer trust. A customer that has integrated with the platform's contracts expects those contracts to continue to operate. Breaking changes without transition support erode trust and are rejected.
+2322:
+2323:### 30.5 Evolution and Deprecation
+2324:
+2325:Deprecation is the disciplined removal of capability that is no longer needed. Deprecation follows a defined process:
+2326:
+2327:| Stage | Code | Description |
+2328:|---|---|---|
+2329:| Deprecation Candidate | DS1 | Capability considered for deprecation; transition planning underway |
+2330:| Deprecated | DS2 | Capability deprecated; new customers cannot adopt; existing customers supported through transition window |
+2331:| End-of-Life | DS3 | Transition window closed; capability removed from the platform |
+2332:
+2333:Deprecation is not neglect. A capability that is no longer used is identified, documented, and deprecated through the defined process. Silent removal is not permitted.
+2334:
+2335:### 30.6 Evolution and Architectural Decision Records
+2336:
+2337:Evolution decisions are ratified through Architecture Decision Records. An ADR documents the decision, the alternatives considered, the rationale, the consequences, and the amendment mechanism. ADRs are the durable artefact; the implementation is its expression.
+2338:
+2339:ADRs are reviewed by the Architecture Council, with ratification recorded in the ADR's status. ADRs are amended through the same process, with amendments recorded in the ADR's revision history.
+2340:
+2341:### 30.7 Evolution and the Decade Horizon
+2342:
+2343:Evolution is pursued on the decade horizon (Principle P18). Short-term optimization that compromises decade-horizon viability is rejected. Evolution that increases decade-horizon viability at the cost of short-term convenience is favoured.
+2344:
+2345:The decade horizon is the test the Architecture Council applies when evaluating evolution decisions. An evolution that is fast but wrong on the decade horizon is rejected as debt. An evolution that is slow but right on the decade horizon is favoured, even when short-term pressure suggests otherwise.
+2346:
+2347:### 30.8 The Decade Commitment
+2348:
+2349:The Ibn Hayan platform is committed to decade-horizon viability. This commitment is not a marketing claim; it is an architectural commitment that governs every decision in this document. The platform is designed to remain viable across technology shifts, market cycles, regulatory evolution, and leadership transitions.
+2350:
+2351:The decade commitment is the architectural expression of the platform's identity (Section 1.5 of `PRODUCT_BIBLE.md`). Ibn Hayan is built to outlast its current implementation, its current technology choices, and its current team. The architecture is the durable artefact; implementations are its stewards. This is the architectural standard the platform holds itself to, and the standard against which every architectural decision is measured.
+2352:

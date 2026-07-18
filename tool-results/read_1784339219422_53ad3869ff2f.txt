@@ -1,0 +1,585 @@
+     1→     1→# Ibn Hayan Healthcare Operating System
+     2→     2→## Configuration Architecture
+     3→     3→
+     4→     4→> **Document Purpose:** The architecture of Ibn Hayan's configuration system — layers, schemas, validation, lifecycle, storage, security, hot-reload, and audit. This document elaborates the configuration aspects of `SYSTEM_ARCHITECTURE.md` Sections 8 and 15 and must align with them.
+     5→     5→>
+     6→     6→> **Status:** Authoritative · **Version:** 1.0.0 · **Last Updated:** 2026-07-18
+     7→     7→> **Document Owner:** Office of the Chief Software Architect
+     8→     8→> **Review Cadence:** Quarterly, with off-cycle revision when a related ADR is ratified
+     9→     9→>
+    10→    10→> This document is part of the official Ibn Hayan Healthcare Operating System
+    11→    11→> documentation framework and serves as the authoritative reference for its
+    12→    12→> architectural domain. It is intended for the entire engineering, architecture,
+    13→    13→> security, and operations organizations.
+    14→    14→
+    15→    15→---
+    16→    16→
+    17→    17→## Table of Contents
+    18→    18→
+    19→    19→1. Configuration Overview
+    20→    20→2. Configuration Layers
+    21→    21→3. Tenant Configuration
+    22→    22→4. Module Configuration
+    23→    23→5. Feature Flags
+    24→    24→6. Configuration Storage
+    25→    25→7. Configuration Validation
+    26→    26→8. Configuration Lifecycle
+    27→    27→9. Environment-Specific Configuration
+    28→    28→10. Configuration Security
+    29→    29→11. Configuration Hot-Reload
+    30→    30→12. Configuration Audit Trail
+    31→    31→13. Related Documents
+    32→    32→
+    33→    33→---
+    34→    34→
+    35→    35→## 1. Configuration Overview
+    36→    36→
+    37→    37→### 1.1 Purpose and Scope
+    38→    38→
+    39→    39→This document defines the architecture of Ibn Hayan's configuration system. It elaborates the configuration aspects of the platform — what configuration is, how it is layered, how it is validated, how it evolves, how it is secured, and how it is audited. It is constrained by, and must align with, `SYSTEM_ARCHITECTURE.md`, particularly Sections 8 (Configuration-Driven Architecture) and 15 (Configuration Strategy).
+    40→    40→
+    41→    41→Where this document and `SYSTEM_ARCHITECTURE.md` appear to conflict, `SYSTEM_ARCHITECTURE.md` prevails. This document is amended through the same ADR process.
+    42→    42→
+    43→    43→### 1.2 Foundational Decision
+    44→    44→
+    45→    45→Configuration is a first-class architectural citizen, governed by ADR-001 (Configuration-Driven Architecture). The platform adapts to customer need through configuration, not customization. Configuration is data, governed, versioned, validated, and audited.
+    46→    46→
+    47→    47→### 1.3 Audience
+    48→    48→
+    49→    49→The primary audience is software architects, module owners, principal engineers, and engineering managers who design and govern configuration. The secondary audience is engineers implementing configuration-aware modules, who must understand the configuration system's structure and contracts.
+    50→    50→
+    51→    51→### 1.4 Document Conventions
+    52→    52→
+    53→    53→Sections are numbered for stable cross-referencing. Tables summarize decisions where prose would obscure them. The verbs *must*, *should*, and *may* are used in their normative sense. Configuration keys are written in `camelCase` or `kebab-case` as appropriate to the context.
+    54→    54→
+    55→    55→---
+    56→    56→
+    57→    57→## 2. Configuration Layers
+    58→    58→
+    59→    59→### 2.1 Layer Inventory
+    60→    60→
+    61→    61→Configuration is organized into layers (SYSTEM_ARCHITECTURE.md Section 8.3), each with its own authority and scope. Layers inherit and override: a more specific layer's value prevails over a more general layer's value, where they conflict.
+    62→    62→
+    63→    63→| Layer | Authority | Scope | Governance |
+    64→    64→|---|---|---|---|
+    65→    65→| Platform Default | Office of the Chief Architect | All tenants, all editions | Architectural review; ADR for irreversible changes |
+    66→    66→| Edition | Product Management (Editions) | All tenants on a given edition | Product management review |
+    67→    67→| Tenant | Tenant Administrator | All facilities within a tenant | Tenant administrator authorization |
+    68→    68→| Facility | Facility Administrator | A single facility | Facility administrator authorization |
+    69→    69→| Department | Department Lead | A team or department within a facility | Department lead authorization |
+    70→    70→| Care Team | Team Lead | A clinical care team | Team lead authorization |
+    71→    71→| User | Individual User (within permitted scope) | A single user's preferences | User authorization |
+    72→    72→| Session | Transient (per session) | A single session | User authorization (within session scope) |
+    73→    73→
+    74→    74→### 2.2 Inheritance Semantics
+    75→    75→
+    76→    76→Configuration inheritance follows these rules:
+    77→    77→
+    78→    78→1. **Default applies unless overridden.** If no layer provides a value, the platform default applies.
+    79→    79→2. **More specific overrides less specific.** A facility value overrides a tenant value; a department value overrides a facility value.
+    80→    80→3. **Override is per-key, not per-record.** A facility may override some keys of a configuration record while inheriting others from the tenant.
+    81→    81→4. **Override is explicit.** A layer that does not provide a value for a key inherits the value from the next layer up.
+    82→    82→5. **Override is audited.** Every override is captured in the audit trail.
+    83→    83→
+    84→    84→### 2.3 Conflict Resolution
+    85→    85→
+    86→    86→Where two configuration records at the same layer conflict (e.g., two facility-level records for the same key), the conflict is resolved by:
+    87→    87→
+    88→    88→1. **Explicit precedence rules** declared in the configuration schema.
+    89→    89→2. **Recency** — the most recently declared record prevails, where the schema does not specify precedence.
+    90→    90→3. **Manual resolution** — if automatic resolution is unsafe, the conflict is surfaced to an administrator.
+    91→    91→
+    92→    92→Conflicts are detected at validation time, not at evaluation time. A configuration that produces an unresolvable conflict is rejected at submission.
+    93→    93→
+    94→    94→### 2.4 Layer Composition
+    95→    95→
+    96→    96→A tenant's effective configuration is the composition of all layers from platform default down to session. The composition is computed by the configuration service at evaluation time, using the inheritance rules above. Consumers receive the resolved value; they do not perform their own composition.
+    97→    97→
+    98→    98→---
+    99→    99→
+   100→   100→## 3. Tenant Configuration
+   101→   101→
+   102→   102→### 3.1 Tenant Configuration Scope
+   103→   103→
+   104→   104→Tenant configuration adapts the platform to a specific tenant's needs, within the bounds of the tenant's edition. It is the primary mechanism by which one platform serves many organizations (SYSTEM_ARCHITECTURE.md Section 10.5).
+   105→   105→
+   106→   106→| Configuration Area | Examples |
+   107→   107→|---|---|
+   108→   108→| Organizational structure | Facilities, departments, care teams |
+   109→   109→| Module enablement | Which modules are enabled for the tenant |
+   110→   110→| Workflow definitions | Tenant-specific clinical and operational workflows |
+   111→   111→| Documentation templates | Tenant-specific clinical documentation templates |
+   112→   112→| Pricing schedules | Tenant-specific pricing for billing |
+   113→   113→| Notification templates | Tenant-specific notification content and routing |
+   114→   114→| Integration configuration | External system endpoints, credentials, schedules |
+   115→   115→| Localization | Tenant's locale, calendar, regional formats |
+   116→   116→| Security policies | Authentication policies, session policies, MFA requirements |
+   117→   117→| Branding | Visual identity, communication templates |
+   118→   118→
+   119→   119→### 3.2 Tenant Configuration Overlay
+   120→   120→
+   121→   121→A tenant's configuration is an overlay on the edition and platform default layers. The overlay cannot violate platform invariants or edition constraints; it can only adapt within them.
+   122→   122→
+   123→   123→| Constraint | Source | Example |
+   124→   124→|---|---|---|
+   125→   125→| Module availability | Edition | Essentials edition cannot enable the Accounting module |
+   126→   126→| Hierarchy depth | Edition | Essentials edition cannot have facility-level administrators |
+   127→   127→| Feature availability | Edition or entitlement | Public Sector edition has additional regulatory reporting features |
+   128→   128→| Regulatory regime | Region | A tenant in a region must comply with that region's regulations |
+   129→   129→| Platform invariants | Architecture | A tenant cannot disable audit |
+   130→   130→
+   131→   131→### 3.3 Tenant Configuration Authority
+   132→   132→
+   133→   133→Tenant configuration is authorized by the tenant administrator role. The tenant administrator may delegate finer-grained configuration authority to facility administrators, department leads, and team leads, within the bounds of the tenant's edition.
+   134→   134→
+   135→   135→Delegation is itself a configuration action and is audited. A delegation that exceeds the tenant administrator's authority is rejected.
+   136→   136→
+   137→   137→### 3.4 Tenant Configuration Isolation
+   138→   138→
+   139→   139→Tenant configuration is isolated from other tenants. A tenant's configuration cannot reference another tenant's data, modules, or users. Cross-tenant configuration references are forbidden and are rejected at validation time.
+   140→   140→
+   141→   141→### 3.5 Tenant Configuration Templates
+   142→   142→
+   143→   143→Tenants are provisioned from templates — curated configuration sets that adapt the platform to a customer size tier and clinic type. Templates are maintained by the product organization and versioned with platform releases. Tenants adopt a template at provisioning and customize within their configuration authority thereafter.
+   144→   144→
+   145→   145→Templates are not code; they are configuration. A template can be inspected, compared, and customized without platform changes (SYSTEM_ARCHITECTURE.md Section 12.6).
+   146→   146→
+   147→   147→---
+   148→   148→
+   149→   149→## 4. Module Configuration
+   150→   150→
+   151→   151→### 4.1 Module Configuration Surface
+   152→   152→
+   153→   153→Each module exposes a configuration surface (MODULE_ARCHITECTURE.md Section 10) — the set of configuration keys the module accepts, with their types, defaults, validation rules, and inheritance behavior. The configuration surface is part of the module's contract and is versioned with it.
+   154→   154→
+   155→   155→### 4.2 Module Configuration Schema
+   156→   156→
+   157→   157→A module's configuration schema declares:
+   158→   158→
+   159→   159→| Element | Description |
+   160→   160→|---|---|
+   161→   161→| Keys | Configuration key names, with types (string, integer, boolean, enum, object, array) |
+   162→   162→| Defaults | Default values, used when no value is provided |
+   163→   163→| Constraints | Type constraints, ranges, formats, allowed values |
+   164→   164→| Validation rules | Structural, referential, semantic, contextual, regulatory rules |
+   165→   165→| Inheritance behavior | How the value is resolved across configuration layers |
+   166→   166→| Required vs. optional | Whether the key must be provided or may be omitted |
+   167→   167→| Deprecation status | Whether the key is deprecated and scheduled for removal |
+   168→   168→
+   169→   169→### 4.3 Module Configuration Resolution
+   170→   170→
+   171→   171→Module configuration is resolved by the configuration service, not by each module. Modules receive the resolved value for their context; they do not perform their own resolution. This centralizes the resolution logic and prevents inconsistency.
+   172→   172→
+   173→   173→The resolution process:
+   174→   174→
+   175→   175→1. The module requests the value of a configuration key, providing the current context (tenant, facility, department, care team, user, session).
+   176→   176→2. The configuration service resolves the value by walking the layers from session up to platform default, applying overrides.
+   177→   177→3. The configuration service returns the resolved value, with metadata (which layer provided it, when it was last changed, by whom).
+   178→   178→
+   179→   179→### 4.4 Module Configuration Caching
+   180→   180→
+   181→   181→Modules may cache configuration values for performance, with explicit invalidation rules:
+   182→   182→
+   183→   183→1. **Cache key.** The cache key includes the configuration key and the context (tenant, facility, etc.).
+   184→   184→2. **Cache TTL.** Each cached value has a time-to-live, after which it is re-resolved.
+   185→   185→3. **Cache invalidation.** The configuration service notifies modules when their configuration changes, allowing proactive invalidation.
+   186→   186→4. **Cache fallback.** If the configuration service is unavailable, modules may use cached values, with awareness that they may be stale.
+   187→   187→
+   188→   188→A module that uses stale configuration beyond its TTL is defective.
+   189→   189→
+   190→   190→### 4.5 Module Configuration Dependencies
+   191→   191→
+   192→   192→Some configuration values depend on others. For example, a notification template may reference a locale, and the locale must be available for the tenant. The configuration schema declares dependencies, and the configuration service validates that dependencies are satisfied at submission time.
+   193→   193→
+   194→   194→---
+   195→   195→
+   196→   196→## 5. Feature Flags
+   197→   197→
+   198→   198→### 5.1 Feature Flags vs. Configuration
+   199→   199→
+   200→   200→Feature flags and configuration are distinct mechanisms (SYSTEM_ARCHITECTURE.md Section 8.8):
+   201→   201→
+   202→   202→| Property | Configuration | Feature Flags |
+   203→   203→|---|---|---|
+   204→   204→| Purpose | Declares how the platform behaves | Declares whether a capability is exposed |
+   205→   205→| Granularity | Per-key, per-layer | Per-capability, per-targeting-rule |
+   206→   206→| Evaluation | Resolved at configuration access | Resolved at capability access |
+   207→   207→| Lifecycle | Long-lived | Often short-lived (release flags) |
+   208→   208→| Governance | Configuration governance | Feature flag governance |
+   209→   209→
+   210→   210→Both are data, both are versioned, both are audited, both are governed, but they serve different purposes and are managed by separate platform services.
+   211→   211→
+   212→   212→### 5.2 Feature Flag Types
+   213→   213→
+   214→   214→Ibn Hayan recognizes five types of feature flags (SYSTEM_ARCHITECTURE.md Section 14.2):
+   215→   215→
+   216→   216→| Flag Type | Purpose | Lifecycle Owner |
+   217→   217→|---|---|---|
+   218→   218→| Release Flag | Decouples deployment from release for new capabilities | Engineering |
+   219→   219→| Ops Flag | Toggles operational behavior in response to incidents | Operations |
+   220→   220→| Experiment Flag | Controls A/B or multivariate experiments | Product |
+   221→   221→| Permission Flag | Gates a capability based on user role or permission | Product |
+   222→   222→| Entitlement Flag | Gates a capability based on tenant edition or purchased entitlement | Product / Commercial |
+   223→   223→
+   224→   224→### 5.3 Feature Flag Lifecycle
+   225→   225→
+   226→   226→Feature flags follow a defined lifecycle (SYSTEM_ARCHITECTURE.md Section 14.3): draft → staged → generally available → sunset → retired. Flags that remain in the platform indefinitely are defects; they accumulate technical debt and obscure the platform's actual behavior.
+   227→   227→
+   228→   228→### 5.4 Feature Flag Evaluation
+   229→   229→
+   230→   230→Feature flag evaluation considers context (tenant, edition, user role, facility, custom attributes) and returns a boolean or variant. The evaluation is performed by the feature flag service, not by individual consumers. Within a single request, a flag resolves to the same value regardless of which consumer evaluates it (SYSTEM_ARCHITECTURE.md Section 14.4).
+   231→   231→
+   232→   232→### 5.5 Feature Flag Governance
+   233→   233→
+   234→   234→Feature flag governance scales with flag type and scope (SYSTEM_ARCHITECTURE.md Section 14.5). Ops flags may be toggled by on-call engineers under incident procedures. Entitlement flags require commercial authorization. All flag changes are audited.
+   235→   235→
+   236→   236→---
+   237→   237→
+   238→   238→## 6. Configuration Storage
+   239→   239→
+   240→   240→### 6.1 Storage Strategy
+   241→   241→
+   242→   242→Configuration is stored in the transactional store (ADR-006), with the following characteristics:
+   243→   243→
+   244→   244→1. **Tenant-scoped.** Configuration records carry a tenant identifier; queries are tenant-scoped.
+   245→   245→2. **Versioned.** Every configuration record has a version history, retained per regulatory requirements.
+   246→   246→3. **Indexed.** Configuration is indexed by key, tenant, layer, and version for efficient resolution.
+   247→   247→4. **Cached.** Resolved configuration is cached (request-scoped, service-scoped, distributed) for performance.
+   248→   248→
+   249→   249→### 6.2 Configuration Record Structure
+   250→   250→
+   251→   251→Each configuration record contains:
+   252→   252→
+   253→   253→| Field | Description |
+   254→   254→|---|---|
+   255→   255→| ID | Unique identifier for the record |
+   256→   256→| Tenant ID | Tenant the record belongs to (or "platform" for platform defaults) |
+   257→   257→| Layer | Configuration layer (platform, edition, tenant, facility, etc.) |
+   258→   258→| Scope | Specific scope within the layer (e.g., which facility) |
+   259→   259→| Key | Configuration key name |
+   260→   260→| Value | Configuration value (typed per schema) |
+   261→   261→| Schema version | Version of the configuration schema this record conforms to |
+   262→   262→| Record version | Version of this specific record (for optimistic concurrency) |
+   263→   263→| Created at | When the record was created |
+   264→   264→| Created by | Who created the record |
+   265→   265→| Last modified at | When the record was last modified |
+   266→   266→| Last modified by | Who last modified the record |
+   267→   267→| Authorization | Under what authorization the change was made |
+   268→   268→
+   269→   269→### 6.3 Version History
+   270→   270→
+   271→   271→Every configuration record has a version history. The platform retains history sufficient to support rollback to any prior version within a defined retention window (multi-year, aligned with regulatory retention requirements). Version history is itself audited.
+   272→   272→
+   273→   273→### 6.4 Storage Segregation
+   274→   274→
+   275→   275→Configuration storage is segregated from operational data storage, even though both use the transactional store. This segregation supports:
+   276→   276→
+   277→   277→1. **Independent scaling.** Configuration access patterns (high read, low write) differ from operational patterns.
+   278→   278→2. **Independent backup.** Configuration can be backed up and restored independently.
+   279→   279→3. **Independent monitoring.** Configuration access is monitored separately.
+   280→   280→4. **Auditability.** Configuration changes are audited as first-class events.
+   281→   281→
+   282→   282→---
+   283→   283→
+   284→   284→## 7. Configuration Validation
+   285→   285→
+   286→   286→### 7.1 Validation Rule Categories
+   287→   287→
+   288→   288→Validation rules are declared in the configuration schema and enforced by the configuration service (SYSTEM_ARCHITECTURE.md Section 15.3):
+   289→   289→
+   290→   290→| Rule Type | Examples | When Checked |
+   291→   291→|---|---|---|
+   292→   292→| Structural | Required fields, types, ranges, formats | At submission |
+   293→   293→| Referential | References to other configuration records must exist | At submission |
+   294→   294→| Semantic | The configuration is internally consistent and safe to apply | At submission |
+   295→   295→| Contextual | The configuration is valid in the current platform state (e.g., edition, region, enabled modules) | At submission |
+   296→   296→| Regulatory | The configuration complies with applicable regulatory regimes | At submission |
+   297→   297→| Runtime | The configuration is compatible with the current runtime state (e.g., a workflow definition references a step that exists) | At evaluation |
+   298→   298→
+   299→   299→### 7.2 Validation Process
+   300→   300→
+   301→   301→Validation is performed by the configuration service, not by individual consumers:
+   302→   302→
+   303→   303→1. **Schema lookup.** The configuration service looks up the schema for the configuration key.
+   304→   304→2. **Structural validation.** The configuration value is validated against the schema's structural rules.
+   305→   305→3. **Referential validation.** References to other configuration records are validated.
+   306→   306→4. **Semantic validation.** Internal consistency is validated.
+   307→   307→5. **Contextual validation.** The configuration is validated against the current platform state.
+   308→   308→6. **Regulatory validation.** The configuration is validated against applicable regulatory regimes.
+   309→   309→7. **Result.** If all validations pass, the configuration is accepted. If any fail, the configuration is rejected with a structured error.
+   310→   310→
+   311→   311→### 7.3 Validation Errors
+   312→   312→
+   313→   313→Validation errors are structured, with:
+   314→   314→
+   315→   315→1. **Error code** — a stable identifier for the error type.
+   316→   316→2. **Error message** — a human-readable description.
+   317→   317→3. **Field** — which field of the configuration value failed validation.
+   318→   318→4. **Rule** — which validation rule failed.
+   319→   319→5. **Suggestion** — where applicable, a suggested correction.
+   320→   320→
+   321→   321→Validation errors are returned to the submitter at submission time. A configuration that fails validation is not applied.
+   322→   322→
+   323→   323→### 7.4 Validation Testing
+   324→   324→
+   325→   325→Validation rules are tested through:
+   326→   326→
+   327→   327→1. **Unit tests** — each rule is tested with valid and invalid inputs.
+   328→   328→2. **Integration tests** — the validation service is tested with realistic configuration records.
+   329→   329→3. **Property-based tests** — random configuration values are generated and validated, to find edge cases.
+   330→   330→4. **Regression tests** — defects in validation are captured as regression tests to prevent recurrence.
+   331→   331→
+   332→   332→---
+   333→   333→
+   334→   334→## 8. Configuration Lifecycle
+   335→   335→
+   336→   336→### 8.1 Lifecycle States
+   337→   337→
+   338→   338→Configuration records follow a lifecycle:
+   339→   339→
+   340→   340→| State | Meaning |
+   341→   341→|---|---|
+   342→   342→| Draft | The configuration is being authored; not yet validated or applied |
+   343→   343→| Validated | The configuration has passed validation but has not been applied |
+   344→   344→| Active | The configuration is in effect |
+   345→   345→| Superseded | The configuration has been replaced by a newer version; retained for history |
+   346→   346→| Archived | The configuration has been moved to archival storage per retention policy |
+   347→   347→| Purged | The configuration has been purged per data retention and deletion policies |
+   348→   348→
+   349→   349→### 8.2 Lifecycle Transitions
+   350→   350→
+   351→   351→| Transition | Trigger | Requirements |
+   352→   352→|---|---|---|
+   353→   353→| Draft → Validated | Submission | All validation rules pass |
+   354→   354→| Validated → Active | Application | Authorization verified; audit captured |
+   355→   355→| Active → Superseded | New version applied | New version is active; old version is retained |
+   356→   356→| Active/Superseded → Archived | Retention threshold reached | Per retention policy; audited |
+   357→   357→| Archived → Purged | Purge threshold reached | Per retention and deletion policy; audited |
+   358→   358→
+   359→   359→### 8.3 Configuration Rollback
+   360→   360→
+   361→   361→Rollback restores a previous version of a configuration record. Rollback is itself an audited operation; configuration is never silently reverted. Rollback is supported within the active retention window; records that have been purged cannot be rolled back.
+   362→   362→
+   363→   363→Rollback is used to recover from defective configuration changes. The rollback process:
+   364→   364→
+   365→   365→1. **Identify the target version.** The administrator identifies the version to roll back to.
+   366→   366→2. **Validate the target version.** The target version is validated against the current platform state (the platform may have evolved since the target version was active).
+   367→   367→3. **Apply the target version.** The target version becomes the active version; the previous active version is superseded.
+   368→   368→4. **Audit.** The rollback is captured in the audit trail.
+   369→   369→
+   370→   370→### 8.4 Configuration Promotion
+   371→   371→
+   372→   372→Configuration may be promoted from a sandbox environment to production (SYSTEM_ARCHITECTURE.md Section 15.6). Promotion is a defined workflow:
+   373→   373→
+   374→   374→1. **Author in sandbox.** The configuration is authored and validated in a sandbox environment.
+   375→   375→2. **Test in sandbox.** The configuration is tested with realistic data and scenarios.
+   376→   376→3. **Submit for promotion.** The configuration is submitted for promotion to production.
+   377→   377→4. **Review.** The promotion is reviewed by authorized roles.
+   378→   378→5. **Promote.** The configuration is applied to production, with audit capture.
+   379→   379→
+   380→   380→Promotion preserves audit history; the configuration's authoring in sandbox is linked to its promotion to production.
+   381→   381→
+   382→   382→---
+   383→   383→
+   384→   384→## 9. Environment-Specific Configuration
+   385→   385→
+   386→   386→### 9.1 Environment Inventory
+   387→   387→
+   388→   388→Ibn Hayan operates multiple environments:
+   389→   389→
+   390→   390→| Environment | Purpose | Configuration Source |
+   391→   391→|---|---|---|
+   392→   392→| Development | Engineering development | Engineering-managed; not tenant-facing |
+   393→   393→| Staging | Pre-production testing | Mirror of production, with test data |
+   394→   394→| Sandbox | Tenant configuration testing | Tenant-managed; isolated from production |
+   395→   395→| Production | Live tenant operation | Tenant-managed; authoritative |
+   396→   396→
+   397→   397→### 9.2 Environment Configuration Isolation
+   398→   398→
+   399→   399→Each environment has its own configuration store, isolated from other environments. Configuration does not flow between environments except through defined promotion workflows. Cross-environment configuration references are forbidden.
+   400→   400→
+   401→   401→### 9.3 Environment Parity
+   402→   402→
+   403→   403→Staging mirrors production, to support realistic testing. Parity includes:
+   404→   404→
+   405→   405→1. **Configuration schema parity.** Staging uses the same configuration schemas as production.
+   406→   406→2. **Module parity.** Staging has the same modules enabled as production.
+   407→   407→3. **Data shape parity.** Staging uses data that is shape-compatible with production (though not real production data).
+   408→   408→4. **Integration parity.** Staging integrates with sandbox versions of external systems, not production versions.
+   409→   409→
+   410→   410→Parity is not identity; staging is not a clone of production. But parity must be sufficient that configuration validated in staging is likely to behave the same in production.
+   411→   411→
+   412→   412→### 9.4 Environment-Specific Overrides
+   413→   413→
+   414→   414→Some configuration is environment-specific by design:
+   415→   415→
+   416→   416→| Configuration | Environment-Specific? | Reason |
+   417→   417→|---|---|---|
+   418→   418→| External system endpoints | Yes | Staging uses sandbox endpoints; production uses real endpoints |
+   419→   419→| Credentials | Yes | Each environment has its own credentials |
+   420→   420→| Rate limits | Yes | Staging has lower rate limits to prevent accidental load |
+   421→   421→| Feature flag staged populations | Yes | Staging's staged population is engineering-only; production's is broader |
+   422→   422→| Tenant configuration | No | Tenant configuration is authored in sandbox and promoted to production |
+   423→   423→
+   424→   424→Environment-specific configuration is managed through environment-level configuration overlays, applied on top of the standard configuration layers.
+   425→   425→
+   426→   426→---
+   427→   427→
+   428→   428→## 10. Configuration Security
+   429→   429→
+   430→   430→### 10.1 Authorization
+   431→   431→
+   432→   432→Configuration access is authorized based on:
+   433→   433→
+   434→   434→1. **Layer.** Platform-default configuration requires architectural review; tenant configuration requires tenant administrator authorization; facility configuration requires facility administrator authorization; and so on.
+   435→   435→2. **Scope.** A user can only modify configuration within their scope (a facility administrator cannot modify another facility's configuration).
+   436→   436→3. **Action.** Read, write, and delete actions may have different authorization requirements.
+   437→   437→4. **Configuration type.** Some configuration types (e.g., security policies) require additional authorization.
+   438→   438→
+   439→   439→Authorization is enforced by the configuration service. A configuration change that lacks required authorization is rejected, regardless of who attempts it.
+   440→   440→
+   441→   441→### 10.2 Secrets in Configuration
+   442→   442→
+   443→   443→Secrets (credentials, keys, tokens) are not stored in configuration. Configuration references secrets by identifier; the secrets service resolves the reference at runtime (SYSTEM_ARCHITECTURE.md Section 20.5). This separation ensures that secrets are managed with the discipline they require, and that configuration records do not become a security liability.
+   444→   444→
+   445→   445→A configuration record that contains a literal secret value is a security defect. Validation rules reject configuration values that look like secrets (e.g., long strings matching credential patterns) unless the configuration schema explicitly permits them.
+   446→   446→
+   447→   447→### 10.3 Configuration Access Auditing
+   448→   448→
+   449→   449→All configuration access is audited, including reads. The audit record captures:
+   450→   450→
+   451→   451→1. **Who** accessed the configuration.
+   452→   452→2. **What** configuration was accessed (key, scope, version).
+   453→   453→3. **When** the access occurred.
+   454→   454→4. **From where** the access originated (IP address, device).
+   455→   455→5. **Under what authorization** the access was made.
+   456→   456→6. **What action** was taken (read, write, delete, validate, promote).
+   457→   457→
+   458→   458→Configuration access auditing supports post-incident investigation and regulatory inquiry.
+   459→   459→
+   460→   460→### 10.4 Configuration Encryption
+   461→   461→
+   462→   462→Configuration is encrypted at rest (SYSTEM_ARCHITECTURE.md Section 20.4), with tenant-specific keys where supported. Encryption protects configuration from unauthorized access through storage-level compromise.
+   463→   463→
+   464→   464→---
+   465→   465→
+   466→   466→## 11. Configuration Hot-Reload
+   467→   467→
+   468→   468→### 11.1 Hot-Reload Definition
+   469→   469→
+   470→   470→Hot-reload is the ability to change configuration without redeploying the platform. Most configuration supports hot-reload; some configuration (e.g., configuration that affects platform startup) requires a restart.
+   471→   471→
+   472→   472→### 11.2 Hot-Reload Mechanism
+   473→   473→
+   474→   474→Hot-reload is implemented through:
+   475→   475→
+   476→   476→1. **Configuration service notifications.** When configuration changes, the configuration service notifies affected modules.
+   477→   477→2. **Module cache invalidation.** Modules invalidate their cached configuration values.
+   478→   478→3. **Re-resolution.** The next configuration access resolves the new value.
+   479→   479→
+   480→   480→Hot-reload is eventual, not immediate. There is a window between configuration change and module behavior change, bounded by the notification latency and the cache invalidation latency. This window is monitored and is part of the configuration service's SLA.
+   481→   481→
+   482→   482→### 11.3 Configuration Requiring Restart
+   483→   483→
+   484→   484→Some configuration cannot be hot-reloaded:
+   485→   485→
+   486→   486→| Configuration | Why Restart Required |
+   487→   487→|---|---|
+   488→   488→| Platform startup parameters | Read once at startup |
+   489→   489→| Module initialization parameters | Read once at module initialization |
+   490→   490→| Connection pool sizes | Changing pools requires restart |
+   491→   491→| Cache infrastructure configuration | Changing cache infrastructure requires restart |
+   492→   492→
+   493→   493→Configuration that requires restart is marked in the schema. Changes to such configuration trigger a notification that the change will take effect on next restart, not immediately.
+   494→   494→
+   495→   495→### 11.4 Hot-Reload Safety
+   496→   496→
+   497→   497→Hot-reload must not produce inconsistent state. The hot-reload mechanism:
+   498→   498→
+   499→   499→1. **Validates the new configuration.** Invalid configuration is rejected, and the old configuration remains in effect.
+   500→   500→2. **Applies the new configuration atomically.** All affected modules see the new configuration at the same logical moment.
+   501→   501→3. **Handles in-flight operations.** Operations in progress when configuration changes may use the old or new configuration; the choice is part of the module's contract.
+   502→   502→4. **Audits the change.** The hot-reload is captured in the audit trail.
+   503→   503→
+   504→   504→---
+   505→   505→
+   506→   506→## 12. Configuration Audit Trail
+   507→   507→
+   508→   508→### 12.1 Audit Trail Definition
+   509→   509→
+   510→   510→The configuration audit trail is the tamper-evident, append-only record of all configuration changes. It is part of the platform's audit store (SYSTEM_ARCHITECTURE.md Section 27) and follows the same immutability, tamper-evidence, and retention rules.
+   511→   511→
+   512→   512→### 12.2 Audit Record Structure
+   513→   513→
+   514→   514→Each configuration audit record contains:
+   515→   515→
+   516→   516→| Field | Description |
+   517→   517→|---|---|
+   518→   518→| Timestamp | When the change occurred |
+   519→   519→| Actor | Who made the change (user, service) |
+   520→   520→| Action | What action was taken (create, update, delete, validate, promote, rollback) |
+   521→   521→| Configuration key | Which configuration key was affected |
+   522→   522→| Previous value | The value before the change (for updates) |
+   523→   523→| New value | The value after the change (for updates) |
+   524→   524→| Layer | Which configuration layer was affected |
+   525→   525→| Scope | Which scope within the layer was affected |
+   526→   526→| Authorization | Under what authorization the change was made |
+   527→   527→| Validation result | Whether validation passed |
+   528→   528→| Reason | Why the change was made (where applicable) |
+   529→   529→
+   530→   530→### 12.3 Audit Trail Uses
+   531→   531→
+   532→   532→The configuration audit trail supports:
+   533→   533→
+   534→   534→1. **Regulatory inquiry.** Regulators may demand evidence of system configuration at the time of a clinical event; the audit trail provides this evidence.
+   535→   535→2. **Post-incident analysis.** After an incident, the audit trail shows what configuration changes may have contributed.
+   536→   536→3. **Compliance review.** Auditors review the audit trail to verify that configuration governance was followed.
+   537→   537→4. **Rollback.** The audit trail identifies prior versions for rollback.
+   538→   538→5. **Operational diagnosis.** When behavior changes unexpectedly, the audit trail shows what configuration changed.
+   539→   539→
+   540→   540→### 12.4 Audit Trail Retention
+   541→   541→
+   542→   542→Audit trail retention follows regulatory requirements, which vary by region and by configuration type. The platform supports per-tenant retention configuration, within the bounds of regulatory minimums. Retention transitions (active → archived → purged) are themselves audited.
+   543→   543→
+   544→   544→### 12.5 Audit Trail Access
+   545→   545→
+   546→   546→Access to the audit trail is itself audited and tightly controlled (SYSTEM_ARCHITECTURE.md Section 27.6). Audit records may be read by authorized roles (compliance officers, security analysts, auditors) for legitimate purposes; access is logged.
+   547→   547→
+   548→   548→### 12.6 Audit Trail Tamper-Evidence
+   549→   549→
+   550→   550→The audit trail is tamper-evident (SYSTEM_ARCHITECTURE.md Section 27.5). Tamper-evidence is provided through cryptographic mechanisms (hash chains, Merkle trees, digital signatures) that make any modification detectable. The architecture does not trust the audit trail's integrity to operational discipline alone; it enforces integrity cryptographically.
+   551→   551→
+   552→   552→---
+   553→   553→
+   554→   554→## 13. Related Documents
+   555→   555→
+   556→   556→### 13.1 Upstream Documents
+   557→   557→
+   558→   558→| Document | Relationship |
+   559→   559→|---|---|
+   560→   560→| `docs/00_PROJECT/PRODUCT_BIBLE.md` | Product authority that defines editions, modules, and the configuration-driven commitment |
+   561→   561→| `docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` | System-level architectural authority; this document elaborates its configuration aspects |
+   562→   562→| `docs/12_ADR/001_CONFIGURATION_DRIVEN_ARCHITECTURE.md` | Foundational ADR that this document realizes |
+   563→   563→
+   564→   564→### 13.2 Peer Documents
+   565→   565→
+   566→   566→| Document | Relationship |
+   567→   567→|---|---|
+   568→   568→| `docs/01_ARCHITECTURE/SOFTWARE_ARCHITECTURE.md` | Software-level architectural authority; this document references it for cross-cutting concerns |
+   569→   569→| `docs/01_ARCHITECTURE/MODULE_ARCHITECTURE.md` | Module-level architectural authority; this document references it for module configuration surface |
+   570→   570→| `docs/01_ARCHITECTURE/CODING_STANDARDS.md` | Implementation-level conventions; this document defines the structure they conform to |
+   571→   571→| `docs/01_ARCHITECTURE/FOLDER_STRUCTURE.md` | Repository layout; this document defines the structure it reflects |
+   572→   572→
+   573→   573→### 13.3 Downstream Documents
+   574→   574→
+   575→   575→| Document | Relationship |
+   576→   576→|---|---|
+   577→   577→| `docs/03_DOMAIN/CONFIGURATION.md` | Domain-level configuration model; must align with this document |
+   578→   578→| `docs/03_DOMAIN/FEATURE_FLAGS.md` | Feature flag definitions; must align with Section 5 of this document |
+   579→   579→| `docs/09_SECURITY/AUDIT.md` | Audit architecture; must align with Section 12 of this document |
+   580→   580→| `docs/12_ADR/*` | Architectural Decision Records; amend this document through ratified decisions |
+   581→   581→
+   582→   582→### 13.4 Document Authority
+   583→   583→
+   584→   584→This document is authoritative for configuration architecture. Where a downstream document conflicts with this document, this document prevails until an ADR is ratified to amend it. ADRs are the only mechanism by which this document is changed; ad-hoc deviations are defects.
+   585→   585→

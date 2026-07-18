@@ -1,0 +1,624 @@
+     1→# Ibn Hayan Healthcare Operating System
+     2→## Module Architecture
+     3→
+     4→> **Document Purpose:** The internal architecture of Ibn Hayan modules — catalog, boundaries, contracts, dependencies, lifecycle, communication patterns, versioning, extension points, configuration surface, isolation strategy, and testing strategy. This document elaborates the module-level aspects of `SYSTEM_ARCHITECTURE.md` Sections 9 and 13 and must align with them.
+     5→>
+     6→> **Status:** Authoritative · **Version:** 1.0.0 · **Last Updated:** 2026-07-18
+     7→> **Document Owner:** Office of the Chief Software Architect
+     8→> **Review Cadence:** Quarterly, with off-cycle revision when a related ADR is ratified
+     9→>
+    10→> This document is part of the official Ibn Hayan Healthcare Operating System
+    11→> documentation framework and serves as the authoritative reference for its
+    12→> architectural domain. It is intended for the entire engineering, architecture,
+    13→> security, and operations organizations.
+    14→
+    15→---
+    16→
+    17→## Table of Contents
+    18→
+    19→1. Module Architecture Overview
+    20→2. Module Catalog
+    21→3. Module Boundaries
+    22→4. Module Contracts
+    23→5. Module Dependencies
+    24→6. Module Lifecycle
+    25→7. Module Communication Patterns
+    26→8. Module Versioning
+    27→9. Module Extension Points
+    28→10. Module Configuration Surface
+    29→11. Module Isolation Strategy
+    30→12. Module Testing Strategy
+    31→13. Related Documents
+    32→
+    33→---
+    34→
+    35→## 1. Module Architecture Overview
+    36→
+    37→### 1.1 Purpose and Scope
+    38→
+    39→This document defines the internal architecture of Ibn Hayan modules. It elaborates the module-level aspects of the platform — what modules exist, how they are bounded, how they contract with each other, how they evolve, and how they are tested. It is constrained by, and must align with, `SYSTEM_ARCHITECTURE.md`, particularly Sections 9 (Modular Architecture) and 13 (Module Architecture).
+    40→
+    41→Where this document and `SYSTEM_ARCHITECTURE.md` appear to conflict, `SYSTEM_ARCHITECTURE.md` prevails. This document is amended through the same ADR process.
+    42→
+    43→### 1.2 Audience
+    44→
+    45→The primary audience is software architects, module owners, principal engineers, and engineering managers who design and govern modules. The secondary audience is engineers implementing modules, who must understand the structural boundaries their work operates within.
+    46→
+    47→### 1.3 Foundational Decisions
+    48→
+    49→This document is governed by the following ADRs:
+    50→
+    51→| ADR | Decision |
+    52→|---|---|
+    53→| ADR-001 | Configuration-driven architecture (modules expose configuration schemas) |
+    54→| ADR-002 | Modular architecture (modules are autonomous units with explicit contracts) |
+    55→| ADR-004 | Multi-tenant strategy (modules are multi-tenant by construction) |
+    56→| ADR-006 | Database strategy (modules own their authoritative state) |
+    57→
+    58→### 1.4 Document Conventions
+    59→
+    60→Sections are numbered for stable cross-referencing. Tables summarize decisions where prose would obscure them. The verbs *must*, *should*, and *may* are used in their normative sense. Module names are capitalized (e.g., the Patient module).
+    61→
+    62→---
+    63→
+    64→## 2. Module Catalog
+    65→
+    66→### 2.1 Module Inventory
+    67→
+    68→Ibn Hayan's modules correspond to the bounded contexts defined in `SYSTEM_ARCHITECTURE.md` Section 7.2. The catalog below lists the modules, their owning context, and their primary responsibility.
+    69→
+    70→| Module | Owning Context | Primary Responsibility |
+    71→|---|---|---|
+    72→| Patient | Patient | Patient identity, demographics, consents, identifiers |
+    73→| Encounter | Encounter | Patient–provider interactions across time and settings |
+    74→| Clinical Documentation | Clinical Documentation | Charts, notes, assessments, observations, care plans |
+    75→| Orders & Results | Orders & Results | Diagnostic and therapeutic orders and their results |
+    76→| Scheduling | Scheduling | Appointments, resources, calendars, slots |
+    77→| Billing | Billing | Charges, claims, invoices, payments, adjustments |
+    78→| Inventory | Inventory | Medical and consumable stock, movements, lots |
+    79→| Pharmacy | Pharmacy | Medications, prescriptions, dispensing |
+    80→| Workforce | Workforce | Practitioners, staff, roles, credentials |
+    81→| CRM | CRM | Prospects, leads, campaigns, communications |
+    82→| Accounting | Accounting | Ledgers, accounts, postings, reconciliations |
+    83→| HR | HR | Employees, payroll inputs, leave, attendance |
+    84→| Documents | Documents | Clinical and administrative documents, templates, signatures |
+    85→| Notifications | Notifications | Notification templates, delivery, preferences |
+    86→| Identity & Access | Identity & Access (platform service) | Users, sessions, roles, permissions |
+    87→| Configuration | Configuration (platform service) | Configuration schemas, values, versions |
+    88→| Audit | Audit (platform service) | Audit events, audit context |
+    89→| Feature Flags | Feature Flags (platform service) | Flag definitions, evaluations |
+    90→| Localization | Localization (platform service) | Translations, locale catalogs |
+    91→
+    92→### 2.2 Module Classification
+    93→
+    94→Modules are classified by their role in the platform:
+    95→
+    96→| Classification | Modules | Characteristics |
+    97→|---|---|---|
+    98→| Clinical modules | Patient, Encounter, Clinical Documentation, Orders & Results, Pharmacy | Healthcare-native; clinical safety is paramount |
+    99→| Operational modules | Scheduling, Inventory, Workforce, Documents, Notifications | Support daily operations; clinical-adjacent |
+   100→| Business modules | Billing, CRM, Accounting, HR | Financial and administrative; regulatory compliance |
+   101→| Platform service modules | Identity & Access, Configuration, Audit, Feature Flags, Localization | Cross-cutting; depended upon by all other modules |
+   102→
+   103→### 2.3 Module Ownership
+   104→
+   105→Each module has a clear owner — a team responsible for the module's design, implementation, operation, and evolution. Ownership is recorded in the module registry and is updated through defined handover processes. A module without a clear owner is a defect.
+   106→
+   107→### 2.4 Module Maturity
+   108→
+   109→Modules vary in maturity. Some are generally available and stable; some are newer and still stabilizing; some are being deprecated in favor of successors. Module maturity is tracked in the module registry and is communicated through release notes.
+   110→
+   111→---
+   112→
+   113→## 3. Module Boundaries
+   114→
+   115→### 3.1 Boundary Definition
+   116→
+   117→A module boundary is the surface between a module and the rest of the platform. Everything inside the boundary is private to the module; everything on the boundary is public. The boundary is defined by the module's contract surface (Section 4).
+   118→
+   119→Boundary design is the most consequential module-level decision. A well-designed boundary enables independent evolution; a poorly designed boundary creates coupling that impedes evolution. Boundaries are designed before they are published; once published, they are expensive to change.
+   120→
+   121→### 3.2 Boundary Design Criteria
+   122→
+   123→A module boundary should:
+   124→
+   125→1. **Expose cohesive capabilities.** The capabilities exposed on the boundary are related and serve a coherent purpose.
+   126→2. **Hide implementation details.** Internal data structures, algorithms, and processes are not visible on the boundary.
+   127→3. **Be stable.** The boundary evolves through backward-compatible changes; breaking changes are rare and follow the deprecation policy.
+   128→4. **Be minimal.** The boundary exposes only what consumers need; speculative capabilities are not exposed.
+   129→5. **Be documented.** Each capability on the boundary is documented with its contract, semantics, and failure modes.
+   130→
+   131→### 3.3 Boundary Anti-Patterns
+   132→
+   133→| Anti-Pattern | Description | Why Forbidden |
+   134→|---|---|---|
+   135→| Leaky abstraction | The boundary exposes implementation details (e.g., internal data structures) | Couples consumers to implementation |
+   136→| God contract | A single contract handles many unrelated responsibilities | Violates single responsibility |
+   137→| Chatty boundary | Consumers must make many calls to accomplish one operation | Inefficient and brittle |
+   138→| Anemic boundary | The boundary exposes data but no behavior | Reduces modules to data stores |
+   139→| Undocumented boundary | Capabilities are not documented | Consumers guess at behavior |
+   140→| Unstable boundary | The boundary changes frequently in breaking ways | Consumers cannot depend on it |
+   141→
+   142→### 3.4 Boundary Refactoring
+   143→
+   144→Module boundaries may be refactored, but only through a deliberate process (SOFTWARE_ARCHITECTURE.md Section 5.5): justification, ADR, migration path, deprecation, retirement. Boundary refactoring is expensive and is undertaken only when the cost of not refactoring exceeds the cost of refactoring.
+   145→
+   146→---
+   147→
+   148→## 4. Module Contracts
+   149→
+   150→### 4.1 Contract Surface
+   151→
+   152→Every module exposes a contract surface consisting of four elements (SYSTEM_ARCHITECTURE.md Section 9.2):
+   153→
+   154→| Contract Element | Purpose | Examples |
+   155→|---|---|---|
+   156→| Commands | Operations that change state | RegisterPatient, ScheduleAppointment, SubmitClaim |
+   157→| Queries | Operations that return data without changing state | GetPatient, ListAppointments, GetClaimStatus |
+   158→| Domain Events | Notifications of state changes | PatientRegistered, AppointmentScheduled, ClaimSubmitted |
+   159→| Configuration Schema | Configuration the module accepts | Patient validation rules, Appointment slot durations |
+   160→
+   161→A module may not expose any other surface. Internal implementation is not part of the contract.
+   162→
+   163→### 4.2 Contract Definition
+   164→
+   165→Contracts are defined explicitly, with:
+   166→
+   167→1. **Name** — a stable, descriptive identifier.
+   168→2. **Version** — semantic version (major.minor.patch).
+   169→3. **Inputs** — parameters with types and constraints.
+   170→4. **Outputs** — return values with types and constraints.
+   171→5. **Errors** — possible errors with codes and meanings.
+   172→6. **Preconditions** — conditions that must hold for the operation to be valid.
+   173→7. **Postconditions** — conditions that hold after the operation succeeds.
+   174→8. **Idempotency** — whether the operation is idempotent.
+   175→9. **Authorization** — required permissions.
+   176→10. **Audit** — what is captured in the audit log.
+   177→
+   178→Contracts are documented in a standard format and are version-controlled alongside the module's source code.
+   179→
+   180→### 4.3 Command Contracts
+   181→
+   182→Commands are operations that change state. Every command:
+   183→
+   184→1. **Is named in the imperative** (e.g., `RegisterPatient`, not `PatientRegistration`).
+   185→2. **Has a unique identifier** (for idempotency).
+   186→3. **Is authorized** before execution.
+   187→4. **Is validated** before execution.
+   188→5. **Is audited** on execution.
+   189→6. **Emits domain events** on success.
+   190→
+   191→Commands may be synchronous (the caller waits for the result) or asynchronous (the caller receives an acknowledgement and the result is delivered later). The choice is part of the command's contract.
+   192→
+   193→### 4.4 Query Contracts
+   194→
+   195→Queries are operations that return data without changing state. Every query:
+   196→
+   197→1. **Is named in the interrogative or as a noun** (e.g., `GetPatient`, `PatientList`).
+   198→2. **Is authorized** before execution.
+   199→3. **Is tenant-scoped** by default.
+   200→4. **Is cacheable** where appropriate.
+   201→5. **Does not emit domain events** (queries are side-effect-free).
+   202→
+   203→Queries may be paginated, filtered, sorted, and projected. The query contract defines the supported parameters and their semantics.
+   204→
+   205→### 4.5 Domain Event Contracts
+   206→
+   207→Domain events are notifications of state changes. Every event:
+   208→
+   209→1. **Is named in the past tense** (e.g., `PatientRegistered`, `AppointmentScheduled`).
+   210→2. **Has a unique identifier** (for idempotent consumption).
+   211→3. **Has a timestamp** (when the event occurred).
+   212→4. **Has a tenant identifier** (for tenant-scoped consumption).
+   213→5. **Has a producer identifier** (which module emitted it).
+   214→6. **Has a payload** (the data the event carries).
+   215→7. **Has a schema version** (for evolution).
+   216→
+   217→Events are emitted by the module that owns the state change, through the outbox pattern (Section 7.4), and are delivered to subscribers at least once.
+   218→
+   219→### 4.6 Configuration Schema Contracts
+   220→
+   221→Configuration schemas define what configuration a module accepts. Every schema:
+   222→
+   223→1. **Declares configuration keys** with types, defaults, and constraints.
+   224→2. **Declares validation rules** (structural, referential, semantic, contextual, regulatory).
+   225→3. **Declares inheritance behavior** (how the value is resolved across configuration layers).
+   226→4. **Declares default values** (used when no value is provided).
+   227→5. **Is versioned** (for evolution).
+   228→
+   229→Configuration schemas are documented in a standard format and are version-controlled alongside the module's source code. They are detailed in `CONFIGURATION_ARCHITECTURE.md`.
+   230→
+   231→---
+   232→
+   233→## 5. Module Dependencies
+   234→
+   235→### 5.1 Dependency Rules
+   236→
+   237→Module dependencies follow the rules in `SYSTEM_ARCHITECTURE.md` Section 9.3 and `SOFTWARE_ARCHITECTURE.md` Section 6.1:
+   238→
+   239→1. Modules may depend on platform service modules.
+   240→2. Modules may depend on other domain modules through published contracts only.
+   241→3. Modules may depend on integration adapters through published contracts.
+   242→4. Modules may not depend on the experience layer.
+   243→5. Modules may not depend on the orchestration layer (except by being invoked by it).
+   244→6. Modules may not depend on another module's internals.
+   245→7. Dependency cycles are forbidden.
+   246→
+   247→### 5.2 Dependency Direction
+   248→
+   249→Dependencies flow downward and inward (SOFTWARE_ARCHITECTURE.md Section 3.2). The typical dependency direction is:
+   250→
+   251→| Source Module | May Depend On |
+   252→|---|---|
+   253→| Clinical module (e.g., Patient) | Platform services (Identity & Access, Configuration, Audit, Feature Flags, Localization); other clinical modules through contracts |
+   254→| Operational module (e.g., Scheduling) | Platform services; clinical modules through contracts; other operational modules through contracts |
+   255→| Business module (e.g., Billing) | Platform services; clinical and operational modules through contracts; integration adapters (e.g., payment gateways) |
+   256→| Platform service module (e.g., Configuration) | Data layer; other platform services through contracts |
+   257→
+   258→### 5.3 Dependency Inventory
+   259→
+   260→Each module maintains a dependency inventory — a documented list of modules it depends on, the contracts it depends on, and the versions it accepts. The inventory is version-controlled alongside the module's source code and is reviewed during architectural review.
+   261→
+   262→### 5.4 Forbidden Dependencies
+   263→
+   264→The following dependencies are explicitly forbidden:
+   265→
+   266→| Forbidden Dependency | Why |
+   267→|---|---|
+   268→| Domain module → Experience layer | Experience layer is a rendering surface, not a capability source |
+   269→| Domain module → Orchestration layer | Orchestration coordinates domain modules; the reverse would invert the dependency direction |
+   270→| Domain module → Another module's internals | Internals are private; only contracts are public |
+   271→| Platform service → Domain module | Platform services are depended upon by domains, not vice versa |
+   272→| Circular dependency | Cycles make the system impossible to reason about and to deploy independently |
+   273→
+   274→---
+   275→
+   276→## 6. Module Lifecycle
+   277→
+   278→### 6.1 Lifecycle States
+   279→
+   280→Modules follow a defined lifecycle (SYSTEM_ARCHITECTURE.md Section 9.4):
+   281→
+   282→| State | Meaning |
+   283→|---|---|
+   284→| Proposed | The module is defined in an ADR but not yet implemented |
+   285→| Implemented | The module's contract is implemented and integrated |
+   286→| Generally Available | The module is enabled by default for new tenants |
+   287→| Optional | The module is available but not enabled by default; tenants may enable it |
+   288→| Deprecated | The module is scheduled for retirement; a deprecation timeline is published |
+   289→| Retired | The module is no longer available; existing tenants have been migrated |
+   290→
+   291→### 6.2 Lifecycle Transitions
+   292→
+   293→| Transition | Trigger | Requirements |
+   294→|---|---|---|
+   295→| Proposed → Implemented | Implementation complete | Contract tests pass; documentation complete; security review passed |
+   296→| Implemented → Generally Available | Sufficient stability and adoption | Operational readiness criteria met; performance validated; documentation published |
+   297→| Generally Available → Optional | Reduced demand or replacement by a successor | Successor available; migration path defined |
+   298→| Optional → Deprecated | Scheduled retirement | Deprecation timeline published; affected tenants notified |
+   299→| Deprecated → Retired | Deprecation window elapsed | All tenants migrated; data preserved per retention policy |
+   300→
+   301→### 6.3 Module Retirement
+   302→
+   303→Retiring a module is a significant undertaking. The retirement process:
+   304→
+   305→1. **Justification.** The retirement is justified by a structural concern (e.g., the module's capability is replaced by a successor).
+   306→2. **ADR.** The retirement is ratified through an ADR.
+   307→3. **Tenant notification.** Affected tenants are notified with sufficient lead time.
+   308→4. **Migration path.** A migration path is defined and documented.
+   309→5. **Migration execution.** Tenants are migrated, with data preserved per retention policy.
+   310→6. **Deprecation window.** The module operates in deprecated state during the migration window.
+   311→7. **Retirement.** The module is retired; its contracts are removed; its data is archived or purged per retention policy.
+   312→
+   313→---
+   314→
+   315→## 7. Module Communication Patterns
+   316→
+   317→### 7.1 Communication Mechanisms
+   318→
+   319→Modules communicate through three mechanisms (SOFTWARE_ARCHITECTURE.md Section 4.3):
+   320→
+   321→| Mechanism | When Used | Coupling |
+   322→|---|---|---|
+   323→| In-process contract invocation | Default for synchronous module-to-module calls | Synchronous; consumer blocked until result |
+   324→| Domain events | For asynchronous notification of state changes | Asynchronous; consumer reacts to past events |
+   325→| Network-based contract invocation | For communication with extracted services | Synchronous or asynchronous; depends on the contract |
+   326→
+   327→### 7.2 Synchronous Communication
+   328→
+   329→Synchronous communication (in-process or network) is used when:
+   330→
+   331→1. The consumer needs the result immediately.
+   332→2. The operation is short-lived (sub-second).
+   333→3. The consumer and producer are in the same transactional context (rare; usually requires sagas).
+   334→
+   335→Synchronous communication couples the consumer to the producer's availability and performance. Where the producer is unavailable or slow, the consumer must fail, degrade, or retry — all of which are part of the consumer's contract with its own callers.
+   336→
+   337→### 7.3 Asynchronous Communication
+   338→
+   339→Asynchronous communication (through domain events) is used when:
+   340→
+   341→1. The consumer does not need the result immediately.
+   342→2. The operation can tolerate eventual consistency.
+   343→3. The producer should not be coupled to the consumer's availability or performance.
+   344→
+   345→Asynchronous communication decouples the producer from the consumer. The producer emits the event and continues; the consumer reacts at its own pace. This decoupling allows consumers to be added, removed, or modified without coordinating with the producer.
+   346→
+   347→### 7.4 Outbox Pattern
+   348→
+   349→The outbox pattern is used to reliably emit domain events in coordination with state changes. When a module changes state, it writes the state change and the corresponding event to the outbox in the same transaction. A separate process reads the outbox and publishes the events to the event infrastructure.
+   350→
+   351→The outbox pattern solves the dual-write problem: without it, a module that writes state and then publishes an event may fail between the two operations, leaving the state changed but the event not published (or vice versa). The outbox ensures atomicity: the state change and the event are written together, and the event is published asynchronously.
+   352→
+   353→All modules that emit domain events must use the outbox pattern. Direct event publication (without the outbox) is forbidden.
+   354→
+   355→### 7.5 Idempotent Consumption
+   356→
+   357→Event consumers must be idempotent (SYSTEM_ARCHITECTURE.md Section 18.3): processing the same event twice must produce the same outcome as processing it once. Idempotency is achieved through:
+   358→
+   359→1. **Stable event identifiers** — each event has a unique ID.
+   360→2. **Consumer-side deduplication** — the consumer tracks processed event IDs and skips duplicates.
+   361→3. **Idempotent state transitions** — applying the same event twice produces the same state.
+   362→
+   363→Idempotency is required because the event infrastructure delivers events at least once, not exactly once.
+   364→
+   365→---
+   366→
+   367→## 8. Module Versioning
+   368→
+   369→### 8.1 Semantic Versioning
+   370→
+   371→Module contracts are versioned using semantic versioning (SYSTEM_ARCHITECTURE.md Section 13.2):
+   372→
+   373→| Version Component | Incremented When |
+   374→|---|---|
+   375→| Major | A backward-incompatible change is introduced |
+   376→| Minor | A backward-compatible capability is added |
+   377→| Patch | A defect is corrected without changing capability |
+   378→
+   379→Consumers depend on a contract version range and are protected from breaking changes within that range.
+   380→
+   381→### 8.2 Backward Compatibility
+   382→
+   383→A change is backward-compatible if existing consumers can continue to operate without modification. Examples:
+   384→
+   385→| Change | Backward-Compatible? |
+   386→|---|---|
+   387→| Adding an optional field to a command's input | Yes |
+   388→| Adding a new operation to a contract | Yes |
+   389→| Adding a new event type | Yes |
+   390→| Adding an optional field to an event's payload | Yes |
+   391→| Removing a field from a command's input | No |
+   392→| Changing a field's type | No |
+   393→| Removing an operation | No |
+   394→| Changing an operation's semantics | No |
+   395→
+   396→### 8.3 Breaking Changes
+   397→
+   398→Breaking changes follow the deprecation policy (SYSTEM_ARCHITECTURE.md Section 30.3):
+   399→
+   400→1. The old contract version is deprecated.
+   401→2. The new contract version is published alongside the old.
+   402→3. A migration path is documented.
+   403→4. Consumers migrate at their own pace during the deprecation window.
+   404→5. After the deprecation window, the old contract version is retired.
+   405→
+   406→The deprecation window is long enough for consumers to migrate — typically months, not weeks. The window is announced at deprecation time, not at retirement time.
+   407→
+   408→### 8.4 Version Compatibility Testing
+   409→
+   410→Contract tests verify compatibility:
+   411→
+   412→| Test Type | Purpose |
+   413→|---|---|
+   414→| Provider-side contract test | The provider honors its contract |
+   415→| Consumer-side contract test | The consumer honors the provider's contract |
+   416→| Compatibility test | The new contract version is backward-compatible with the old version |
+   417→
+   418→Compatibility tests are part of the module's test suite and are run on every change.
+   419→
+   420→---
+   421→
+   422→## 9. Module Extension Points
+   423→
+   424→### 9.1 Extension Over Modification
+   425→
+   426→Modules are extended, not modified (SYSTEM_ARCHITECTURE.md Section 13.3). Extension is adaptation through published mechanisms — configuration overlays, workflow definitions, event subscriptions, integration adapters — that do not require modification of the module's code. Modification is adaptation through code changes; it is architecturally forbidden (ADR-001).
+   427→
+   428→### 9.2 Extension Point Categories
+   429→
+   430→| Extension Point Category | Mechanism | Governance |
+   431→|---|---|---|
+   432→| Configuration Overlays | Tenant-specific configuration that adapts module behavior | Configuration governance |
+   433→| Workflow Definitions | Custom workflows or modifications to module-provided workflows | Configuration governance; workflow review for clinical workflows |
+   434→| Event Subscriptions | Subscriptions to the module's domain events | Event schema governance; consumer contract governance |
+   435→| Integration Adapters | Adapters to external systems, with anti-corruption layer | Integration governance |
+   436→
+   437→### 9.3 Extension Contracts
+   438→
+   439→Each extension point has a contract that defines what the extension may do, what inputs it receives, what outputs it must produce, and what failure modes are permitted. The contract is versioned and evolves under the same backward-compatibility rules as module contracts (Section 8).
+   440→
+   441→### 9.4 Extension Sandboxing
+   442→
+   443→Extensions execute within a sandbox that limits their access to module resources (SYSTEM_ARCHITECTURE.md Section 22.4). An extension cannot access another tenant's data, modify module-default configuration, or invoke unauthorized contracts. The sandbox is enforced at runtime.
+   444→
+   445→### 9.5 Extension Lifecycle
+   446→
+   447→Extensions follow a lifecycle: proposed, validated, deployed, monitored, deprecated, retired. Lifecycle transitions are governed by the extension's category. The lifecycle is tracked in the platform's extension registry.
+   448→
+   449→---
+   450→
+   451→## 10. Module Configuration Surface
+   452→
+   453→### 10.1 Configuration Surface Definition
+   454→
+   455→Each module exposes a configuration surface — the set of configuration keys the module accepts, with their types, defaults, validation rules, and inheritance behavior. The configuration surface is part of the module's contract (Section 4.6) and is versioned with it.
+   456→
+   457→### 10.2 Configuration Surface Design
+   458→
+   459→The configuration surface should:
+   460→
+   461→1. **Be cohesive.** Configuration keys are related and serve the module's adaptation needs.
+   462→2. **Be minimal.** Only configuration that is genuinely needed is exposed; speculative configuration is not.
+   463→3. **Be documented.** Each key is documented with its purpose, type, default, validation rules, and inheritance behavior.
+   464→4. **Be stable.** The configuration surface evolves through backward-compatible changes; breaking changes follow the deprecation policy.
+   465→5. **Be governed.** Configuration changes follow the governance rules in `CONFIGURATION_ARCHITECTURE.md`.
+   466→
+   467→### 10.3 Configuration Categories per Module
+   468→
+   469→A module's configuration typically falls into several categories:
+   470→
+   471→| Category | Examples |
+   472→|---|---|
+   473→| Behavioral | Workflow definitions, business rules, validation rules |
+   474→| Structural | Feature toggles, capability gating |
+   475→| Integration | External system endpoints, credentials, schedules |
+   476→| Localization | Locale-specific templates, formats, terminology |
+   477→| Security | Authorization rules, access controls |
+   478→| Performance | Cache settings, batch sizes, timeouts |
+   479→
+   480→### 10.4 Configuration Resolution
+   481→
+   482→Configuration is resolved by the configuration service (SYSTEM_ARCHITECTURE.md Section 6.6), not by each module. Modules receive the resolved value for their context; they do not perform their own resolution. This centralizes the resolution logic and prevents inconsistency.
+   483→
+   484→### 10.5 Configuration Caching
+   485→
+   486→Modules may cache configuration values for performance, with explicit invalidation rules. Cache invalidation is governed by the configuration service, which notifies modules when their configuration changes. A module that uses stale configuration is defective.
+   487→
+   488→---
+   489→
+   490→## 11. Module Isolation Strategy
+   491→
+   492→### 11.1 Isolation Dimensions
+   493→
+   494→Modules are isolated from each other in three dimensions (SYSTEM_ARCHITECTURE.md Section 9.5):
+   495→
+   496→| Dimension | Description |
+   497→|---|---|
+   498→| Contract isolation | Modules interact only through published contracts |
+   499→| State isolation | A module's authoritative state is owned by that module |
+   500→| Failure isolation | A module's failure does not cascade uncontrollably |
+   501→
+   502→### 11.2 Contract Isolation
+   503→
+   504→Contract isolation is enforced through:
+   505→
+   506→1. **Published contracts.** Modules expose only their contract surface; internals are inaccessible.
+   507→2. **Architectural review.** New contracts are reviewed before they are added.
+   508→3. **Static analysis.** Tools detect contract violations (e.g., a module reaching into another module's internals).
+   509→4. **Contract testing.** Contract tests catch violations.
+   510→
+   511→### 11.3 State Isolation
+   512→
+   513→State isolation is enforced through:
+   514→
+   515→1. **Context-owned authoritative state.** Each module owns its authoritative state; other modules hold references or projections, not copies they may mutate.
+   516→2. **Aggregate boundaries.** State changes are scoped to aggregates, which are owned by a single module.
+   517→3. **Event-driven updates.** Other modules update their projections by subscribing to domain events, not by directly mutating the source.
+   518→
+   519→### 11.4 Failure Isolation
+   520→
+   521→Failure isolation is enforced through:
+   522→
+   523→1. **Declared failure modes.** Each module declares its failure modes (fail-fast, degrade, retry, circuit-break) per operation.
+   524→2. **Circuit breakers.** Cross-module calls are protected by circuit breakers that stop attempting operations that are consistently failing.
+   525→3. **Timeouts.** Cross-module calls have timeouts, preventing indefinite blocking.
+   526→4. **Bulkheads.** Resources (threads, connections) are isolated per module, preventing one module's resource exhaustion from affecting others.
+   527→5. **Graceful degradation.** Consumers degrade gracefully when producers fail, returning partial results with explicit indication of what is missing.
+   528→
+   529→### 11.5 Multi-Tenant Isolation Within Modules
+   530→
+   531→Every module is multi-tenant by construction (ADR-004). Within a module:
+   532→
+   533→1. **Tenant context is propagated.** Every request carries tenant context, established at the edge.
+   534→2. **State is tenant-scoped.** All state is associated with a tenant identifier; queries are tenant-scoped.
+   535→3. **Access controls are tenant-aware.** Authorization checks include tenant scope.
+   536→4. **Configuration is tenant-resolved.** Configuration values are resolved per tenant context.
+   537→
+   538→A module that fails to enforce tenant isolation is defective and is a security incident.
+   539→
+   540→---
+   541→
+   542→## 12. Module Testing Strategy
+   543→
+   544→### 12.1 Test Pyramid
+   545→
+   546→Module testing follows the test pyramid:
+   547→
+   548→| Test Level | Scope | Frequency |
+   549→|---|---|---|
+   550→| Unit tests | Individual functions and classes | Every commit |
+   551→| Contract tests | Module's contract surface | Every commit |
+   552→| Integration tests | Module's interaction with dependencies | Every commit |
+   553→| End-to-end tests | User-visible scenarios across modules | Pre-release |
+   554→| Performance tests | Module's performance under load | Pre-release and periodically |
+   555→| Security tests | Module's security posture | Pre-release and periodically |
+   556→
+   557→### 12.2 Contract Testing
+   558→
+   559→Contract testing is the primary mechanism for verifying module boundaries (SYSTEM_ARCHITECTURE.md Section 13.6). Two types of contract tests are required:
+   560→
+   561→| Test Type | Purpose |
+   562→|---|---|
+   563→| Provider-side contract test | The module honors its published contracts |
+   564→| Consumer-side contract test | The module's consumers honor the contracts they depend on |
+   565→
+   566→Contract tests are part of the module's test suite and are run on every change. A change that breaks a contract test is a breaking change and must follow the deprecation policy (Section 8.3).
+   567→
+   568→### 12.3 Test Data
+   569→
+   570→Test data is managed through:
+   571→
+   572→1. **Test fixtures.** Reusable test data, version-controlled alongside the tests.
+   573→2. **Test data builders.** Code that constructs test data programmatically, supporting variation.
+   574→3. **Test data factories.** Factories that produce realistic test data, including edge cases.
+   575→4. **Synthetic data.** For tests that require large datasets, synthetic data is generated, never real patient data.
+   576→
+   577→Real patient data is never used in tests. Using real patient data in tests is a security incident.
+   578→
+   579→### 12.4 Test Coverage
+   580→
+   581→Test coverage is monitored, with thresholds per module. Coverage is a necessary but not sufficient measure of test quality; high coverage with poor test design produces false confidence. Coverage thresholds are set per module based on risk and are reviewed periodically.
+   582→
+   583→### 12.5 Test Performance
+   584→
+   585→Tests must be fast. Slow tests discourage running them, which reduces their value. Unit and contract tests run in seconds; integration tests run in minutes; end-to-end tests run in tens of minutes. Tests that exceed their time budget are optimized or split.
+   586→
+   587→### 12.6 Test Reliability
+   588→
+   589→Tests must be reliable. Flaky tests — tests that pass or fail non-deterministically — are defects. A flaky test is either fixed or quarantined; it is not ignored. Flaky tests erode confidence in the test suite and must be addressed promptly.
+   590→
+   591→---
+   592→
+   593→## 13. Related Documents
+   594→
+   595→### 13.1 Upstream Documents
+   596→
+   597→| Document | Relationship |
+   598→|---|---|
+   599→| `docs/00_PROJECT/PRODUCT_BIBLE.md` | Product authority that defines the 17 product modules |
+   600→| `docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` | System-level architectural authority; this document elaborates its module-level aspects |
+   601→| `docs/01_ARCHITECTURE/SOFTWARE_ARCHITECTURE.md` | Software-level architectural authority; this document elaborates its module-level aspects |
+   602→
+   603→### 13.2 Peer Documents
+   604→
+   605→| Document | Relationship |
+   606→|---|---|
+   607→| `docs/01_ARCHITECTURE/CONFIGURATION_ARCHITECTURE.md` | Configuration architecture; this document references it for module configuration surface detail |
+   608→| `docs/01_ARCHITECTURE/CODING_STANDARDS.md` | Implementation-level conventions; this document defines the structure they conform to |
+   609→| `docs/01_ARCHITECTURE/FOLDER_STRUCTURE.md` | Repository layout; this document defines the structure it reflects |
+   610→| `docs/02_PRODUCT/MODULES.md` | Product-level module descriptions; this document defines their architectural realization |
+   611→| `docs/02_PRODUCT/PERMISSIONS.md` | Permission model; this document defines the authorization architecture modules implement |
+   612→
+   613→### 13.3 Downstream Documents
+   614→
+   615→| Document | Relationship |
+   616→|---|---|
+   617→| `docs/07_MODULES/*` | Per-module specifications; must align with this document |
+   618→| `docs/12_ADR/*` | Architectural Decision Records; amend this document through ratified decisions |
+   619→| `docs/11_TESTING/*` | Testing strategy; must align with the testing discipline defined in Section 12 |
+   620→
+   621→### 13.4 Document Authority
+   622→
+   623→This document is authoritative for module architecture. Where a downstream document conflicts with this document, this document prevails until an ADR is ratified to amend it. ADRs are the only mechanism by which this document is changed; ad-hoc deviations are defects.
+   624→

@@ -1,0 +1,590 @@
+     1→     1→# Ibn Hayan Healthcare Operating System
+     2→     2→## Software Architecture
+     3→     3→
+     4→     4→> **Document Purpose:** The internal software architecture of Ibn Hayan — patterns, layering, service decomposition, dependency management, cross-cutting concerns, and the design principles that govern implementation. This document elaborates the software-structural aspects of `SYSTEM_ARCHITECTURE.md` and must align with it.
+     5→     5→>
+     6→     6→> **Status:** Authoritative · **Version:** 1.0.0 · **Last Updated:** 2026-07-18
+     7→     7→> **Document Owner:** Office of the Chief Software Architect
+     8→     8→> **Review Cadence:** Quarterly, with off-cycle revision when a related ADR is ratified
+     9→     9→>
+    10→    10→> This document is part of the official Ibn Hayan Healthcare Operating System
+    11→    11→> documentation framework and serves as the authoritative reference for its
+    12→    12→> architectural domain. It is intended for the entire engineering, architecture,
+    13→    13→> security, and operations organizations.
+    14→    14→
+    15→    15→---
+    16→    16→
+    17→    17→## Table of Contents
+    18→    18→
+    19→    19→1. Software Architecture Overview
+    20→    20→2. Architectural Patterns
+    21→    21→3. Layered Architecture
+    22→    22→4. Service Architecture
+    23→    23→5. Module Decomposition
+    24→    24→6. Dependency Management
+    25→    25→7. Cross-Cutting Concerns
+    26→    26→8. Design Principles (SOLID, DRY, KISS)
+    27→    27→9. Technology Stack
+    28→    28→10. Framework Selection
+    29→    29→11. Architectural Trade-offs
+    30→    30→12. Technical Debt Management
+    31→    31→13. Related Documents
+    32→    32→
+    33→    33→---
+    34→    34→
+    35→    35→## 1. Software Architecture Overview
+    36→    36→
+    37→    37→### 1.1 Purpose and Scope
+    38→    38→
+    39→    39→This document defines the internal software architecture of Ibn Hayan. It elaborates the structural aspects of the platform — how software is organized into layers, services, modules, and components, and how those elements interact. It is constrained by, and must align with, `SYSTEM_ARCHITECTURE.md`, which defines the platform's architectural posture at a higher level of abstraction.
+    40→    40→
+    41→    41→Where this document and `SYSTEM_ARCHITECTURE.md` appear to conflict, `SYSTEM_ARCHITECTURE.md` prevails. This document is amended through the same ADR process as the system architecture.
+    42→    42→
+    43→    43→### 1.2 Audience
+    44→    44→
+    45→    45→The primary audience is software architects, principal engineers, and engineering managers who design and govern the platform's software structure. The secondary audience is engineers implementing features, who must understand the structural boundaries their work operates within.
+    46→    46→
+    47→    47→### 1.3 Relationship to System Architecture
+    48→    48→
+    49→    49→| System Architecture Section | Elaborated In This Document |
+    50→    50→|---|---|
+    51→    51→| Section 5 (High-Level Architecture) | Sections 2, 3, 4 |
+    52→    52→| Section 6 (Platform Layers) | Sections 3, 4 |
+    53→    53→| Section 7 (Domain-Driven Architecture) | Section 5 |
+    54→    54→| Section 9 (Modular Architecture) | Sections 4, 5, 6 |
+    55→    55→| Section 13 (Module Architecture) | Section 5 (refer to `MODULE_ARCHITECTURE.md` for module-internal detail) |
+    56→    56→| Section 4 (Architectural Principles) | Section 8 |
+    57→    57→
+    58→    58→### 1.4 Document Conventions
+    59→    59→
+    60→    60→Sections are numbered for stable cross-referencing. Tables summarize decisions where prose would obscure them. Where a principle has exceptions, the exceptions are stated explicitly. The verbs *must*, *should*, and *may* are used in their normative sense.
+    61→    61→
+    62→    62→---
+    63→    63→
+    64→    64→## 2. Architectural Patterns
+    65→    65→
+    66→    66→### 2.1 Pattern Catalog
+    67→    67→
+    68→    68→Ibn Hayan uses a defined set of architectural patterns, each chosen to address a specific structural concern. Patterns are not mixed arbitrarily; each pattern has a purpose, applicability conditions, and consequences that must be understood before adoption.
+    69→    69→
+    70→    70→| Pattern | Purpose | Where Applied |
+    71→    71→|---|---|---|
+    72→    72→| Layered Architecture | Separate concerns horizontally; enforce dependency direction | Across the platform (Section 3) |
+    73→    73→| Modular Monolith | Decompose the platform into autonomous modules with explicit contracts | Domain layer (ADR-002) |
+    74→    74→| Bounded Context | Decompose the domain into coherent, autonomous contexts with ubiquitous language | Domain layer (SYSTEM_ARCHITECTURE.md Section 7) |
+    75→    75→| Anti-Corruption Layer | Translate between external and internal models at integration boundaries | Integration layer |
+    76→    76→| Domain Events | Communicate state changes across contexts without tight coupling | Cross-context integration |
+    77→    77→| CQRS (selective) | Separate read models from write models where read and write workloads diverge | Reporting; high-read contexts |
+    78→    78→| Event Sourcing (selective) | Persist state as a sequence of events where complete auditability is required | Audit context (SYSTEM_ARCHITECTURE.md Section 18.6) |
+    79→    79→| Saga | Coordinate long-running transactions across contexts | Billing; multi-step clinical workflows |
+    80→    80→| Outbox | Reliably emit domain events in coordination with state changes | All contexts that emit events |
+    81→    81→| Circuit Breaker | Stop attempting operations that are consistently failing | Integration adapters; cross-service calls |
+    82→    82→| Backpressure | Signal overload to upstream callers | All services under load |
+    83→    83→| Idempotent Consumer | Process events exactly-once in effect, despite at-least-once delivery | All event consumers |
+    84→    84→| Strangler Fig | Incrementally replace legacy components with new ones | Migration scenarios |
+    85→    85→
+    86→    86→### 2.2 Pattern Selection Criteria
+    87→    87→
+    88→    88→A pattern is adopted only when its benefits justify its costs. The selection criteria are:
+    89→    89→
+    90→    90→1. **Structural need** — the pattern addresses a real structural concern, not a hypothetical one.
+    91→    91→2. **Cost acceptance** — the pattern's complexity, performance overhead, and operational burden are acceptable.
+    92→    92→3. **Team capability** — the team adopting the pattern understands it and can operate it.
+    93→    93→4. **Architectural alignment** — the pattern aligns with the platform's principles (SYSTEM_ARCHITECTURE.md Section 4) and does not violate them.
+    94→    94→5. **Documented decision** — the pattern's adoption is recorded, with rationale, in the module's documentation or an ADR.
+    95→    95→
+    96→    96→### 2.3 Pattern Combinations
+    97→    97→
+    98→    98→Some patterns combine well; others conflict. Known combinations:
+    99→    99→
+   100→   100→| Combination | Compatibility | Notes |
+   101→   101→|---|---|---|
+   102→   102→| Layered + Modular Monolith | Compatible | Default platform structure |
+   103→   103→| Bounded Context + Domain Events | Compatible | Default cross-context integration |
+   104→   104→| CQRS + Event Sourcing | Compatible | Used selectively (e.g., audit) |
+   105→   105→| Saga + Event Sourcing | Compatible but complex | Avoid unless justified |
+   106→   106→| Circuit Breaker + Retry | Compatible with care | Retry within circuit-breaker thresholds |
+   107→   107→| Outbox + Domain Events | Required | Events are emitted through the outbox |
+   108→   108→
+   109→   109→### 2.4 Anti-Patterns
+   110→   110→
+   111→   111→The following anti-patterns are explicitly forbidden:
+   112→   112→
+   113→   113→| Anti-Pattern | Why Forbidden |
+   114→   114→|---|---|
+   115→   115→| Distributed Monolith | Modules that are nominally separate but coupled through shared databases, synchronous dependencies, or coordinated deployments |
+   116→   116→| God Object | A single class or component that handles many unrelated responsibilities |
+   117→   117→| Spaghetti Dependencies | Unstructured dependencies that make the system impossible to reason about |
+   118→   118→| Hidden Coupling | Coupling through shared mutable state, implicit assumptions, or undocumented behavior |
+   119→   119→| Magic | Behavior that is not discoverable from the code (e.g., reflection-based dispatch without documentation) |
+   120→   120→| Premature Optimization | Optimization before profiling has identified the bottleneck |
+   121→   121→| Gold Plating | Capabilities built without a demonstrated need |
+   122→   122→
+   123→   123→---
+   124→   124→
+   125→   125→## 3. Layered Architecture
+   126→   126→
+   127→   127→### 3.1 Layer Inventory
+   128→   128→
+   129→   129→Ibn Hayan uses a layered architecture, as defined in `SYSTEM_ARCHITECTURE.md` Section 6. The layers, repeated here for completeness, are:
+   130→   130→
+   131→   131→| Layer | Responsibility |
+   132→   132→|---|---|
+   133→   133→| Experience Layer | Render results; capture user intent |
+   134→   134→| Edge Layer | Authentication; tenant resolution; rate limiting |
+   135→   135→| Orchestration Layer | Workflow coordination; long-running transactions |
+   136→   136→| Domain Layer | Bounded contexts; business logic; authoritative state |
+   137→   137→| Platform Services Layer | Cross-cutting services: identity, configuration, audit, feature flags, localization, search |
+   138→   138→| Integration Layer | Adapters to external systems |
+   139→   139→| Data Layer | Durable storage, segmented by access pattern |
+   140→   140→| Infrastructure Layer | Compute, network, storage abstraction |
+   141→   141→
+   142→   142→### 3.2 Dependency Direction Rules
+   143→   143→
+   144→   144→Dependencies flow downward and inward. The rules are:
+   145→   145→
+   146→   146→1. **No upward dependencies.** A lower layer may not depend on a higher layer. The data layer does not invoke domain layer logic; the domain layer does not invoke orchestration layer logic.
+   147→   147→2. **No lateral dependencies except through contracts.** Bounded contexts within the domain layer may invoke each other only through published contracts (commands, queries) or through domain events.
+   148→   148→3. **Platform services may be depended upon by domain and orchestration layers, but not vice versa.** Platform services do not depend on domain contexts.
+   149→   149→4. **The integration layer depends on domain contracts (for translation) but not on domain internals.**
+   150→   150→5. **The experience layer depends on orchestration and domain contracts, but not on their internals.**
+   151→   151→
+   152→   152→These rules are enforced through architectural review and through tooling (dependency analysis) where available.
+   153→   153→
+   154→   154→### 3.3 Layer Internal Structure
+   155→   155→
+   156→   156→Within each layer, internal structure follows the same discipline: components have explicit responsibilities, dependencies flow in a defined direction, and cross-component interaction occurs through contracts. The specific internal structure varies by layer (the domain layer is decomposed into bounded contexts; the platform services layer is decomposed into services; the integration layer is decomposed into adapters), but the discipline is consistent.
+   157→   157→
+   158→   158→### 3.4 Cross-Layer Concerns
+   159→   159→
+   160→   160→Some concerns cross all layers: observability, security, audit, localization, and tenant context propagation. These are not layers; they are capabilities that every layer participates in. Cross-layer concerns are implemented through platform-wide mechanisms (a logging framework, an authentication propagation mechanism, an audit capture mechanism), not through per-layer reinvention.
+   161→   161→
+   162→   162→### 3.5 Layer Evolution
+   163→   163→
+   164→   164→Layers evolve independently to the extent their contracts allow. The data layer may be re-platformed without affecting the domain layer, as long as the data layer's contract with the domain layer is preserved. The experience layer may be re-platformed without affecting orchestration and domain layers, as long as the experience layer's contract with lower layers is preserved.
+   165→   165→
+   166→   166→This independence is the architectural mechanism by which the platform absorbs technology refresh over the decade horizon (SYSTEM_ARCHITECTURE.md Section 30.6).
+   167→   167→
+   168→   168→---
+   169→   169→
+   170→   170→## 4. Service Architecture
+   171→   171→
+   172→   172→### 4.1 Service Types
+   173→   173→
+   174→   174→Ibn Hayan distinguishes several types of services, each with its own characteristics and lifecycle.
+   175→   175→
+   176→   176→| Service Type | Description | Default Deployment |
+   177→   177→|---|---|---|
+   178→   178→| Domain Service | Realizes a bounded context; owns authoritative state | In-process (modular monolith) |
+   179→   179→| Platform Service | Provides cross-cutting capability (identity, configuration, audit, etc.) | In-process by default; extractable to a separate service if justified |
+   180→   180→| Orchestration Service | Coordinates workflows across contexts | In-process |
+   181→   181→| Integration Adapter | Translates between external and internal models at an integration boundary | In-process; extractable for high-throughput integrations |
+   182→   182→| Sync Service | Manages client-server synchronization | Separate service (stateful) |
+   183→   183→| Reporting Service | Manages the analytical pipeline and report generation | Separate service |
+   184→   184→
+   185→   185→### 4.2 Service Boundaries
+   186→   186→
+   187→   187→Service boundaries follow bounded context boundaries (SYSTEM_ARCHITECTURE.md Section 7). A service owns one or more bounded contexts; contexts are not split across services. Where a service owns multiple contexts, the contexts remain internally separated through contracts, even though they share a process.
+   188→   188→
+   189→   189→### 4.3 Service Communication
+   190→   190→
+   191→   191→Services communicate through three mechanisms, chosen per interaction:
+   192→   192→
+   193→   193→| Mechanism | When Used |
+   194→   194→|---|---|
+   195→   195→| In-process contract invocation | Default for module-to-module communication within the modular monolith |
+   196→   196→| Domain events | For asynchronous notification of state changes across contexts |
+   197→   197→| Network-based contract invocation | For communication with services that have been extracted to separate processes |
+   198→   198→
+   199→   199→The default is in-process communication, which is fast and avoids the operational overhead of network calls. Network communication is reserved for services that have been extracted for scaling, isolation, or deployment cadence reasons.
+   200→   200→
+   201→   201→### 4.4 Service Statefulness
+   202→   202→
+   203→   203→Most services are stateless (SYSTEM_ARCHITECTURE.md Section 21.3); state lives in the data layer. Stateful services are exceptions, used where state cannot be externalized:
+   204→   204→
+   205→   205→| Stateful Service | Why Stateful |
+   206→   206→|---|---|
+   207→   207→| Sync Service | Manages long-lived sync state per client |
+   208→   208→| Workflow Engine | Manages in-flight workflow state |
+   209→   209→| Session Service | Manages user sessions |
+   210→   210→| Cache | Holds cached state by definition |
+   211→   211→
+   212→   212→Stateful services have explicit scaling strategies (sharding, replication) and are treated as operational specialties, not as the default.
+   213→   213→
+   214→   214→### 4.5 Service Lifecycle
+   215→   215→
+   216→   216→Services follow a lifecycle: proposed, implemented, generally available, optional, deprecated, retired. Lifecycle transitions are governed by ADRs and communicated through release notes. Service retirement follows the deprecation policy (SYSTEM_ARCHITECTURE.md Section 30.3), with a defined window during which consumers migrate.
+   217→   217→
+   218→   218→---
+   219→   219→
+   220→   220→## 5. Module Decomposition
+   221→   221→
+   222→   222→### 5.1 Decomposition Approach
+   223→   223→
+   224→   224→Module decomposition follows bounded context decomposition (SYSTEM_ARCHITECTURE.md Section 7). Each bounded context is realized by one module; a few contexts are realized by multiple cooperating modules (e.g., the Clinical Documentation context may be realized by separate Notes, Assessments, and Care Plans modules). The decomposition is governed by ADR-002 and is detailed in `MODULE_ARCHITECTURE.md`.
+   225→   225→
+   226→   226→### 5.2 Decomposition Criteria
+   227→   227→
+   228→   228→A new module is justified when:
+   229→   229→
+   230→   230→1. **Distinct ubiquitous language.** The domain has a vocabulary that differs meaningfully from existing modules.
+   231→   231→2. **Distinct invariants.** The domain has consistency rules that are not shared with existing modules.
+   232→   232→3. **Distinct lifecycle.** The domain evolves at a different rate than existing modules.
+   233→   233→4. **Distinct ownership.** The domain is owned by a different team than existing modules.
+   234→   234→5. **Distinct deployment cadence.** The domain benefits from independent deployment.
+   235→   235→
+   236→   236→Where these criteria do not hold, the domain should be part of an existing module, not a new one. Over-decomposition produces integration overhead without ownership benefits.
+   237→   237→
+   238→   238→### 5.3 Module Sizes
+   239→   239→
+   240→   240→Modules are not uniform in size. The Patient module is large (it owns patient identity, demographics, consents, and identifiers); the Notifications module is smaller (it owns notification templates and delivery). Size is not a primary concern; cohesion and autonomy are. A small, cohesive module is preferable to a large, fragmented one.
+   241→   241→
+   242→   242→### 5.4 Module Boundaries
+   243→   243→
+   244→   244→Module boundaries are the published contract surface (commands, queries, events, configuration schema). Everything inside the boundary is private; everything on the boundary is public. Boundary design is the most consequential module-level decision, because boundaries are expensive to change once consumers depend on them.
+   245→   245→
+   246→   246→### 5.5 Refactoring Module Boundaries
+   247→   247→
+   248→   248→Module boundaries may be refactored, but only through a deliberate process:
+   249→   249→
+   250→   250→1. **Justification.** The refactoring is justified by a structural concern (e.g., a context that has grown too large, a context that should be split for ownership reasons).
+   251→   251→2. **ADR.** The refactoring is ratified through an ADR.
+   252→   252→3. **Migration path.** A migration path is defined for existing consumers.
+   253→   253→4. **Deprecation.** The old boundary is deprecated, with a defined window during which both old and new operate.
+   254→   254→5. **Retirement.** The old boundary is retired after the deprecation window.
+   255→   255→
+   256→   256→Boundary refactoring is expensive and is undertaken only when the cost of not refactoring exceeds the cost of refactoring.
+   257→   257→
+   258→   258→---
+   259→   259→
+   260→   260→## 6. Dependency Management
+   261→   261→
+   262→   262→### 6.1 Dependency Rules
+   263→   263→
+   264→   264→Module dependencies follow strict rules (SYSTEM_ARCHITECTURE.md Section 9.3), repeated here:
+   265→   265→
+   266→   266→1. Modules may depend on platform service modules.
+   267→   267→2. Modules may depend on other domain modules through published contracts only.
+   268→   268→3. Modules may depend on integration adapters through published contracts.
+   269→   269→4. Modules may not depend on the experience layer.
+   270→   270→5. Modules may not depend on the orchestration layer (except by being invoked by it).
+   271→   271→6. Modules may not depend on another module's internals.
+   272→   272→7. Dependency cycles are forbidden.
+   273→   273→
+   274→   274→### 6.2 Dependency Direction Enforcement
+   275→   275→
+   276→   276→Dependencies are enforced through:
+   277→   277→
+   278→   278→| Mechanism | Description |
+   279→   279→|---|---|
+   280→   280→| Architectural review | New dependencies are reviewed before they are added |
+   281→   281→| Static analysis | Tools detect dependency violations (e.g., cycles, upward dependencies) |
+   282→   282→| Contract testing | Consumers depend on contracts, not implementations; contract tests catch violations |
+   283→   283→| Module boundaries | Modules expose only their contract surface; internals are inaccessible |
+   284→   284→
+   285→   285→### 6.3 Dependency Versioning
+   286→   286→
+   287→   287→Module dependencies are versioned. A consuming module declares which version range of a dependency it accepts. Backward-compatible changes (new optional fields, new operations) do not require consumer changes. Backward-incompatible changes follow the deprecation policy (SYSTEM_ARCHITECTURE.md Section 30.3).
+   288→   288→
+   289→   289→### 6.4 Transitive Dependencies
+   290→   290→
+   291→   291→Transitive dependencies (A depends on B, B depends on C) are managed through declared contracts. A does not depend on C directly; it depends on B's contract, which may internally depend on C. If A needs C's capability, it must declare a direct dependency on C, not rely on transitive access.
+   292→   292→
+   293→   293→This rule prevents hidden coupling through transitive dependencies, which is a common source of fragility in modular systems.
+   294→   294→
+   295→   295→### 6.5 External Dependencies
+   296→   296→
+   297→   297→External dependencies (third-party libraries, frameworks, services) are managed with discipline:
+   298→   298→
+   299→   299→1. **Justification.** Each external dependency is justified; it solves a problem the platform cannot reasonably solve itself.
+   300→   300→2. **License review.** External dependencies' licenses are reviewed for compatibility with the platform's licensing model.
+   301→   301→3. **Security review.** External dependencies are reviewed for known vulnerabilities and security posture.
+   302→   302→4. **Version pinning.** External dependencies are version-pinned to avoid unexpected changes.
+   303→   303→5. **Upgrade cadence.** External dependencies are upgraded on a defined cadence, with security upgrades prioritized.
+   304→   304→6. **Replacement plan.** For critical external dependencies, a replacement plan exists in case the dependency becomes unsupportable.
+   305→   305→
+   306→   306→---
+   307→   307→
+   308→   308→## 7. Cross-Cutting Concerns
+   309→   309→
+   310→   310→### 7.1 Concern Catalog
+   311→   311→
+   312→   312→Cross-cutting concerns are capabilities that every layer and module participates in. They are not layers; they are dimensions that cut across the layered architecture.
+   313→   313→
+   314→   314→| Concern | Description | Implementation Mechanism |
+   315→   315→|---|---|---|
+   316→   316→| Observability | Logs, metrics, traces | Platform-wide telemetry framework |
+   317→   317→| Security | Authentication, authorization, encryption | Platform-wide security framework |
+   318→   318→| Audit | Capture of state-changing operations | Audit platform service |
+   319→   319→| Localization | Locale-aware formatting and translation | Localization platform service |
+   320→   320→| Tenant Context | Tenant identifier propagated through requests | Edge layer establishes; all layers consume |
+   321→   321→| Configuration | Configuration resolution and propagation | Configuration platform service |
+   322→   322→| Feature Flags | Capability exposure control | Feature flag platform service |
+   323→   323→| Error Handling | Consistent error reporting | Platform-wide error model |
+   324→   324→| Caching | Multi-level caching | Platform-wide cache framework |
+   325→   325→| Performance | Latency and throughput monitoring | Platform-wide performance framework |
+   326→   326→
+   327→   327→### 7.2 Implementation Discipline
+   328→   328→
+   329→   329→Cross-cutting concerns are implemented through platform-wide mechanisms, not reinvented per module. Each concern has:
+   330→   330→
+   331→   331→1. **A platform service or framework** that provides the canonical implementation.
+   332→   332→2. **A contract** that modules use to interact with the concern.
+   333→   333→3. **Documentation** that describes how modules participate.
+   334→   334→4. **Enforcement** through review, tooling, or runtime checks.
+   335→   335→
+   336→   336→A module that reinvents a cross-cutting concern (e.g., implements its own logging framework) is defective.
+   337→   337→
+   338→   338→### 7.3 Concern Composition
+   339→   339→
+   340→   340→Cross-cutting concerns compose through middleware, interceptors, or decorators (the specific mechanism is an implementation detail). A request flows through the middleware chain, with each concern participating at the appropriate point: tenant context is established at the edge; authentication is verified; authorization is checked; the operation is executed; audit is captured; telemetry is emitted.
+   341→   341→
+   342→   342→The composition order is significant: security concerns (authentication, authorization) must execute before the operation; observability concerns (logging, tracing) must execute around the operation; audit must execute after the operation commits.
+   343→   343→
+   344→   344→---
+   345→   345→
+   346→   346→## 8. Design Principles (SOLID, DRY, KISS)
+   347→   347→
+   348→   348→### 8.1 Principle Catalog
+   349→   349→
+   350→   350→Ibn Hayan adopts the classic software design principles, applied at the implementation level. These principles complement, but do not replace, the architectural principles in `SYSTEM_ARCHITECTURE.md` Section 4.
+   351→   351→
+   352→   352→| Principle | Statement | Application |
+   353→   353→|---|---|---|
+   354→   354→| Single Responsibility (SRP) | A class or module has one reason to change | Module and class design |
+   355→   355→| Open-Closed (OCP) | Software entities are open for extension, closed for modification | Contract design; extension points |
+   356→   356→| Liskov Substitution (LSP) | Subtypes must be substitutable for their base types | Inheritance hierarchies; interface design |
+   357→   357→| Interface Segregation (ISP) | Clients are not forced to depend on interfaces they do not use | Contract design |
+   358→   358→| Dependency Inversion (DIP) | Depend on abstractions, not concretions | Module dependencies; contract design |
+   359→   359→| Don't Repeat Yourself (DRY) | Every piece of knowledge has a single, authoritative representation | Code, configuration, documentation |
+   360→   360→| Keep It Simple, Stupid (KISS) | Simplicity is a feature; choose the simplest design that works | All design decisions |
+   361→   361→| You Aren't Gonna Need It (YAGNI) | Do not build capabilities until they are needed | Feature scope; premature generalization |
+   362→   362→| Principle of Least Astonishment | A design should behave as a reasonable user would expect | API design; UI behavior |
+   363→   363→
+   364→   364→### 8.2 Principle Application
+   365→   365→
+   366→   366→These principles are applied at the implementation level, where they guide class, function, and component design. They are enforced through code review, not through tooling alone. A design that violates a principle must either be corrected or must explicitly justify the violation.
+   367→   367→
+   368→   368→### 8.3 Principle Conflicts
+   369→   369→
+   370→   370→Principles sometimes conflict. Common conflicts and their resolutions:
+   371→   371→
+   372→   372→| Conflict | Resolution |
+   373→   373→|---|---|
+   374→   374→| DRY vs. SRP | Sometimes extracting shared logic violates SRP (the extracted class has multiple reasons to change). Prefer SRP; accept limited duplication if it preserves single responsibility. |
+   375→   375→| KISS vs. OCP | Sometimes the simplest design is not extensible. Prefer KISS for short-term needs; introduce extensibility when needed (YAGNI). |
+   376→   376→| YAGNI vs. Future-Proofing | The decade horizon requires some future-proofing. Distinguish between speculative generalization (forbidden by YAGNI) and load-bearing architectural commitments (required by the decade horizon). |
+   377→   377→| DIP vs. Performance | Dependency inversion may introduce indirection that affects performance. Apply DIP at module boundaries; bypass it within performance-critical internal paths. |
+   378→   378→
+   379→   379→### 8.4 Principle Evolution
+   380→   380→
+   381→   381→These principles are durable but not immutable. New principles may be added (e.g., principle of explicitness, principle of reversibility) as the platform evolves. Principle changes are ratified through ADRs.
+   382→   382→
+   383→   383→---
+   384→   384→
+   385→   385→## 9. Technology Stack
+   386→   386→
+   387→   387→### 9.1 Technology-Agnostic Posture
+   388→   388→
+   389→   389→`SYSTEM_ARCHITECTURE.md` commits to a technology-agnostic posture: the architecture specifies capabilities, not technologies, wherever possible. This document respects that posture. The technology stack is an implementation concern, governed by the architecture but not specified by it.
+   390→   390→
+   391→   391→This section defines the *categories* of technology the platform uses and the *criteria* for selecting specific technologies. Specific technology selections are documented in implementation guides and are subject to change through the technology refresh process (SYSTEM_ARCHITECTURE.md Section 30.6).
+   392→   392→
+   393→   393→### 9.2 Technology Categories
+   394→   394→
+   395→   395→| Category | Purpose | Selection Criteria |
+   396→   396→|---|---|---|
+   397→   397→| Application platform | Runtime for application logic | Multi-tenancy support; performance; ecosystem; long-term support |
+   398→   398→| Data store (transactional) | Operational state | ACID; multi-tenancy patterns; scalability; operational maturity |
+   399→   399→| Data store (analytical) | Reporting and analytics | Columnar or lakehouse; analytical query performance; integration with ETL/ELT |
+   400→   400→| Data store (cache) | Hot-path reads | Low latency; TTL support; distributed operation |
+   401→   401→| Data store (object) | Large binary artifacts | Durability; cost; integration with application platform |
+   402→   402→| Data store (audit) | Tamper-evident audit | Append-only; cryptographic tamper-evidence; queryability |
+   403→   403→| Messaging | Event distribution | At-least-once delivery; ordering guarantees; throughput |
+   404→   404→| Search | Full-text and structured search | Relevance; multi-tenancy; performance |
+   405→   405→| Identity provider | Authentication and user management | Multi-factor authentication; standards compliance; federation |
+   406→   406→| Observability platform | Logs, metrics, traces | Correlation; queryability; retention; alerting |
+   407→   407→| Deployment platform | Compute, network, storage | Multi-region; autoscaling; operational maturity |
+   408→   408→
+   409→   409→### 9.3 Selection Process
+   410→   410→
+   411→   411→Technology selections follow a defined process:
+   412→   412→
+   413→   413→1. **Need identification.** A specific need is identified that a technology category must serve.
+   414→   414→2. **Option evaluation.** Candidate technologies are evaluated against the selection criteria.
+   415→   415→3. **Proof of concept.** A proof of concept validates the technology against the platform's specific requirements.
+   416→   416→4. **Decision.** A decision is made, documented in an ADR if the choice is load-bearing.
+   417→   417→5. **Adoption.** The technology is adopted, with migration path if replacing an existing technology.
+   418→   418→6. **Review.** The technology is reviewed on a defined cadence; replacement is considered if it no longer serves the platform's needs.
+   419→   419→
+   420→   420→### 9.4 Vendor Lock-In Avoidance
+   421→   421→
+   422→   422→The platform avoids vendor lock-in through:
+   423→   423→
+   424→   424→1. **Standards-based interfaces.** Where standards exist (e.g., FHIR, HL7, SQL), the platform uses them.
+   425→   425→2. **Abstraction layers.** The platform abstracts vendor-specific capabilities behind internal contracts, allowing vendors to be replaced.
+   426→   426→3. **Portability testing.** Critical capabilities are tested for portability across at least two vendors, where feasible.
+   427→   427→4. **Exit strategy.** For each critical vendor, an exit strategy exists, even if it is never exercised.
+   428→   428→
+   429→   429→Vendor lock-in is not always avoidable; where it is accepted, the acceptance is explicit and documented.
+   430→   430→
+   431→   431→---
+   432→   432→
+   433→   433→## 10. Framework Selection
+   434→   434→
+   435→   435→### 10.1 Frameworks as Implementation Choices
+   436→   436→
+   437→   437→Frameworks are implementation choices, not architectural commitments. The architecture specifies capabilities (e.g., "a workflow engine that evaluates declarative definitions"); the framework that implements that capability is selected per the technology selection process (Section 9.3).
+   438→   438→
+   439→   439→Frameworks may be discussed in architectural trade-offs (Section 11) where the framework's design imposes structural constraints that affect the architecture. In such cases, the trade-off is documented; otherwise, framework selection is an implementation concern.
+   440→   440→
+   441→   441→### 10.2 Framework Categories
+   442→   442→
+   443→   443→| Framework Category | Purpose |
+   444→   444→|---|---|
+   445→   445→| Web framework | HTTP request handling; routing; middleware |
+   446→   446→| ORM / data access | Object-relational mapping; data access |
+   447→   447→| Workflow engine | Declarative workflow evaluation |
+   448→   448→| Rules engine | Declarative business rule evaluation |
+   449→   449→| Form engine | Form rendering from configuration |
+   450→   450→| Messaging framework | Event production and consumption |
+   451→   451→| Authentication framework | Authentication flows; session management |
+   452→   452→| Authorization framework | Authorization checks; role-permission resolution |
+   453→   453→| Testing framework | Unit, integration, contract, end-to-end testing |
+   454→   454→| Observability framework | Telemetry emission and correlation |
+   455→   455→
+   456→   456→### 10.3 Framework Selection Criteria
+   457→   457→
+   458→   458→| Criterion | Description |
+   459→   459→|---|---|
+   460→   460→| Alignment with architecture | The framework supports the platform's architectural patterns (Section 2) |
+   461→   461→| Multi-tenancy support | The framework supports multi-tenancy natively or through well-documented patterns |
+   462→   462→| Long-term support | The framework is actively maintained and has a sustainable support model |
+   463→   463→| Ecosystem | The framework has a healthy ecosystem of extensions, documentation, and community |
+   464→   464→| Performance | The framework's performance is acceptable for the platform's workloads |
+   465→   465→| Security posture | The framework has a strong security posture and a track record of timely security fixes |
+   466→   466→| License compatibility | The framework's license is compatible with the platform's licensing model |
+   467→   467→| Team capability | The team can operate the framework effectively |
+   468→   468→
+   469→   469→### 10.4 Framework Governance
+   470→   470→
+   471→   471→Frameworks are governed like other dependencies (Section 6.5), with additional discipline because frameworks impose structural constraints:
+   472→   472→
+   473→   473→1. **Architectural review.** New frameworks are reviewed by the architecture organization before adoption.
+   474→   474→2. **Limitation on frameworks per category.** The platform uses a small number of frameworks per category, to avoid fragmentation.
+   475→   475→3. **Framework upgrades.** Frameworks are upgraded on a defined cadence, with security upgrades prioritized.
+   476→   476→4. **Framework replacement.** When a framework is replaced, a migration path is defined and executed over a defined window.
+   477→   477→
+   478→   478→---
+   479→   479→
+   480→   480→## 11. Architectural Trade-offs
+   481→   481→
+   482→   482→### 11.1 Trade-Off Catalog
+   483→   483→
+   484→   484→Architectural decisions involve trade-offs. This section catalogs the most significant trade-offs in Ibn Hayan's software architecture, with the chosen resolution and rationale.
+   485→   485→
+   486→   486→| Trade-Off | Options | Chosen Resolution | Rationale |
+   487→   487→|---|---|---|---|
+   488→   488→| Monolith vs. microservices | Single deployable vs. many deployables | Modular monolith (ADR-002) | Balances autonomy, performance, and operational simplicity |
+   489→   489→| Strong vs. eventual consistency | ACID everywhere vs. eventual everywhere | Strong within aggregate; eventual across contexts | Matches the platform's clinical and financial correctness requirements |
+   490→   490→| Configuration vs. flexibility | Limited configurable surface vs. arbitrary extension | Configuration-driven (ADR-001) | Preserves upgradability, auditability, and multi-tenancy |
+   491→   491→| Offline vs. online | Online-only vs. local-first | Local-first (ADR-003) | Serves connectivity-challenged settings and clinical safety |
+   492→   492→| Multi-tenant vs. single-tenant | Shared infrastructure vs. dedicated per customer | Multi-tenant default (ADR-004) | Serves customer spectrum economically |
+   493→   493→| Single store vs. segmented stores | One store for all data vs. specialized stores per access pattern | Segmented (ADR-006) | Optimizes each access pattern |
+   494→   494→| Synchronous vs. asynchronous integration | Blocking calls vs. messaging | Per integration (SYSTEM_ARCHITECTURE.md Section 19.2) | Matches external system capabilities |
+   495→   495→| CQRS everywhere vs. selectively | Separate read/write models everywhere vs. where justified | Selectively | Avoids complexity where not justified |
+   496→   496→| Event sourcing everywhere vs. selectively | Event-sourced state everywhere vs. where justified | Selectively (audit) | Avoids complexity where not justified |
+   497→   497→
+   498→   498→### 11.2 Trade-Off Evaluation
+   499→   499→
+   500→   500→Trade-offs are evaluated against:
+   501→   501→
+   502→   502→1. **Architectural principles** (SYSTEM_ARCHITECTURE.md Section 4) — does the resolution honor the principles?
+   503→   503→2. **Decade horizon** — will the resolution remain viable over the platform's lifetime?
+   504→   504→3. **Operational burden** — is the operational burden of the resolution acceptable?
+   505→   505→4. **Team capability** — can the team operate the resolution effectively?
+   506→   506→5. **Reversibility** — is the resolution reversible if it proves wrong?
+   507→   507→
+   508→   508→### 11.3 Documenting Trade-Offs
+   509→   509→
+   510→   510→Significant trade-offs are documented in ADRs. The ADR records the options considered, the resolution chosen, and the rationale. This documentation supports future architects who need to understand why a decision was made and whether it remains valid.
+   511→   511→
+   512→   512→---
+   513→   513→
+   514→   514→## 12. Technical Debt Management
+   515→   515→
+   516→   516→### 12.1 Technical Debt Definition
+   517→   517→
+   518→   518→Technical debt is the gap between the current implementation and the implementation that the architecture specifies. Debt arises from shortcuts taken under time pressure, from architectural decisions that proved wrong, from external dependencies that have become unsupportable, and from the natural evolution of the platform's understanding of itself.
+   519→   519→
+   520→   520→Not all debt is bad. Strategic debt — taken deliberately, with a repayment plan — is a normal part of software development. Unstrategic debt — taken accidentally, without a repayment plan — is a defect.
+   521→   521→
+   522→   522→### 12.2 Debt Categories
+   523→   523→
+   524→   524→| Category | Description | Repayment Approach |
+   525→   525→|---|---|---|
+   526→   526→| Architectural debt | Implementation diverges from the architecture | Refactoring toward the architecture |
+   527→   527→| Design debt | Implementation violates design principles (Section 8) | Refactoring toward the principles |
+   528→   528→| Dependency debt | External dependencies are outdated or unsupportable | Upgrade or replacement |
+   529→   529→| Test debt | Insufficient test coverage or quality | Test additions and improvements |
+   530→   530→| Documentation debt | Documentation is missing, outdated, or inaccurate | Documentation updates |
+   531→   531→| Configuration debt | Configuration has accumulated cruft (unused flags, stale records) | Configuration cleanup |
+   532→   532→| Operational debt | Operational tooling and runbooks are missing or outdated | Operational improvements |
+   533→   533→
+   534→   534→### 12.3 Debt Tracking
+   535→   535→
+   536→   536→Technical debt is tracked in a debt register, maintained by the architecture organization. Each debt item records:
+   537→   537→
+   538→   538→1. **Description** — what the debt is.
+   539→   539→2. **Category** — which category (Section 12.2) it belongs to.
+   540→   540→3. **Origin** — when and why the debt was incurred.
+   541→   541→4. **Impact** — what the debt costs (performance, maintainability, risk).
+   542→   542→5. **Repayment plan** — how and when the debt will be repaid.
+   543→   543→6. **Priority** — relative priority for repayment.
+   544→   544→
+   545→   545→### 12.4 Debt Repayment
+   546→   546→
+   547→   547→Debt is repaid through:
+   548→   548→
+   549→   549→1. **Dedicated repayment time.** A portion of each engineering cycle is dedicated to debt repayment.
+   550→   550→2. **Opportunistic repayment.** Debt is repaid when nearby work is being done (the "boy scout rule").
+   551→   551→3. **Targeted campaigns.** Specific debt categories are targeted for focused repayment.
+   552→   552→4. **Architectural initiatives.** Significant architectural debt is repaid through dedicated initiatives, ratified through ADRs.
+   553→   553→
+   554→   554→### 12.5 Debt Acceptance
+   555→   555→
+   556→   556→Some debt is accepted as permanent. For example, the platform may accept that a legacy module will never be fully refactored to current standards, because the cost of refactoring exceeds the benefit. Accepted debt is documented, with the rationale, and is reviewed on a defined cadence to confirm that the acceptance remains valid.
+   557→   557→
+   558→   558→---
+   559→   559→
+   560→   560→## 13. Related Documents
+   561→   561→
+   562→   562→### 13.1 Upstream Documents
+   563→   563→
+   564→   564→| Document | Relationship |
+   565→   565→|---|---|
+   566→   566→| `docs/00_PROJECT/PRODUCT_BIBLE.md` | Product authority that constrains architectural scope |
+   567→   567→| `docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` | System-level architectural authority; this document elaborates its software-structural aspects |
+   568→   568→
+   569→   569→### 13.2 Peer Documents
+   570→   570→
+   571→   571→| Document | Relationship |
+   572→   572→|---|---|
+   573→   573→| `docs/01_ARCHITECTURE/MODULE_ARCHITECTURE.md` | Module-internal architecture; this document references it for module-level detail |
+   574→   574→| `docs/01_ARCHITECTURE/CONFIGURATION_ARCHITECTURE.md` | Configuration architecture; this document references it for configuration concerns |
+   575→   575→| `docs/01_ARCHITECTURE/CODING_STANDARDS.md` | Implementation-level coding conventions; this document defines the architecture they conform to |
+   576→   576→| `docs/01_ARCHITECTURE/FOLDER_STRUCTURE.md` | Repository layout; this document defines the structure it reflects |
+   577→   577→
+   578→   578→### 13.3 Downstream Documents
+   579→   579→
+   580→   580→| Document | Relationship |
+   581→   581→|---|---|
+   582→   582→| `docs/12_ADR/*` | Architectural Decision Records; amend this document through ratified decisions |
+   583→   583→| `docs/04_DATABASE/*` | Database design; must align with the data layer architecture defined here and in `SYSTEM_ARCHITECTURE.md` |
+   584→   584→| `docs/09_SECURITY/*` | Security controls; must align with the cross-cutting security concern defined here |
+   585→   585→| `docs/11_TESTING/*` | Testing strategy; must align with the testing discipline implied by the principles in Section 8 |
+   586→   586→
+   587→   587→### 13.4 Document Authority
+   588→   588→
+   589→   589→This document is authoritative for software architecture. Where a downstream document conflicts with this document, this document prevails until an ADR is ratified to amend it. ADRs are the only mechanism by which this document is changed; ad-hoc deviations are defects.
+   590→   590→

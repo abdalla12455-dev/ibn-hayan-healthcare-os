@@ -1,0 +1,177 @@
+     1→     1→---
+     2→     2→Task ID: PRODUCT_BIBLE_v1
+     3→     3→Agent: Main Agent (Chief Product Officer role)
+     4→     4→Task: Fully write docs/00_PROJECT/PRODUCT_BIBLE.md — the highest-level reference for the entire Ibn Hayan Healthcare Operating System, with 31 mandated sections, professional enterprise-SaaS quality, no implementation details, no marketing language, future-proof.
+     5→     5→
+     6→     6→Work Log:
+     7→     7→- Verified existing skeleton file at /home/z/my-project/download/docs/00_PROJECT/PRODUCT_BIBLE.md (61 lines, empty sections) and existing folder structure (00_PROJECT through 14_FUTURE).
+     8→     8→- Authored full document in 3 write passes using Write + Edit tools:
+     9→     9→  - Pass 1: Header + TOC + Sections 1–10 (Introduction, Vision, Mission, Philosophy, Core Principles, Product Goals, Problems Solved, Target Customers, Stakeholders, Product Scope).
+    10→    10→  - Pass 2: Sections 11–20 (Out of Scope, Business Model, SaaS Strategy, Editions, Supported Healthcare Organizations, Supported Clinic Types, Product Modules Overview, User Roles Overview, Permission Philosophy, Configuration-Driven Philosophy).
+    11→    11→  - Pass 3: Sections 21–31 (Multi-Tenant Philosophy, Scalability Strategy, Localization Strategy, Accessibility Strategy, Security Philosophy, Offline Strategy, Integration Philosophy, Future Vision, Long-Term Roadmap, Success Metrics, Product Glossary).
+    12→    12→- Adhered to all user constraints: no JavaScript/HTML/CSS/Tailwind/implementation/code/DB tables/APIs. Only product-strategy content.
+    13→    13→- Verified forbidden-term scan: "schema" appears only in explicit disclaimers about what the document excludes; "code change" appears only in the configuration-over-code product commitment (no code changes needed for supported clinics). Both are appropriate product-level statements.
+    14→    14→- Verified final structure: 1,395 lines, 31 H2 sections (all mandated sections present), 202 H3 subsections, 309 table rows (rich tabular content), proper End-of-Product-Bible marker.
+    15→    15→
+    16→    16→Stage Summary:
+    17→    17→- File path: /home/z/my-project/download/docs/00_PROJECT/PRODUCT_BIBLE.md
+    18→    18→- Total lines: 1,395
+    19→    19→- Top-level sections: 31 (matches user-mandated list exactly, in order)
+    20→    20→- Subsections: 202 (every H2 expanded into multiple H3 subsections)
+    21→    21→- Tables: 25+ tables across editions, clinic types, modules, roles, integrations, metrics, glossary, etc.
+    22→    22→- Style: Professional enterprise SaaS reference document, no marketing language, no AI filler, every paragraph carries product value. Reads like Microsoft / Atlassian / Salesforce / Epic documentation.
+    23→    23→- Authority posture set: Authoritative v1.0.0, owned by Office of the CPO, quarterly review cadence, Product Council ratification, escalation rules for conflicts.
+    24→    24→- Cross-references: Document explicitly references and constrains all other docs in the framework (architecture, modules, clinic types, security, integrations, etc.), establishing it as the canonical source of truth.
+    25→    25→- Document is ready to serve as the authoritative reference for all downstream documentation in the Ibn Hayan framework.
+    26→    26→
+    27→    27→---
+    28→    28→Task ID: PRODUCT_BIBLE_v1_1
+    29→    29→Agent: Main Agent (Senior Product Review)
+    30→    30→Task: Senior product review and improvement of PRODUCT_BIBLE.md — strengthen product identity, add Design Principles section, add Product Differentiators section (with explicit comparison to Epic, Cerner, Athenahealth, Odoo, ERPNext, generic CMS), expand glossary, remove repetitive paragraphs, improve readability, preserve existing structure and information.
+    31→    31→
+    32→    32→Work Log:
+    33→    33→- Performed senior product review of existing v1.0.0 document (1,395 lines, 31 sections).
+    34→    34→- Mapped all internal cross-references (Section X.X) for systematic renumbering.
+    35→    35→- Strengthened Ibn Hayan identity by adding Section 1.5 "The Ibn Hayan Identity" — establishes the platform's namesake (Jabir ibn Hayyan, 8th-century polymath), three commitments flowing from the identity (documented-before-shipped, accumulated-verified-practice, practitioners-not-buyers).
+    36→    36→- Added new Section 6 "Design Principles" with 10 architectural commitments: Healthcare First, Configuration Before Customization, One Platform Many Organizations, Simplicity Without Sacrificing Power, Enterprise Scalability, Regional Adaptability, Future-Proof Architecture, Open Data Open Standards, Composable Not Monolithic, Observable Auditable Accountable. Each Design Principle is differentiated from overlapping Core Principles by focusing on architectural consequence rather than decision rule.
+    37→    37→- Added new Section 13 "Product Differentiators" with 10 differentiators + comparison table explicitly naming Epic, Cerner (Oracle Health), Athenahealth, Odoo Healthcare, ERPNext Healthcare, and generic Clinic Management Systems. Differentiators cover: healthcare-native vs adapted, configuration-driven vs customization-dependent, multi-tenant SaaS vs single-tenant, unified platform vs acquired suite, globally adaptable vs regionally fixed, accessible across tiers vs enterprise-only, open data vs captive data, long-term product vs acquisition target, specialty depth vs generic templates, transparent pricing vs opaque contracting.
+    38→    38→- Renumbered all subsequent sections (6→7 through 31→33) — 27 sections renumbered, all H2 and H3 headings updated consistently.
+    39→    39→- Updated all internal cross-references to point to correct renumbered sections (Section 6.3 → 7.3, Section 6.4 → 7.4, Section 6.5 → 7.5, Section 6.6 → 7.6, Section 11 → 12, Section 11.2 → 12.2, Section 13.7 → 15.7, Section 14 → 16, Section 16 → 18, Section 17 → 19, Section 19 → 21, Section 20 → 22, Section 22.3 → 24.3, Section 23 → 25, Section 25 → 27, Section 26 → 28, Section 29 → 31, etc.).
+    40→    40→- Tightened Section 8.4 (Data Lock-In resolution) to reference Section 4.4 rather than restating the principle.
+    41→    41→- Expanded Section 33 Product Glossary from ~45 terms to ~75 terms, adding: Access Review, Accountability, Acquired Suite, ARR, Auditability, Clinical Decision Support, Clinical Fidelity, Composability, Configuration Coverage, Configuration Inheritance, Configuration Overlay, Configuration Sandboxing, Configuration Validation, Configuration Versioning, Core Principle, CAC, Customer Lifetime, Customer Maturity Profile, Customer Size Tier, Customer Specialty Profile, Design Principle, Differentiator, Emergency Access, Future-Proof Architecture, GA, Global Reach, Gross Margin, Healthcare-Native, Ibn Hayan Identity, Integration Coverage, Long-Term Product, MTTR, NRR, Observability, Onboarding Success, Open Data, Open Standards, Operational Intelligence, Operational Isolation, Patient Entity, Pricing Principles, Product Differentiator, Simplicity Without Sacrificing Power, Specialty Depth, Tenant Data Residency, Tenant Lifecycle, Time-to-Value, TCO, Trial Edition, Unified Platform, Workflow Exclusivity.
+    42→    42→- Updated TOC to reflect 33 sections.
+    43→    43→- Updated version metadata: v1.0.0 → v1.1.0.
+    44→    44→- Verified final structure: 1,586 lines, 33 H2 sections (was 31 + 2 new), 226 H3 subsections (was 202, +24 from new sections), 370 table rows (was 309, +61 from new comparison table and expanded glossary).
+    45→    45→- Verified forbidden-term scan: zero matches for JavaScript/HTML/CSS/Tailwind/React/TypeScript/Python/API endpoints/code/DB tables.
+    46→    46→- Verified all cross-references resolve to correct renumbered sections (no orphaned references to old section numbers).
+    47→    47→
+    48→    48→Stage Summary:
+    49→    49→- File path: /home/z/my-project/download/docs/00_PROJECT/PRODUCT_BIBLE.md
+    50→    50→- Total lines: 1,586 (was 1,395; +191 lines from 2 new sections + identity strengthening + glossary expansion)
+    51→    51→- Top-level sections: 33 (was 31; added Design Principles as Section 6, Product Differentiators as Section 13)
+    52→    52→- Subsections: 226 (was 202)
+    53→    53→- Tables: 30+ tables including new competitor comparison matrix in Section 13.12
+    54→    54→- Identity: Ibn Hayan mentioned 28 times throughout; Section 1.5 establishes namesake heritage (Jabir ibn Hayyan); differentiators explicitly position against 5 named competitor classes
+    55→    55→- Cross-references: All 11 unique Section X.X references verified to point to correct renumbered targets
+    56→    56→- Document remains the permanent source of truth for the entire Ibn Hayan project, now with strengthened product identity, explicit competitive positioning, and reusable terminology across the documentation framework.
+    57→    57→
+    58→    58→---
+    59→    59→Task ID: SYSTEM_ARCHITECTURE_v1
+    60→    60→Agent: Main Agent (Chief Software Architect role)
+    61→    61→Task: Fully write docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md — the definitive architectural reference for the entire Ibn Hayan Healthcare Operating System. 30 mandated sections (Architecture Overview through Future Evolution Strategy). Professional English for senior software architects. No marketing, no AI filler, no implementation details, no code, no APIs, no database tables, no UI components, technology-agnostic wherever possible. Must read like the official architecture specification of a world-class Healthcare OS viable for the next decade.
+    62→    62→
+    63→    63→Work Log:
+    64→    64→- Reviewed existing stub at /home/z/my-project/download/docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md (65 lines, 15 empty placeholder sections) — overwritten completely with the user's mandated 30-section structure.
+    65→    65→- Reviewed worklog (PRODUCT_BIBLE_v1 and PRODUCT_BIBLE_v1_1 records) for product posture alignment — confirmed the architecture must serve: multi-tenant SaaS, 4 editions, 30 clinic types, 17 modules, 14 user roles, offline-first operation, configuration-driven behavior, decade horizon.
+    66→    66→- Authored full document in 3 write/edit passes:
+    67→    67→  - Pass 1 (Write): Header + TOC + Sections 1–10 (Architecture Overview, Architectural Vision, System Philosophy, Architectural Principles, High-Level Architecture with Mermaid diagram, Platform Layers, Domain-Driven Architecture, Configuration-Driven Architecture, Modular Architecture, Multi-Tenant Architecture).
+    68→    68→  - Pass 2 (Edit): Sections 11–20 (Organization Hierarchy, Clinic Hierarchy, Module Architecture, Feature Flag Strategy, Configuration Strategy, Workflow Engine Philosophy, State Management Philosophy, Event-Driven Concepts, Integration Architecture, Security Architecture).
+    69→    69→  - Pass 3 (Edit): Sections 21–30 (Scalability Strategy, Extensibility Strategy, Deployment Models, Offline-First Architecture, Synchronization Strategy, Localization Architecture, Audit Architecture, Reporting Architecture, AI Readiness, Future Evolution Strategy).
+    70→    70→- Adhered to all user constraints: zero implementation details, zero code, zero APIs, zero database tables, zero UI components, zero framework mentions (Mermaid is for diagrams, not a framework commitment).
+    71→    71→- Section 5.2 contains a Mermaid flowchart diagram showing all 8 platform layers (Experience, Edge, Orchestration, Domain, Platform Services, Integration, Data, Offline) with their internal components and dependency direction — the single load-bearing architectural diagram of the document.
+    72→    72→- Architectural principles (Section 4) define 18 numbered principles (P1–P18) with explicit precedence: P18 (healthcare safety) overrides all others; P5 (consistency) and P13 (auditability) override P9 (reversibility) and P6 (loose coupling) when clinical/financial correctness is at stake.
+    73→    73→- Bounded contexts (Section 7) define 19 contexts covering Patient, Encounter, Clinical Documentation, Orders & Results, Scheduling, Billing, Inventory, Pharmacy, Workforce, CRM, Accounting, HR, Documents, Notifications, plus 5 platform service contexts (Identity & Access, Configuration, Audit, Feature Flags, Localization).
+    74→    74→- Configuration strategy (Section 15) defines 7 precedence layers (platform default → edition → tenant → facility → department → care team → user → session) and 5 validation rule categories (Structural, Referential, Semantic, Contextual, Regulatory).
+    75→    75→- Multi-tenancy (Section 10) defines 3 isolation levels (Logical, Logical + Dedicated Compute, Physical) and 7 tenant lifecycle stages.
+    76→    76→- Deployment models (Section 23) define 5 models (Multi-Tenant SaaS, Single-Tenant Dedicated, Hybrid, Air-Gapped, Region-Specific) — all running the same multi-tenant code paths.
+    77→    77→- Synchronization (Section 25) defines 3 conflict resolution strategies (Last-Write-Wins, Field-Level Merge, Manual Resolution).
+    78→    78→- Reporting (Section 28) defines 3 reporting categories (Operational, Analytical, Regulatory) with distinct latency requirements and data sources.
+    79→    79→- Document explicitly aligns with and constrains all downstream technical documents (SOFTWARE_ARCHITECTURE, MODULE_ARCHITECTURE, CONFIGURATION_ARCHITECTURE, CODING_STANDARDS, FOLDER_STRUCTURE, all ADRs, SECURITY/*, INTEGRATIONS/*, DATABASE/*).
+    80→    80→- Final validation:
+    81→    81→  - Total lines: 1,717
+    82→    82→  - H2 sections: 30 (matches user-mandated list exactly, in order)
+    83→    83→  - H3 subsections: 207 (every H2 expanded into multiple H3 subsections)
+    84→    84→  - Mermaid diagrams: 1 (high-level architecture in Section 5.2)
+    85→    85→  - Table rows: 219 (rich tabular content across principles, layers, contexts, isolation levels, lifecycle stages, flag types, conflict strategies, reporting categories, deployment models, etc.)
+    86→    86→  - Forbidden-term scan: zero actual matches. Three flagged terms ("React", "Rust", "AWS") were all false-positive substrings of legitimate words ("react" the verb, "trust"/"trusted", "draws"/"laws"). All mentions of "code", "source code", "schema" are at the architectural-decision level (explicitly forbidding code changes/customization, distinguishing configuration from code, declarative configuration/event schemas as data) — consistent with PRODUCT_BIBLE posture and user's mandate.
+    87→    87→  - Document ends cleanly at Section 30.9 "The Decade Commitment" — no artificial end-of-document markers.
+    88→    88→- Version metadata: Authoritative v1.0.0, owned by Office of the Chief Software Architect, quarterly review cadence with off-cycle revision when an ADR is ratified.
+    89→    89→
+    90→    90→Stage Summary:
+    91→    91→- File path: /home/z/my-project/download/docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md
+    92→    92→- Total lines: 1,717
+    93→    93→- Top-level sections: 30 (matches user-mandated list exactly, in order)
+    94→    94→- Subsections: 207 (every H2 expanded into multiple H3 subsections)
+    95→    95→- Tables: 30+ tables across principles, layers, bounded contexts, isolation levels, lifecycle stages, flag types, configuration categories, validation rules, integration patterns, healthcare standards, deployment models, conflict strategies, reporting categories, scaling dimensions
+    96→    96→- Mermaid diagram: 1 comprehensive high-level architecture diagram (Section 5.2) showing all 8 platform layers, internal components, and dependency direction
+    97→    97→- Style: Professional enterprise architecture specification, no marketing language, no AI filler, every paragraph defines an architectural decision or principle. Reads like the official architecture specification of a world-class Healthcare OS.
+    98→    98→- Authority posture: Authoritative v1.0.0, owned by Office of the Chief Software Architect, quarterly review cadence, ADRs are the only amendment mechanism, ad-hoc deviations are defects.
+    99→    99→- Cross-references: Document explicitly references and constrains all downstream architectural documents (SOFTWARE_ARCHITECTURE, MODULE_ARCHITECTURE, CONFIGURATION_ARCHITECTURE, CODING_STANDARDS, FOLDER_STRUCTURE, ADRs, SECURITY/*, INTEGRATIONS/*, DATABASE/*) and aligns upward with PRODUCT_BIBLE.
+   100→   100→- Document is ready to serve as the canonical architectural reference that all future technical documents in the Ibn Hayan framework must align with.
+   101→   101→
+   102→   102→---
+   103→   103→Task ID: ARCHITECTURE_DOCS_v1
+   104→   104→Agent: Main Agent (Chief Software Architect role)
+   105→   105→Task: Complete the downstream architecture documents and ADRs that SYSTEM_ARCHITECTURE.md explicitly references and constrains. User instruction: "finish what you haven't finished yet." Identified 11 stub files (6 ADRs + 5 architecture docs), prioritized the 9 most directly constrained by SYSTEM_ARCHITECTURE.md (6 ADRs + SOFTWARE_ARCHITECTURE + MODULE_ARCHITECTURE + CONFIGURATION_ARCHITECTURE). Deferred CODING_STANDARDS and FOLDER_STRUCTURE as inherently implementation-bound and requiring separate scoping.
+   106→   106→
+   107→   107→Work Log:
+   108→   108→- Audited existing stub state: 5 architecture docs (SOFTWARE_ARCHITECTURE, MODULE_ARCHITECTURE, CONFIGURATION_ARCHITECTURE, CODING_STANDARDS, FOLDER_STRUCTURE) at 55-58 lines each with empty placeholder sections. 6 ADRs (001-006) at 36 lines each with empty Decision/Context/Alternatives/Consequences/Status/Future Notes sections.
+   109→   109→- Read placeholder structures to understand expected section layout per document.
+   110→   110→- Authored 6 ADRs, each with full ADR structure (Decision, Context, Alternatives, Consequences, Status, Future Notes):
+   111→   111→  - ADR-001 Configuration-Driven Architecture (234 lines): ratifies configuration as primary adaptation mechanism, rejects customization-driven and composition-only alternatives, defers sandboxed extension as future escape hatch.
+   112→   112→  - ADR-002 Modular Architecture (234 lines): ratifies modular monolith as default, rejects monolith and microservices alternatives, reserves right to extract modules to services when justified.
+   113→   113→  - ADR-003 Local-First Strategy (243 lines): ratifies local-first client architecture, rejects online-only and cache-first alternatives, accepts significant complexity as cost of clinical safety in connectivity-challenged settings.
+   114→   114→  - ADR-004 Multi-Tenant Strategy (237 lines): ratifies logical multi-tenancy as default, rejects single-tenancy and per-tenant-database-silo alternatives, with physical isolation available as deployment choice.
+   115→   115→  - ADR-005 UI Design Philosophy (237 lines): ratifies thin-client-over-platform-contracts, rejects surface-specific and server-rendered alternatives, commits to healthcare-native role-aware accessibility-first localization-first UI.
+   116→   116→  - ADR-006 Database Strategy (246 lines): ratifies segmented data architecture (transactional/analytical/cache/object/audit stores), rejects single-store and polyglot-per-context alternatives, preserves context ownership through contracts.
+   117→   117→- Authored 3 downstream architecture documents, each with 13 H2 sections and full subsection expansion:
+   118→   118→  - SOFTWARE_ARCHITECTURE.md (589 lines, 55 H3): elaborates SYSTEM_ARCHITECTURE Sections 5-6, 9, 13. Covers architectural patterns, layered architecture, service architecture, module decomposition, dependency management, cross-cutting concerns, SOLID/DRY/KISS principles, technology stack (technology-agnostic posture preserved), framework selection, trade-offs, technical debt management.
+   119→   119→  - MODULE_ARCHITECTURE.md (623 lines, 59 H3): elaborates SYSTEM_ARCHITECTURE Sections 9, 13. Covers module catalog (19 modules aligned with bounded contexts), boundaries, contracts (commands/queries/events/configuration schema), dependencies, lifecycle, communication patterns (in-process, events, outbox pattern), versioning, extension points, configuration surface, isolation strategy (contract/state/failure), testing strategy.
+   120→   120→  - CONFIGURATION_ARCHITECTURE.md (584 lines, 57 H3): elaborates SYSTEM_ARCHITECTURE Sections 8, 15. Covers configuration layers (8-layer inheritance), tenant configuration, module configuration, feature flags (vs configuration distinction), storage, validation (5 rule categories), lifecycle, environment-specific configuration, security, hot-reload, audit trail.
+   121→   121→- Cross-reference integrity: each ADR references its related SYSTEM_ARCHITECTURE sections; each architecture doc references its upstream SYSTEM_ARCHITECTURE sections and peer documents; ADR cross-references (e.g., ADR-002 depends on ADR-001; ADR-004 depends on ADR-001 and ADR-002; ADR-006 constrained by ADR-002 and ADR-004) are consistent.
+   122→   122→- Final validation:
+   123→   123→  - Total lines added across 9 documents: 3,227 (ADRs: 1,431; architecture docs: 1,796)
+   124→   124→  - ADRs: 6 H2 sections each (matches mandated Decision/Context/Alternatives/Consequences/Status/Future Notes structure), 19 H3 subsections each
+   125→   125→  - Architecture docs: 13 H2 sections each (matches existing stub structure), 55-59 H3 subsections each
+   126→   126→  - Forbidden-term scan: zero actual violations. Flagged terms (Cerner/Athenahealth in ADR-001; HTML in ADR-005; HTTP/SQL in SOFTWARE_ARCHITECTURE) all contextually appropriate — competitor names used in differentiation context (consistent with PRODUCT_BIBLE v1.1), HTML mentioned in rejected alternative, SQL/HTTP mentioned as standards/framework categories. All consistent with user's exception: "Do not mention frameworks unless discussing architectural trade-offs in a generic way."
+   127→   127→  - Version metadata: all 9 documents marked Authoritative v1.0.0, owned by Office of the Chief Software Architect, quarterly review cadence.
+   128→   128→
+   129→   129→Stage Summary:
+   130→   130→- Files written: 9 (6 ADRs + 3 architecture documents)
+   131→   131→  - /home/z/my-project/download/docs/12_ADR/001_CONFIGURATION_DRIVEN_ARCHITECTURE.md (234 lines)
+   132→   132→  - /home/z/my-project/download/docs/12_ADR/002_MODULAR_ARCHITECTURE.md (234 lines)
+   133→   133→  - /home/z/my-project/download/docs/12_ADR/003_LOCAL_FIRST_STRATEGY.md (243 lines)
+   134→   134→  - /home/z/my-project/download/docs/12_ADR/004_MULTI_TENANT_STRATEGY.md (237 lines)
+   135→   135→  - /home/z/my-project/download/docs/12_ADR/005_UI_DESIGN_PHILOSOPHY.md (237 lines)
+   136→   136→  - /home/z/my-project/download/docs/12_ADR/006_DATABASE_STRATEGY.md (246 lines)
+   137→   137→  - /home/z/my-project/download/docs/01_ARCHITECTURE/SOFTWARE_ARCHITECTURE.md (589 lines)
+   138→   138→  - /home/z/my-project/download/docs/01_ARCHITECTURE/MODULE_ARCHITECTURE.md (623 lines)
+   139→   139→  - /home/z/my-project/download/docs/01_ARCHITECTURE/CONFIGURATION_ARCHITECTURE.md (584 lines)
+   140→   140→- Total lines added: 3,227
+   141→   141→- All 6 ADRs follow consistent ADR structure with Decision/Context/Alternatives/Consequences/Status/Future Notes and include comparison tables for alternatives considered
+   142→   142→- All 3 architecture documents align with SYSTEM_ARCHITECTURE.md (referenced sections explicitly traced), align upward with PRODUCT_BIBLE, and constrain downstream documents (per-module specs, domain docs, security docs, database docs, testing docs)
+   143→   143→- Each ADR records: Decision Statement, Scope, Decision Properties (reversibility/cost), Forces Driving the Decision, Constraints, Alternatives (with criteria-based verdicts), Positive/Negative/Neutral Consequences, Mitigations, Current Status, Ratification, Owner, Open Questions, Evolution Triggers, Related Decisions
+   144→   144→- Architecture documents preserve technology-agnostic posture: SOFTWARE_ARCHITECTURE Section 9 defines technology categories and selection criteria without naming specific technologies; Section 10 treats frameworks as implementation choices governed by selection criteria, not architectural commitments
+   145→   145→- Documentation framework status: the architecture spine of the Ibn Hayan documentation framework is now complete. SYSTEM_ARCHITECTURE.md (canonical) → SOFTWARE_ARCHITECTURE.md + MODULE_ARCHITECTURE.md + CONFIGURATION_ARCHITECTURE.md (elaborations) → 6 ADRs (ratified decisions). Remaining stubs (CODING_STANDARDS, FOLDER_STRUCTURE, and docs in 02_PRODUCT through 14_FUTURE) are out of scope for this task.
+   146→   146→
+   147→   147→---
+   148→   148→Task ID: SA_v2_redo
+   149→   149→Agent: Subagent (Senior Software Architect role)
+   150→   150→Task: Redo SOFTWARE_ARCHITECTURE.md as v2.0.0, elaborating SYSTEM_ARCHITECTURE v2.0.0 with 13 mandated sections
+   151→   151→
+   152→   152→Work Log:
+   153→   153→- Read mandatory pre-work: worklog.md (prior SA_v1 and architecture-spine history), SYSTEM_ARCHITECTURE.md v2.0.0 (canonical 30-section reference, 2,353 lines), PRODUCT_BIBLE.md v2.0.0 (33-section product authority), and the existing SOFTWARE_ARCHITECTURE.md v1.0.0 stub (590 lines, 13 sections with combined SOLID/DRY/KISS section and a trailing Related Documents section).
+   154→   154→- Mapped the v1.0.0 stub structure to the new mandated 13-section structure: the v1 "Design Principles (SOLID, DRY, KISS)" single section was split into Section 8 (SOLID Principles Application) and Section 9 (DRY and KISS Principles); the v1 "Framework Selection" was renamed to "Framework Selection Criteria"; the v1 trailing "Related Documents" section was removed (cross-references folded into the header metadata table, consistent with SYSTEM_ARCHITECTURE.md v2.0.0 posture).
+   155→   155→- Replaced the v1.0.0 header block (Status/Version/Owner banner) with the full SYSTEM_ARCHITECTURE.md v2.0.0-style metadata table: Document Title, Project, Document Type (Implementation-Grade Architectural Specification), Authority Level (Authoritative — Elaboration of SYSTEM_ARCHITECTURE), Version 2.0.0, Status Ratified, Owner Office of the Chief Software Architect, Custodian Architecture Council, Review Cadence Quarterly, Audience, Scope, Out of Scope, Conflict Resolution (SYSTEM_ARCHITECTURE prevails), Amendment Mechanism, Predecessor, Supersedes.
+   156→   156→- Authored the full document in a single Write pass, then validated and patched one cross-reference.
+   157→   157→- Established an explicit elaboration map in Section 1.2 tracing each SYSTEM_ARCHITECTURE section (4, 5, 6, 7, 9, 13, 19, 22, 27, 30) to the SOFTWARE_ARCHITECTURE section that elaborates it.
+   158→   158→- Cross-referenced PRODUCT_BIBLE Design Principle D-4 (Simplicity Without Sacrificing Power) in Section 9.5, and referenced the 18 architectural principles (P1–P18) throughout to bind structural decisions to SYSTEM_ARCHITECTURE Section 4.
+   159→   159→- Preserved technology-agnostic posture throughout Sections 10 and 11: Section 10 defines 12 technology categories with selection criteria but names zero products; Section 11 defines 10 framework categories with selection criteria but commits to zero frameworks. Frameworks are explicitly stated to be implementation choices, not architectural commitments.
+   160→   160→- Used tables liberally: 27 tables across pattern catalog, layer inventory, service types, dependency rules, cross-cutting concerns, SOLID conflicts, technology categories, framework categories, trade-off catalog, debt categories, and debt register fields.
+   161→   161→- Validated cross-reference integrity: extracted all 33 unique SYSTEM_ARCHITECTURE Section references and verified each resolves to an actual section in SYSTEM_ARCHITECTURE.md v2.0.0. Found one stale reference (Strangler Fig row cited Section 30.3 for "migration scenarios", but 30.3 is "Evolution Vectors" in v2.0.0; deprecation/transition windows live in 30.5). Patched the reference to Section 30.5.
+   162→   162→- Validated technology-agnostic posture with word-boundary scan for 30+ specific product names (PostgreSQL, MySQL, MongoDB, Redis, React, Vue, Angular, Node.js, Django, Flask, Spring, Kubernetes, Docker, Kafka, RabbitMQ, Elasticsearch, AWS, Azure, GCP, GraphQL, Java, Python, TypeScript, JavaScript, Golang, Rust, Oracle, SQL Server, MariaDB, Cassandra, Couchbase, Memcached, Nginx, Apache, Tomcat, Jetty): zero matches.
+   163→   163→- Verified ADR references (ADR-001, ADR-002, ADR-003, ADR-004, ADR-006) are consistent with the ratified ADR catalogue; ADR-005 (UI Design Philosophy) not referenced as it is out of scope for software-structural architecture.
+   164→   164→- Verified bounded context code BC15 (Identity & Access) and module code M01 (Patient) match SYSTEM_ARCHITECTURE Section 7.2 and Section 13.4 respectively.
+   165→   165→- Final validation: 13 H2 sections in the mandated order (Software Architecture Overview, Architectural Patterns, Layered Architecture, Service Architecture, Module Decomposition, Dependency Management, Cross-Cutting Concerns, SOLID Principles Application, DRY and KISS Principles, Technology Stack, Framework Selection Criteria, Architectural Trade-offs, Technical Debt Management); 71 H3 subsections (every H2 has 5–6 H3, exceeding the 50+ minimum); 807 total lines (exceeds the 600+ hard requirement); document ends cleanly at Section 13.6 Debt Prevention with no artificial end markers.
+   166→   166→
+   167→   167→Stage Summary:
+   168→   168→- File path: /home/z/my-project/download/docs/01_ARCHITECTURE/SOFTWARE_ARCHITECTURE.md
+   169→   169→- Total lines: 807
+   170→   170→- Top-level sections: 13 (matches user-mandated list exactly, in order; Related Documents section removed and folded into header metadata)
+   171→   171→- Subsections: 71 (every H2 expanded into 5–6 H3 subsections)
+   172→   172→- Tables: 27 (pattern catalog, layer inventory, service types, decomposition criteria, dependency rules, cross-cutting concern catalog, SOLID conflicts, DRY surfaces, technology categories, framework categories, trade-off catalog, debt categories, debt register fields, etc.)
+   173→   173→- Cross-references: 33 unique SYSTEM_ARCHITECTURE Section references (all verified to resolve), 1 PRODUCT_BIBLE Design Principle reference (D-4), 5 ADR references (001/002/003/004/006), peer references to MODULE_ARCHITECTURE.md and CONFIGURATION_ARCHITECTURE.md
+   174→   174→- Technology-agnostic posture: preserved — zero specific product or framework commitments; 12 technology categories and 10 framework categories defined by capability and selection criteria only
+   175→   175→- Version metadata: Authoritative v2.0.0 (elaboration of SYSTEM_ARCHITECTURE v2.0.0), owned by Office of the Chief Software Architect, custodian Architecture Council, quarterly review cadence with off-cycle revision when a related ADR is ratified, conflict resolution in favour of SYSTEM_ARCHITECTURE.md
+   176→   176→- Document is ready to serve as the implementation-grade elaboration of SYSTEM_ARCHITECTURE.md for the Ibn Hayan Healthcare Operating System, constraining downstream CODING_STANDARDS.md, FOLDER_STRUCTURE.md, per-module specs, and ADRs.
+   177→   177→

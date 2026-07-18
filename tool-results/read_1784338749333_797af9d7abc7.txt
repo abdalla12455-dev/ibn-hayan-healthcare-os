@@ -1,0 +1,2002 @@
+     1→# Ibn Hayan Healthcare Operating System — Product Bible
+     2→
+     3→| Field | Value |
+     4→|---|---|
+     5→| Document Title | Product Bible |
+     6→| Project | Ibn Hayan Healthcare Operating System |
+     7→| Document Type | Canonical Product Reference |
+     8→| Authority Level | Authoritative — Source of Truth |
+     9→| Version | 2.0.0 |
+    10→| Status | Ratified |
+    11→| Owner | Office of the Chief Product Officer |
+    12→| Custodian | Product Council |
+    13→| Review Cadence | Quarterly, with off-cycle revision when a product decision is ratified |
+    14→| Audience | Product leadership, engineering leadership, design leadership, executive sponsors, customer-facing teams, partners |
+    15→| Scope | Product strategy, identity, philosophy, principles, scope, market positioning, customer tiers, modules, roles, governance, glossary |
+    16→| Out of Scope | Implementation details, source code, database schemas, API contracts, user-interface specifications, deployment runbooks, vendor selection |
+    17→| Conflict Resolution | This document prevails over every other product, module, or operational document. Any conflict between this document and a downstream document is resolved in favor of this document until this document is amended. |
+    18→| Amendment Mechanism | Product Council ratification; recorded in CHANGELOG with explicit version increment |
+    19→| Predecessor | v1.0.0 (initial), v1.1.0 (identity and differentiators pass) |
+    20→| Supersedes | All prior drafts and internal memos covering product strategy |
+    21→
+    22→---
+    23→
+    24→## Table of Contents
+    25→
+    26→1. Introduction
+    27→2. Product Vision
+    28→3. Product Mission
+    29→4. Product Philosophy
+    30→5. Core Principles
+    31→6. Design Principles
+    32→7. Product Goals
+    33→8. Problems the Product Solves
+    34→9. Target Customers
+    35→10. Stakeholders
+    36→11. Product Scope
+    37→12. Out of Scope
+    38→13. Product Differentiators
+    39→14. Business Model
+    40→15. SaaS Strategy
+    41→16. Editions
+    42→17. Supported Healthcare Organizations
+    43→18. Supported Clinic Types
+    44→19. Product Modules Overview
+    45→20. User Roles Overview
+    46→21. Permission Philosophy
+    47→22. Configuration-Driven Philosophy
+    48→23. Multi-Tenant Philosophy
+    49→24. Scalability Strategy
+    50→25. Localization Strategy
+    51→26. Accessibility Strategy
+    52→27. Security Philosophy
+    53→28. Offline Strategy
+    54→29. Integration Philosophy
+    55→30. Future Vision
+    56→31. Long-Term Roadmap
+    57→32. Success Metrics
+    58→33. Product Glossary
+    59→
+    60→---
+    61→
+    62→## 1. Introduction
+    63→
+    64→### 1.1 Purpose of This Document
+    65→
+    66→The Product Bible is the highest-level product reference for the Ibn Hayan Healthcare Operating System. It is the single document that establishes what the product is, why it exists, who it serves, how it differs from alternatives, and how it is governed. Every other product document, every module specification, every architectural decision, every go-to-market artefact, and every customer-facing commitment must align with this document. Where alignment is not possible, either the downstream artefact is incorrect or this document must be amended. There is no third option.
+    67→
+    68→This document is not a marketing brief, a sales playbook, a requirements catalogue, or an implementation plan. It is the canonical product reference — the document a senior leader can read end-to-end to understand the entire product without consulting any other source. Marketing, sales, requirements, and implementation all derive from this document; they do not define it.
+    69→
+    70→The Product Bible is written for senior practitioners who already understand healthcare operations, enterprise software economics, and multi-tenant SaaS delivery. It does not explain what a clinic is, what a multi-tenant platform is, or why regulatory compliance matters. It assumes that literacy and instead focuses on the product decisions that distinguish Ibn Hayan from every other healthcare system on the market.
+    71→
+    72→### 1.2 Scope and Authority
+    73→
+    74→The scope of this document is the entire Ibn Hayan Healthcare Operating System as a product — its identity, philosophy, principles, customer landscape, capability surface, governance model, and long-term trajectory. The document does not describe any specific implementation of the platform. It describes the product that implementations are expected to deliver.
+    75→
+    76→This document holds authority over the following classes of downstream artefacts:
+    77→
+    78→- All product-line documents under `docs/02_PRODUCT/` through `docs/11_MODULES/`.
+    79→- All architectural documents under `docs/01_ARCHITECTURE/`, including `SYSTEM_ARCHITECTURE.md`, `SOFTWARE_ARCHITECTURE.md`, `MODULE_ARCHITECTURE.md`, and `CONFIGURATION_ARCHITECTURE.md`.
+    80→- All decision records under `docs/12_ADR/`, which must be consistent with the principles in Section 5 and Section 6.
+    81→- All operational, security, integration, deployment, and future-direction documents under `docs/03_SECURITY/` through `docs/14_FUTURE/`.
+    82→
+    83→A downstream artefact that contradicts this document is, by definition, defective. The remedy is to either correct the downstream artefact or amend this document through the Product Council. Silent contradiction is not permitted.
+    84→
+    85→### 1.3 Audience
+    86→
+    87→This document is written for the following primary audiences:
+    88→
+    89→- **Product leadership** — to align product-line decisions with the canonical product reference.
+    90→- **Engineering leadership and chief architects** — to ensure that architectural decisions serve the product, not the reverse.
+    91→- **Design leadership** — to ground interaction, information, and visual design in the product philosophy.
+    92→- **Executive sponsors and investors** — to understand the product as a durable asset rather than a feature list.
+    93→- **Customer-facing teams** — to communicate the product consistently without improvisation.
+    94→- **Partners and integrators** — to understand what the product is and is not, before proposing extensions or integrations.
+    95→
+    96→Secondary audiences include compliance, legal, finance, customer success, and prospective customers under non-disclosure. The document assumes professional literacy in healthcare and enterprise software; it does not dilute its language for general audiences.
+    97→
+    98→### 1.4 Document Conventions
+    99→
+   100→Throughout this document, the following conventions are observed:
+   101→
+   102→- **Ibn Hayan** refers to the Ibn Hayan Healthcare Operating System as a whole, including all editions, modules, and deployment models.
+   103→- **The platform** refers to the multi-tenant runtime environment shared across customers.
+   104→- **A customer** refers to an organization that has subscribed to Ibn Hayan.
+   105→- **A tenant** refers to the logical isolation boundary within the platform that holds a single customer's data and configuration.
+   106→- **A user** refers to a human or system principal that interacts with the platform under an identity governed by a customer.
+   107→- **A module** refers to a bounded product capability shipped as part of the platform.
+   108→- **An edition** refers to a packaged tier of capability and service level offered commercially.
+   109→- **Configuration** refers to declarative, version-controlled, tenant-scoped adaptation of platform behaviour without modifying platform source.
+   110→- **Customization** refers to source-level modification of platform behaviour. Ibn Hayan does not perform customization. The distinction is load-bearing and recurs throughout this document.
+   111→
+   112→Capitalized terms (such as *Configuration Before Customization*, *Healthcare First*, *One Platform Many Organizations*) refer to named principles defined in Section 5 or Section 6 and are used as proper nouns throughout the documentation framework.
+   113→
+   114→### 1.5 The Ibn Hayan Identity
+   115→
+   116→Ibn Hayan takes its name from Jabir ibn Hayyan, the 8th-century polymath whose systematic approach to observation, documentation, and reproducibility laid foundations that influenced both chemistry and medicine for centuries. The name is not decorative. It encodes three commitments that distinguish the product from every other healthcare system on the market.
+   117→
+   118→The first commitment is **documented-before-shipped**. Every capability, every configuration surface, every role, every permission, and every integration is documented before it is exposed to a customer. Undocumented capability is defective capability. This commitment is the product-level expression of Jabir's insistence that knowledge which cannot be reproduced by others is not yet knowledge.
+   119→
+   120→The second commitment is **accumulated-verified-practice**. The platform is not a collection of features released into the market and left to customers to assemble. It is an accumulated body of verified practice — workflows, configurations, role definitions, and integrations that have been tested against real healthcare operations and proven to work before being made generally available. New capability enters the platform as a candidate, matures through validation, and only then becomes a default.
+   121→
+   122→The third commitment is **practitioners-not-buyers**. Ibn Hayan is built for the people who actually use healthcare software — clinicians, nurses, pharmacists, administrators, receptionists, technicians — not for procurement committees who will see the product once and never touch it again. Every product decision is made by asking what a practitioner will experience on a busy Tuesday afternoon, not what will look favourable in a comparison matrix.
+   123→
+   124→These three commitments are the source of the product's identity. They are not aspirations. They are operating constraints that govern what gets built, in what order, with what level of documentation, and for whom. When a product decision is unclear, the test is whether it strengthens or weakens these three commitments.
+   125→
+   126→### 1.6 Document Structure
+   127→
+   128→The document is organized in six movements:
+   129→
+   130→1. **Identity and philosophy** (Sections 2 through 6) — establishes what Ibn Hayan is, why it exists, and the principles that govern every product decision.
+   131→2. **Scope and differentiation** (Sections 7 through 13) — defines what the product does, what it does not do, who it serves, and how it differs from alternatives.
+   132→3. **Commercial and delivery model** (Sections 14 through 16) — defines how the product is packaged, sold, and delivered.
+   133→4. **Customer and capability landscape** (Sections 17 through 22) — defines the organizations, clinic types, modules, roles, permissions, and configuration surfaces the platform supports.
+   134→5. **Operating posture** (Sections 23 through 29) — defines how the platform behaves across tenants, scale, regions, accessibility, security, offline, and integrations.
+   135→6. **Direction and measurement** (Sections 30 through 33) — defines the long-term vision, roadmap, success metrics, and shared vocabulary.
+   136→
+   137→Each section is self-contained but cross-references other sections rather than restating their content. The glossary in Section 33 is the single source of truth for product terminology and is referenced throughout the documentation framework.
+   138→
+   139→### 1.7 How to Read This Document
+   140→
+   141→A first-time reader should read Sections 1 through 6 in order to internalize the product identity and philosophy, then jump to Section 13 (Product Differentiators) to understand how Ibn Hayan is positioned in the market. Sections 14 through 22 may be consulted as a reference. Sections 23 through 29 are essential for anyone responsible for delivery or customer success. Sections 30 through 33 are essential for anyone responsible for product strategy or investment.
+   142→
+   143→A reader looking for a specific decision rule should consult Section 5 (Core Principles) and Section 6 (Design Principles) first; these two sections together form the decision framework that governs every product choice. A reader looking for terminology should consult Section 33 (Product Glossary) directly. A reader looking for competitive positioning should consult Section 13. A reader looking for what is explicitly excluded should consult Section 12.
+   144→
+   145→---
+   146→
+   147→## 2. Product Vision
+   148→
+   149→### 2.1 Vision Statement
+   150→
+   151→Ibn Hayan exists to become the operating system of healthcare — the foundational layer on which healthcare organizations of every size, specialty, and geography run their clinical, operational, and financial work, and on which the next generation of healthcare innovation is built.
+   152→
+   153→The vision is not to be one of many healthcare systems. It is to be the layer that other healthcare systems depend on, that practitioners reach for first, and that organizations build long-term strategy around. The word *operating system* is deliberate. Ibn Hayan is not an application, not a suite, and not a marketplace. It is the substrate that makes coherent healthcare computing possible across an organization.
+   154→
+   155→### 2.2 The Decade Horizon
+   156→
+   157→The vision is stated on a ten-year horizon. This is not a marketing flourish. Healthcare organizations operate on multi-decade planning cycles. Their systems must remain viable across leadership transitions, regulatory shifts, clinical practice evolution, mergers and acquisitions, and technology generational changes. A product that cannot articulate a credible ten-year trajectory is, from a healthcare executive's perspective, a liability.
+   158→
+   159→The ten-year horizon shapes product decisions in concrete ways. It favours architectural choices that survive technology shifts over choices that optimize for the current quarter. It favours configuration over customization, because customization accumulates debt that becomes unrecoverable within five to seven years. It favours open data formats and open integration standards, because proprietary lock-in is incompatible with a decade of customer sovereignty. It favours conservative module boundaries, because modules that are wrong on day one cannot be corrected on year five without abandoning customers.
+   160→
+   161→The decade horizon does not mean the product moves slowly. It means the product moves deliberately. Capability that is fast to ship but wrong on the decade horizon is not progress; it is debt.
+   162→
+   163→### 2.3 The Three Vectors of the Vision
+   164→
+   165→The vision unfolds along three vectors that are pursued simultaneously and in tension with each other.
+   166→
+   167→The first vector is **depth**. Ibn Hayan must be deep enough in each supported specialty and operational domain that practitioners do not need to leave the platform to do their work. Depth is measured by the percentage of a practitioner's daily work that is fully supported inside the platform. A platform that requires ten external tools to complete a day's work is not deep; it is a launcher.
+   168→
+   169→The second vector is **breadth**. Ibn Hayan must be broad enough to cover clinical, operational, financial, and administrative work in a single coherent system, so that an organization does not need to maintain parallel platforms for parallel functions. Breadth is measured by the number of distinct organizational functions that are first-class citizens of the platform. A platform that handles only clinical work is a clinical system; a platform that handles clinical, financial, administrative, and operational work is an operating system.
+   170→
+   171→The third vector is **reach**. Ibn Hayan must be reachable by organizations of every size and in every supported geography, not only by large enterprises in wealthy markets. Reach is measured by the lowest customer tier that can adopt the platform without compromise, and by the number of regions where the platform operates as a local rather than an imported product. A platform that only serves large hospitals in three countries is a regional enterprise system; a platform that serves a single-practitioner clinic in Baghdad as capably as a 2,000-bed hospital in Riyadh is an operating system.
+   172→
+   173→Tension among the three vectors is intentional. Depth without breadth produces isolated specialty silos. Breadth without depth produces a generic platform that satisfies no practitioner. Reach without depth or breadth produces a low-cost product that customers outgrow. Ibn Hayan pursues all three vectors simultaneously and accepts that progress on each is slower than it would be if the other two were ignored.
+   174→
+   175→### 2.4 What the Vision Excludes
+   176→
+   177→The vision explicitly excludes the following ambitions, which are common in healthcare software marketing but incompatible with Ibn Hayan's identity:
+   178→
+   179→- **Becoming a healthcare provider.** Ibn Hayan is a software platform, not a clinic operator, not an insurer, and not a pharmaceutical company. The platform serves providers; it does not compete with them.
+   180→- **Owning patient data.** Patient data belongs to the patient and is custodied by the provider organization under contract. Ibn Hayan is the custodian's tool, not the data's owner.
+   181→- **Owning clinical decision-making.** Ibn Hayan provides decision support, alerts, and intelligence. It does not make clinical decisions. The clinician is always the decision-maker, and the platform's role is to inform, not to decide.
+   182→- **Being the cheapest option.** Ibn Hayan competes on decade-horizon value, not on lowest sticker price. Customers who optimize solely on price are not Ibn Hayan customers.
+   183→- **Being acquired.** Ibn Hayan is built as an independent, durable platform. Acquisition is not a product strategy and is not a goal. Decisions that would make the platform more acquirable at the cost of more useful are rejected.
+   184→
+   185→### 2.5 Vision Alignment Test
+   186→
+   187→Every product decision is tested against the vision by asking three questions in sequence:
+   188→
+   189→1. Does this decision deepen the platform's support for the work practitioners actually do?
+   190→2. Does this decision broaden the platform's coverage of organizational functions?
+   191→3. Does this decision extend the platform's reach to organizations or geographies not previously served?
+   192→
+   193→A decision that answers yes to at least one question without answering no to any other is consistent with the vision. A decision that answers no to all three questions is rejected regardless of short-term benefit. A decision that answers yes to one and no to another is escalated to the Product Council for adjudication, with the tension made explicit rather than hidden.
+   194→
+   195→This test is the operational expression of the vision. It is not a checklist; it is a discipline.
+   196→
+   197→---
+   198→
+   199→## 3. Product Mission
+   200→
+   201→### 3.1 Mission Statement
+   202→
+   203→Ibn Hayan's mission is to give every healthcare organization — from a solo practitioner in a rural clinic to a multi-national hospital network — a single, configurable, durable operating system for clinical, operational, and financial work, so that practitioners spend their time caring for patients rather than fighting their software.
+   204→
+   205→### 3.2 Mission Versus Vision
+   206→
+   207→The vision describes the destination: to be the operating system of healthcare. The mission describes the work: to give every healthcare organization a single, configurable, durable operating system. The vision is what success looks like on the decade horizon. The mission is what is done every day to move toward that horizon.
+   208→
+   209→The mission is stated in the active voice — *to give* — because the product team is accountable for delivering the platform to organizations, not for waiting for organizations to discover it. The mission is stated with the word *every* because selective reach is incompatible with the operating-system ambition. The mission is stated with three adjectives — *single*, *configurable*, *durable* — that together distinguish Ibn Hayan from fragmented, customized, or short-lived alternatives.
+   210→
+   211→### 3.3 The Three Adjectives
+   212→
+   213→**Single** means that an organization's clinical, operational, and financial work runs on one platform, not on a patchwork of point solutions. Single does not mean monolithic. The platform is composable — modules can be enabled or disabled per tenant — but the platform itself is one coherent system with one data model, one identity model, one configuration model, and one audit model. An organization that runs its clinical work on Ibn Hayan and its financial work on a separate ledger is not fully on the mission; the mission is to bring both onto the same platform.
+   214→
+   215→**Configurable** means that the platform adapts to the organization's workflow without source-level modification. Configuration is declarative, version-controlled, tenant-scoped, and validated. It is the mechanism by which a single code base serves a solo general practitioner and a 2,000-bed tertiary hospital. Configuration is not a fallback for missing capability; it is the primary adaptation mechanism and a first-class product surface. The depth of configurability is itself a measure of product maturity.
+   216→
+   217→**Durable** means that the platform remains viable across the decade horizon. Durability has three dimensions: technical (the architecture does not need to be rewritten to absorb new capability), commercial (the business model sustains investment through market cycles), and operational (the platform's uptime, recoverability, and audit posture meet healthcare-grade standards). A platform that is technically excellent but commercially fragile is not durable. A platform that is commercially successful but operationally brittle is not durable. All three dimensions are required.
+   218→
+   219→### 3.4 The Practitioner Focus
+   220→
+   221→The mission centres on practitioners — clinicians, nurses, pharmacists, technicians, administrators — because they are the people whose daily experience determines whether healthcare software is a help or a hindrance. A platform that satisfies a procurement committee but frustrates a nurse on a Friday night shift has failed. A platform that frustrates procurement but earns a nurse's trust will eventually be procured.
+   222→
+   223→This focus shapes product decisions in concrete ways. It means that the platform's default workflows are designed for the practitioner at the point of care, not for the administrator in the back office. It means that the platform's performance targets are stated in practitioner-felt latency, not in infrastructure metrics. It means that the platform's accessibility commitments are not checkbox compliance but operational requirements, because practitioners include people with disabilities and patients include people with disabilities.
+   224→
+   225→### 3.5 What the Mission Requires of the Product Team
+   226→
+   227→The mission requires the product team to make decisions that are sometimes commercially uncomfortable. Refusing to ship a capability that is not yet deep enough, even when a customer offers to pay, is a mission requirement. Investing in configuration depth that does not generate immediate revenue is a mission requirement. Declining to add a feature that would benefit one customer at the cost of broadening the platform is a mission requirement. Holding the line on data ownership and patient sovereignty, even when a larger customer demands otherwise, is a mission requirement.
+   228→
+   229→The mission is the test the product team applies when commercial pressure conflicts with product integrity. The mission wins. Commercial outcomes follow from product integrity over the decade horizon; they do not lead it.
+   230→
+   231→---
+   232→
+   233→## 4. Product Philosophy
+   234→
+   235→### 4.1 Philosophy Overview
+   236→
+   237→Ibn Hayan's product philosophy is the set of beliefs about healthcare, software, and organizations that shape every product decision. The philosophy is not derived from the market; it is the lens through which the market is interpreted. Where the market contradicts the philosophy, the market is regarded as wrong until the philosophy is amended.
+   238→
+   239→The philosophy is stated as six beliefs. Each belief has direct product consequences, which are enumerated rather than left implicit.
+   240→
+   241→### 4.2 Belief One — Healthcare Is Different
+   242→
+   243→Healthcare is not a vertical industry to which general-purpose enterprise software can be adapted. Healthcare combines life-critical work, asymmetric information between provider and patient, multi-generational data horizons, dense regulatory environments, multi-stakeholder workflows, and a duty of care that has no equivalent in commerce, manufacturing, or finance. Software that does not begin from this difference is not healthcare software; it is enterprise software with healthcare customers.
+   244→
+   245→The product consequence is that Ibn Hayan is healthcare-native. Every module, every role, every workflow, every configuration surface, and every integration is designed for healthcare work first. General-purpose enterprise patterns are borrowed only where they do not compromise healthcare fidelity, and the borrowing is explicit.
+   246→
+   247→### 4.3 Belief Two — Configuration Is the Adaptation Mechanism
+   248→
+   249→Healthcare organizations differ in specialty, size, geography, language, payment model, regulatory regime, and culture. A single hardcoded system cannot serve them. Customization — source-level modification per customer — is incompatible with a multi-tenant SaaS delivery model and with the decade horizon. The only viable adaptation mechanism is configuration: declarative, version-controlled, tenant-scoped, validated adaptation of platform behaviour without touching source.
+   250→
+   251→The product consequence is that configuration is a first-class product surface with its own architecture, its own governance, and its own documentation. Configuration is not a setting; it is a discipline. The depth and quality of the configuration surface is a primary measure of platform maturity.
+   252→
+   253→### 4.4 Belief Three — The Platform Outlasts Every Individual
+   254→
+   255→A healthcare organization will outlast its current chief executive, its current chief information officer, its current clinical leadership, and its current vendor account team. The platform must outlast all of them. This requires that the platform be larger than any individual's preferences, that decisions be recorded rather than carried in heads, and that the platform's evolution be governed by amendable principles rather than by personal authority.
+   256→
+   257→The product consequence is that every product decision of consequence is recorded in this document or in a downstream document, every architectural decision is recorded in an Architecture Decision Record, and every principle has an amendment mechanism. Tribal knowledge is a defect; explicit knowledge is the standard.
+   258→
+   259→### 4.5 Belief Four — The Patient Is the Ultimate Stakeholder
+   260→
+   261→The patient is not the customer of Ibn Hayan — the healthcare organization is the customer. But the patient is the ultimate stakeholder of every decision the platform enables. A decision that benefits the organization at the cost of the patient is, over the decade horizon, a decision that harms the organization. A platform that helps organizations serve patients well is a platform that organizations will retain; a platform that helps organizations extract from patients is a platform that organizations will eventually be forced to abandon.
+   262→
+   263→The product consequence is that patient-facing considerations are weighted disproportionately in product decisions, even when no patient is the direct user. Patient data ownership, patient data portability, patient consent, patient safety, and patient dignity are not features; they are constraints that govern feature design.
+   264→
+   265→### 4.6 Belief Five — Open Beats Closed Over the Decade
+   266→
+   267→Closed platforms capture short-term rent and lose long-term relevance. Open platforms — open data formats, open integration standards, open configuration surfaces, open documentation — earn long-term relevance and rent that follows from relevance rather than from capture. Healthcare organizations have been burned by closed platforms before; they will not be burned again quietly.
+   268→
+   269→The product consequence is that Ibn Hayan favours open standards over proprietary ones, exposes its data through documented interfaces, avoids captive data formats, and documents its behaviour before shipping it. Openness is a competitive strategy, not a charitable posture.
+   270→
+   271→### 4.7 Belief Six — The Team Is Accountable to the Product
+   272→
+   273→The product is not accountable to the team; the team is accountable to the product. This is not a rhetorical inversion. It means that when a team member leaves, the product continues. When a team's preference conflicts with a documented principle, the principle prevails. When a team's interpretation of a principle differs from the documented interpretation, the documented interpretation prevails until amended. The product is the durable artefact; the team is its steward.
+   274→
+   275→The product consequence is that this document, and the documents it constrains, are written to outlast their authors. Decisions are justified, not merely asserted. Alternatives are named, not merely rejected. Future readers — including future product teams — are the audience.
+   276→
+   277→### 4.8 Philosophy in Practice
+   278→
+   279→The six beliefs are not decorative. They are applied as decision tests. When a product decision is unclear, the team asks which belief governs and what that belief requires. When two beliefs appear to conflict, the conflict is named explicitly and resolved through the Core Principles (Section 5) and Design Principles (Section 6), which provide precedence. When a belief is shown to be wrong, the belief is amended through the Product Council, and the amendment is recorded in this document with explicit reasoning rather than silently absorbed.
+   280→
+   281→---
+   282→
+   283→## 5. Core Principles
+   284→
+   285→### 5.1 Purpose of Core Principles
+   286→
+   287→Core Principles are the decision rules that govern product choices. They are not aspirations; they are operating constraints. Every product decision of consequence is justifiable by reference to one or more Core Principles. A decision that cannot be justified by reference to a Core Principle is, by definition, out of scope for the product.
+   288→
+   289→Core Principles are distinguished from Design Principles (Section 6) as follows: Core Principles state *what* the product commits to; Design Principles state *how* the product's architecture and behaviour manifest those commitments. Core Principles are stable across market cycles; Design Principles evolve as the platform's architectural sophistication matures.
+   290→
+   291→### 5.2 Principle P-1 — Healthcare First
+   292→
+   293→The platform is healthcare software before it is enterprise software, before it is a SaaS product, and before it is a commercial offering. When a decision pits healthcare fidelity against commercial expediency, against generic enterprise patterns, or against SaaS delivery convenience, healthcare fidelity prevails.
+   294→
+   295→**Applies to:** module scope, workflow design, role definitions, permission boundaries, data model decisions, integration prioritization.
+   296→
+   297→**Conflicts with:** none. This is the foundational principle.
+   298→
+   299→### 5.3 Principle P-2 — Configuration Before Customization
+   300→
+   301→The platform adapts to customer needs through configuration, not through source-level customization. Customization is rejected as a delivery model. Configuration is the primary adaptation mechanism and is treated as a first-class product surface with its own architecture, governance, and validation framework.
+   302→
+   303→**Applies to:** every customer-specific adaptation request, every module extension decision, every integration scope decision.
+   304→
+   305→**Conflicts with:** none directly. Customization is rejected outright; it does not enter into precedence.
+   306→
+   307→### 5.4 Principle P-3 — One Platform, Many Organizations
+   308→
+   309→The platform is a single code base, a single configuration model, and a single operational runtime that serves every customer — from a solo practitioner to a multinational hospital network. Variations between customers are expressed as configuration, not as forks. The platform does not maintain customer-specific branches.
+   310→
+   311→**Applies to:** release management, tenant isolation strategy, configuration inheritance, module packaging.
+   312→
+   313→**Conflicts with:** none directly.
+   314→
+   315→### 5.5 Principle P-4 — Open Data, Open Standards
+   316→
+   317→Patient and operational data belongs to the customer organization, not to the platform. The platform exposes data through documented interfaces, uses open data formats wherever viable, prefers open integration standards over proprietary ones, and refuses captive data architectures. Data portability is a product commitment, not a customer effort.
+   318→
+   319→**Applies to:** data model design, integration architecture, export capabilities, partner ecosystems, offboarding processes.
+   320→
+   321→**Conflicts with:** none directly. Openness is a strategy, not a concession.
+   322→
+   323→### 5.6 Principle P-5 — Practitioner Experience Over Procurement Satisfaction
+   324→
+   325→When a product decision improves the procurement-stage impression at the cost of the practitioner-stage experience, the practitioner experience wins. The platform is designed for the people who use it daily, not for the people who buy it once.
+   326→
+   327→**Applies to:** workflow design, default settings, performance targets, accessibility commitments, onboarding flows.
+   328→
+   329→**Conflicts with:** occasionally with commercial pressure to add features that look good in demonstrations but harm daily use. Practitioner experience prevails.
+   330→
+   331→### 5.7 Principle P-6 — Durable Over Fashionable
+   332→
+   333→The platform favours architectural and product choices that remain viable across the decade horizon over choices that optimize for the current technology fashion. Fashion is acknowledged; it is not followed. Choices that are fashionable but incompatible with the decade horizon are rejected.
+   334→
+   335→**Applies to:** technology selection, architectural patterns, integration protocols, user-interface paradigms.
+   336→
+   337→**Conflicts with:** occasionally with market expectations and customer requests for current-fashion choices. Durable prevails.
+   338→
+   339→### 5.8 Principle P-7 — Documented Before Shipped
+   340→
+   341→No capability is shipped to a customer until it is documented. Documentation is part of the definition of done. Undocumented capability is defective capability, regardless of whether it works. Documentation includes behavioural specification, configuration surface, integration surface, role and permission implications, and known limitations.
+   342→
+   343→**Applies to:** every module, every feature, every configuration surface, every integration, every role.
+   344→
+   345→**Conflicts with:** occasionally with delivery pressure. Documentation prevails.
+   346→
+   347→### 5.9 Principle P-8 — Verified Practice Over Hypothetical Capability
+   348→
+   349→Capability enters the platform as a candidate, matures through validation against real healthcare operations, and only then becomes a default. Hypothetical capability — features designed in the abstract without operational validation — is not shipped as default. This protects practitioners from untested work and protects the platform from accumulating unvalidated surface area.
+   350→
+   351→**Applies to:** feature release strategy, default configurations, workflow templates, integration availability.
+   352→
+   353→**Conflicts with:** occasionally with market pressure to announce capability before it is validated. Verified practice prevails.
+   354→
+   355→### 5.10 Principle P-9 — Composable, Not Monolithic
+   356→
+   357→The platform is composed of modules with explicit boundaries, explicit contracts, and explicit dependencies. Customers compose the platform by enabling modules relevant to their work. The platform is not a monolith in which everything is always present, and it is not a marketplace in which anything goes. Composition is governed by the module architecture and by edition packaging.
+   358→
+   359→**Applies to:** module boundaries, dependency management, edition composition, customer onboarding.
+   360→
+   361→**Conflicts with:** occasionally with simplicity of single-tenant deployment. Composable prevails because it serves the decade horizon.
+   362→
+   363→### 5.10.1 Precedence Among Core Principles
+   364→
+   365→Core Principles are not strictly ordered. In the event of a conflict, the following precedence applies:
+   366→
+   367→1. **Healthcare First (P-1)** prevails over all others.
+   368→2. **Configuration Before Customization (P-2)** and **One Platform, Many Organizations (P-3)** are co-equal and jointly prevail over P-4 through P-9.
+   369→3. **Open Data, Open Standards (P-4)** prevails over P-5 through P-9 when data ownership or patient sovereignty is at stake.
+   370→4. **Practitioner Experience (P-5)** prevails over P-6 through P-9 when daily-use experience is at stake.
+   371→5. The remaining principles are applied as guidance, with conflicts escalated to the Product Council for explicit adjudication.
+   372→
+   373→Conflicts are not hidden. When a decision requires precedence, the precedence applied is recorded in the decision's rationale.
+   374→
+   375→### 5.11 Core Principles Are Not a Checklist
+   376→
+   377→Core Principles are not invoked mechanically. They are the lens through which product decisions are made. A decision that requires no principle to justify it is usually a decision that is out of scope or insufficiently considered. A decision that requires three principles to justify is usually a decision that is tension-laden and requires explicit Product Council attention. The principles exist to make tensions visible, not to resolve them by rote.
+   378→
+   379→---
+   380→
+   381→## 6. Design Principles
+   382→
+   383→### 6.1 Purpose of Design Principles
+   384→
+   385→Design Principles translate the Core Principles into architectural and behavioural commitments. They state how the platform's design manifests the product's beliefs. A Design Principle is not a feature; it is a constraint on how features are designed. Where a Core Principle says *what* the product commits to, a Design Principle says *how* the commitment is honoured.
+   386→
+   387→Design Principles are distinguished from Core Principles by their architectural consequence. Each Design Principle names an architectural or behavioural property that the platform exhibits by design, not by accident, and that downstream architectural documents must preserve.
+   388→
+   389→### 6.2 Design Principle D-1 — Healthcare First, Architecture Second
+   390→
+   391→The platform's architecture is shaped by healthcare work, not by generic enterprise patterns adapted to healthcare. Domain models, workflow engines, permission systems, audit primitives, and integration surfaces are designed for healthcare semantics first. Generic patterns are borrowed only where they do not compromise healthcare fidelity.
+   392→
+   393→**Architectural consequence:** the bounded contexts (defined in `SYSTEM_ARCHITECTURE.md`) are organized around healthcare work, not around generic enterprise resource categories. The clinical encounter is the central organizing entity of the data model, not the customer or the invoice.
+   394→
+   395→**Differentiation from Core Principle P-1:** P-1 states the commitment; D-1 states the architectural consequence — that domain decomposition, entity relationships, and workflow orchestration begin from healthcare semantics.
+   396→
+   397→### 6.3 Design Principle D-2 — Configuration Before Customization
+   398→
+   399→The platform's adaptation surface is configuration, declared, validated, version-controlled, and tenant-scoped. Source-level customization is not a delivery mechanism. The configuration surface is treated as a first-class product with its own architecture, its own governance, and its own validation framework, defined in `CONFIGURATION_ARCHITECTURE.md`.
+   400→
+   401→**Architectural consequence:** the platform has a layered configuration model with explicit precedence (platform default → edition → tenant → facility → department → care team → user → session), a configuration validation framework with five rule categories, and a configuration audit trail. Every behavioural decision in the platform is, in principle, configurable.
+   402→
+   403→**Differentiation from Core Principle P-2:** P-2 states the commitment; D-2 states the architectural consequence — the layered configuration model, the validation framework, and the configuration audit trail.
+   404→
+   405→### 6.4 Design Principle D-3 — One Platform, Many Organizations
+   406→
+   407→The platform is a single code base serving every customer from a solo practitioner to a multinational hospital network. Variations between customers are expressed as configuration, not as forks. The platform does not maintain customer-specific branches, customer-specific builds, or customer-specific deployment artefacts.
+   408→
+   409→**Architectural consequence:** the platform's multi-tenant architecture (defined in `SYSTEM_ARCHITECTURE.md`) is the default delivery model. Tenant isolation is achieved through logical separation, with dedicated compute and physical isolation available as deployment choices but never as code branches. Every customer runs the same code paths.
+   410→
+   411→**Differentiation from Core Principle P-3:** P-3 states the commitment; D-3 states the architectural consequence — that multi-tenancy is the default, and that variations are expressed through configuration rather than through branches.
+   412→
+   413→### 6.5 Design Principle D-4 — Simplicity Without Sacrificing Power
+   414→
+   415→The platform's surface area is small for the practitioner and large for the configurator. A receptionist should be able to do their daily work without understanding the platform's full capability. A clinical informatics officer should be able to configure the platform deeply without modifying source. The platform does not trade simplicity for power; it offers each to its appropriate audience.
+   416→
+   417→**Architectural consequence:** the platform separates the *experience surface* (what practitioners see) from the *configuration surface* (what administrators configure) from the *extension surface* (what integrators build against). Each surface has its own contracts, its own documentation, and its own governance. Complexity is not eliminated; it is placed where it belongs.
+   418→
+   419→**Differentiation from Core Principle P-5:** P-5 prioritizes practitioner experience; D-4 states the architectural consequence — surface separation that lets practitioner simplicity coexist with configurator power.
+   420→
+   421→### 6.6 Design Principle D-5 — Enterprise Scalability
+   422→
+   423→The platform scales from a single-practitioner clinic to a multi-national hospital network without architectural change. Scaling is achieved through horizontal and vertical scaling of stateless components, partitioning of stateful components by tenant and by bounded context, and degradation that preserves clinical safety under load. The same code paths that serve a one-doctor clinic serve a 2,000-bed hospital.
+   424→
+   425→**Architectural consequence:** the platform's scalability strategy (defined in `SYSTEM_ARCHITECTURE.md`) is multi-dimensional, covering tenants, users, facilities, data volume, transaction rate, and geographic distribution. Scaling decisions are made per dimension, not globally.
+   426→
+   427→**Differentiation from Core Principle P-3:** P-3 commits to one platform; D-5 commits to that platform scaling without architectural change across the customer size spectrum.
+   428→
+   429→### 6.7 Design Principle D-6 — Regional Adaptability
+   430→
+   431→The platform is built for global use, with regional adaptation as a first-class concern. Localization is not a translation pass; it includes language, calendar, date and time formats, number formats, currency, regulatory frameworks, clinical coding systems, payment models, and cultural expectations about clinical workflow. A region is not a language; a region is a complete operational context.
+   432→
+   433→**Architectural consequence:** the platform's localization architecture (defined in `SYSTEM_ARCHITECTURE.md`) treats regional adaptation as a configuration surface, not as a fork. Regulatory frameworks, clinical coding systems, and payment models are pluggable. The platform supports multiple regulatory regimes per tenant where organizations operate across borders.
+   434→
+   435→**Differentiation from Core Principle P-3:** P-3 commits to one platform; D-6 commits to that platform being regionally adaptable without forking.
+   436→
+   437→### 6.8 Design Principle D-7 — Future-Proof Architecture
+   438→
+   439→The platform's architecture is designed to absorb capability that has not yet been imagined. This requires that bounded contexts be stable, that contracts be explicit, that extension points be first-class, and that the platform avoid premature commitment to technologies, paradigms, or vendors that may not survive the decade horizon.
+   440→
+   441→**Architectural consequence:** the platform's extensibility strategy (defined in `SYSTEM_ARCHITECTURE.md`) defines four categories of extension points, the platform's bounded contexts are designed to outlast any specific implementation, and technology selection is treated as an implementation choice governed by architectural criteria rather than as an architectural commitment.
+   442→
+   443→**Differentiation from Core Principle P-6:** P-6 commits to durability; D-7 states the architectural consequence — bounded context stability, explicit contracts, first-class extension points, and technology-agnostic posture.
+   444→
+   445→### 6.9 Design Principle D-8 — Open Data, Open Standards
+   446→
+   447→The platform's data is exposed through documented interfaces, uses open data formats wherever viable, and prefers open integration standards over proprietary ones. The platform does not hold customer data captive. Customer data is, by contract and by architecture, portable.
+   448→
+   449→**Architectural consequence:** the platform's integration architecture (defined in `SYSTEM_ARCHITECTURE.md`) favours open healthcare standards over proprietary ones, the platform's data export capabilities are first-class, and the platform's data model is documented as a contract, not as an internal artefact.
+   450→
+   451→**Differentiation from Core Principle P-4:** P-4 states the commitment; D-8 states the architectural consequence — documented interfaces, open formats, and portable data by architecture rather than by exception.
+   452→
+   453→### 6.10 Design Principle D-9 — Composable, Not Monolithic
+   454→
+   455→The platform is composed of modules with explicit boundaries, explicit contracts, and explicit dependencies. Customers compose the platform by enabling modules relevant to their work. The module architecture is governed by bounded contexts, not by feature catalogues.
+   456→
+   457→**Architectural consequence:** the platform's module architecture (defined in `MODULE_ARCHITECTURE.md`) defines module boundaries, module contracts, module dependencies, and module lifecycle. Modules communicate through explicit contracts — commands, queries, events, and configuration schemas — never through direct data access.
+   458→
+   459→**Differentiation from Core Principle P-9:** P-9 commits to composability; D-9 states the architectural consequence — explicit boundaries, explicit contracts, and explicit dependencies governed by bounded contexts.
+   460→
+   461→### 6.11 Design Principle D-10 — Observable, Auditable, Accountable
+   462→
+   463→The platform is observable in operation, auditable after the fact, and accountable to its decisions. Every clinical, financial, and operational action of consequence is recorded in an immutable audit trail. Every system action of consequence is observable through telemetry. Every decision of consequence is recorded in a decision record.
+   464→
+   465→**Architectural consequence:** the platform's audit architecture (defined in `SYSTEM_ARCHITECTURE.md`) is a primitive, not a feature. Audit is built into every module's contract. Observability is built into every operational component. Decision records are mandatory for architectural choices of consequence.
+   466→
+   467→**Differentiation from Core Principles:** D-10 is not derived from a single Core Principle; it operationalizes the combination of P-4 (open data), P-7 (documented), and the platform's duty-of-care posture.
+   468→
+   469→### 6.12 Precedence Among Design Principles
+   470→
+   471→Design Principles are not strictly ordered. In the event of conflict, the following precedence applies:
+   472→
+   473→1. **D-1 (Healthcare First, Architecture Second)** prevails over all others.
+   474→2. **D-2 (Configuration Before Customization)** and **D-3 (One Platform, Many Organizations)** are co-equal and jointly prevail over D-4 through D-10.
+   475→3. **D-10 (Observable, Auditable, Accountable)** prevails over D-4 through D-9 when clinical, financial, or regulatory accountability is at stake.
+   476→4. The remaining Design Principles are applied as guidance, with conflicts escalated to the Product Council and recorded in the decision's rationale.
+   477→
+   478→Where a Core Principle and a Design Principle appear to conflict, the Core Principle prevails. Where two Design Principles conflict and precedence does not resolve, the Product Council adjudicates and records the decision.
+   479→
+   480→---
+   481→
+   482→## 7. Product Goals
+   483→
+   484→### 7.1 Purpose of Product Goals
+   485→
+   486→Product Goals are the measurable outcomes the product team commits to over the planning horizon. They are not features; they are outcomes. A feature is a means to a goal; a goal is not a means to a feature. Product Goals are reviewed quarterly and revised annually, with the revision recorded in this document.
+   487→
+   488→### 7.2 Goal G-1 — Practitioner Time Reclaimed
+   489→
+   490→The platform's primary product goal is to reclaim practitioner time that is currently lost to administrative friction, software-mediated delay, and parallel-system reconciliation. The success measure is the number of practitioner minutes per shift spent on the platform versus spent on workaround activity, measured through operational telemetry and periodic practitioner surveys.
+   491→
+   492→**Why this goal:** it operationalizes Principle P-5 (Practitioner Experience Over Procurement Satisfaction) and the mission's practitioner focus. A platform that does not reclaim practitioner time is not earning its place in the workflow.
+   493→
+   494→**Target horizon:** measurable improvement at every quarterly review, with a cumulative target stated annually.
+   495→
+   496→### 7.3 Goal G-2 — Configuration Coverage of Supported Clinic Types
+   497→
+   498→The platform's configuration surface must cover the operational reality of every supported clinic type without customization. The success measure is the percentage of supported clinic types (see Section 18) for which a complete, validated configuration exists that requires no source-level modification.
+   499→
+   500→**Why this goal:** it operationalizes Principle P-2 (Configuration Before Customization) and Design Principle D-2. Configuration coverage is the primary measure of the configuration surface's maturity.
+   501→
+   502→**Target horizon:** complete coverage of all clinic types listed in Section 18 by the end of the planning horizon, with quarterly progress tracked against the clinic-type catalogue.
+   503→
+   504→### 7.4 Goal G-3 — Tenant Onboarding Time
+   505→
+   506→The platform's onboarding process must be fast enough that a small clinic can be productive on the platform within a defined window of subscription, and a large hospital can be productive within a defined window proportional to its complexity. The success measure is the median time from subscription to first clinical encounter recorded in the platform, segmented by customer size tier.
+   507→
+   508→**Why this goal:** it operationalizes the mission's *every* commitment and Design Principle D-5 (Enterprise Scalability). Slow onboarding is the most common failure mode of healthcare software and the most common reason for customer churn in the first year.
+   509→
+   510→**Target horizon:** segmented targets defined annually, with quarterly progress reviewed.
+   511→
+   512→### 7.5 Goal G-4 — Decade-Horizon Customer Retention
+   513→
+   514→The platform must retain customers across the decade horizon. The success measure is the percentage of customers who remain on the platform at year five and at year ten of their subscription, with churn causes analysed and recorded.
+   515→
+   516→**Why this goal:** it operationalizes Principle P-6 (Durable Over Fashionable) and the decade horizon. Retention is the only honest measure of durability; revenue is a derivative of retention.
+   517→
+   518→**Target horizon:** year-five retention tracked from year two onward; year-ten retention tracked from year five onward.
+   519→
+   520→### 7.6 Goal G-5 — Module Depth Per Specialty
+   521→
+   522→Each supported clinical specialty must have module depth sufficient to support the specialty's actual daily work, not a generic approximation. The success measure is the percentage of a specialty's daily workflow activities that are first-class capabilities of the platform, measured through workflow analysis per specialty.
+   523→
+   524→**Why this goal:** it operationalizes the vision's depth vector and Design Principle D-1 (Healthcare First, Architecture Second). A specialty that the platform serves superficially is a specialty that the platform does not yet serve.
+   525→
+   526→**Target horizon:** depth targets defined per specialty annually, with quarterly progress tracked against the specialty workflow catalogue.
+   527→
+   528→### 7.7 Goal G-6 — Regional Adaptation Coverage
+   529→
+   530→The platform must be operationally usable in every supported region without forking. The success measure is the number of regions where the platform passes regional adaptation readiness — language, calendar, regulatory framework, clinical coding system, payment model, and cultural workflow expectations.
+   531→
+   532→**Why this goal:** it operationalizes Design Principle D-6 (Regional Adaptability) and the vision's reach vector. A platform that works in three regions is a regional platform; an operating system works in every supported region.
+   533→
+   534→**Target horizon:** regional adaptation readiness tracked quarterly against the regional roadmap.
+   535→
+   536→### 7.8 Goal G-7 — Open Data Portability Demonstrated
+   537→
+   538→The platform's open-data commitment must be demonstrable, not theoretical. The success measure is the existence of a documented, tested, and operationally viable export pipeline that allows a customer to leave the platform with their data intact and consumable by alternative systems, exercised periodically as part of platform operations.
+   539→
+   540→**Why this goal:** it operationalizes Principle P-4 (Open Data, Open Standards) and Design Principle D-8. A portability commitment that is never exercised is not a commitment.
+   541→
+   542→**Target horizon:** operational export pipeline available and tested at every quarterly review.
+   543→
+   544→### 7.9 Goal G-8 — Audit Completeness
+   545→
+   546→Every clinical, financial, and operational action of consequence must be recorded in the audit trail. The success measure is the percentage of consequential actions that have a corresponding audit record, measured through periodic audit sampling and through automated completeness checks.
+   547→
+   548→**Why this goal:** it operationalizes Design Principle D-10 (Observable, Auditable, Accountable) and the platform's duty-of-care posture. An audit gap is a compliance gap and a clinical safety gap.
+   549→
+   550→**Target horizon:** 100% audit completeness for consequential actions, with quarterly progress reviewed and gaps treated as defects.
+   551→
+   552→### 7.10 Relationship Among Goals
+   553→
+   554→The eight Product Goals are pursued simultaneously. Tension among them is expected and is not avoided. The Product Council adjudicates tensions that cannot be resolved at the team level, with the adjudication recorded in the decision's rationale.
+   555→
+   556→Goals are not traded against each other casually. A decision to deprioritize one goal in favour of another is recorded, time-bounded, and revisited. Silent trade-offs are not permitted.
+   557→
+   558→---
+   559→
+   560→## 8. Problems the Product Solves
+   561→
+   562→### 8.1 Purpose of This Section
+   563→
+   564→This section names the problems the product solves, framed as the customer experiences them. It is not a feature list; it is a problem catalogue. A feature is justified by the problem it solves; a problem without a corresponding feature is a backlog item, not a marketing claim.
+   565→
+   566→### 8.2 Problem — The Fragmented Healthcare Software Landscape
+   567→
+   568→Healthcare organizations typically operate a patchwork of point solutions: a clinical system for encounters, a separate system for billing, a separate system for pharmacy, a separate system for laboratory, a separate system for scheduling, a separate system for inventory, a separate system for human resources, and a separate system for accounting. Each system has its own login, its own data model, its own update cycle, its own vendor relationship, and its own integration debt. The cumulative cost of operating this patchwork — in licensing, in integration maintenance, in staff training, in parallel data entry, and in reconciliation overhead — typically exceeds the cost of any single system by a wide margin.
+   569→
+   570→**How Ibn Hayan solves it:** Ibn Hayan is a single platform covering clinical, operational, financial, and administrative work in one coherent system. The patchwork is replaced by composition of modules within one platform, with one identity model, one data model, one configuration model, and one audit model. Integration debt between internal modules is eliminated by design; the modules share contracts, not integrations.
+   571→
+   572→### 8.3 Problem — Customization Lock-In
+   573→
+   574→Healthcare software vendors historically deliver customer-specific adaptations through source-level customization — either direct modification of the vendor's source code, customer-specific build flags, or customer-specific modules maintained outside the main code line. The result is lock-in: the customer cannot upgrade without re-applying their customizations, the vendor cannot innovate without breaking customer-specific builds, and the customization debt compounds until the only viable path is a rip-and-replace project that the customer cannot afford and the vendor cannot resource.
+   575→
+   576→**How Ibn Hayan solves it:** Ibn Hayan does not customize. Customer-specific adaptation is delivered through configuration — declarative, version-controlled, tenant-scoped, validated. The platform's code base is single and shared across all customers. Customers upgrade without re-applying adaptations, because adaptations are configuration, not code. Customization debt does not accumulate because customization does not occur.
+   577→
+   578→### 8.4 Problem — Data Lock-In
+   579→
+   580→Healthcare software vendors historically hold customer data captive through proprietary data formats, undocumented data models, exclusionary integration contracts, and exorbitant data-export fees. Customers who wish to change vendors find that their data is, in practice, not portable — either because the format is unreadable to alternative systems, because the export is prohibitively expensive, or because the vendor declines to provide it. The result is that customers remain on platforms that no longer serve them, not because the platform is the best choice but because leaving is impractical.
+   581→
+   582→**How Ibn Hayan solves it:** Ibn Hayan holds customer data under explicit custody, not ownership. Data is exposed through documented interfaces, in open formats wherever viable, and export is a first-class operational capability exercised periodically, not a customer effort that must be negotiated. The offboarding process is documented before the customer onboards, so the path out is known before the customer enters.
+   583→
+   584→### 8.5 Problem — Practitioner Friction
+   585→
+   586→Healthcare software is historically designed to satisfy procurement requirements and regulatory checklists, with the practitioner's daily experience as a secondary concern. The result is software that requires excessive clicks to complete common tasks, that performs slowly under clinical load, that interrupts the clinician with low-value alerts, that buries critical information behind navigation, and that demands parallel data entry into separate systems for separate functions. Practitioner friction is the largest single contributor to clinician burnout, to data quality degradation, and to patient safety incidents mediated by software.
+   587→
+   588→**How Ibn Hayan solves it:** Ibn Hayan's default workflows are designed for the practitioner at the point of care (Principle P-5). Performance targets are stated in practitioner-felt latency. Alerts are governed by clinical utility, not by liability deflection. Critical information is surfaced by default; navigation is reserved for non-critical depth. Parallel data entry is eliminated by module composition within the platform. The practitioner's experience is the design centre, not the residual.
+   589→
+   590→### 8.6 Problem — Specialty Shallowness
+   591→
+   592→Generic healthcare software historically serves all specialties at a shallow level — the same encounter template, the same order set, the same documentation structure — with specialty-specific behaviour left to customization or to bolt-on modules. The result is that specialists either work around the platform's generic templates or maintain parallel specialty-specific systems outside the platform. Either way, the platform's claimed coverage of the specialty is fictional.
+   593→
+   594→**How Ibn Hayan solves it:** Ibn Hayan's modules are designed with specialty depth as a first-class concern (Goal G-5). Each supported specialty has workflow analysis, configuration templates, and module extensions specific to its daily work. Specialty depth is measured by the percentage of a specialty's daily workflow that is a first-class capability of the platform, not by the existence of a specialty-named template.
+   595→
+   596→### 8.7 Problem — Regional Incompatibility
+   597→
+   598→Healthcare software built for one region typically does not work in another without significant rework. Language, calendar, regulatory framework, clinical coding system, payment model, and cultural workflow expectations differ across regions. Vendors who attempt regional expansion without architectural support for regional adaptation end up either forking the code base per region (with the resulting maintenance collapse) or shipping a poorly adapted version that customers reject.
+   599→
+   600→**How Ibn Hayan solves it:** Ibn Hayan's localization architecture treats regional adaptation as a configuration surface (Design Principle D-6). Language, calendar, regulatory framework, clinical coding system, and payment model are pluggable. The platform supports multiple regulatory regimes per tenant where organizations operate across borders. Regional adaptation does not require forking.
+   601→
+   602→### 8.8 Problem — Audit and Compliance Gaps
+   603→
+   604→Healthcare software historically treats audit as a feature added late in development, recorded at the application layer, with gaps in coverage for actions performed through integrations, through administrative tools, or through edge-case workflows. The result is audit trails that are incomplete when they are most needed — during incident investigation, regulatory inquiry, or legal discovery. Compliance teams operate with the gap-filled audit trails they have, not the complete audit trails they need.
+   605→
+   606→**How Ibn Hayan solves it:** Ibn Hayan's audit architecture is a primitive, not a feature (Design Principle D-10). Audit is built into every module's contract. Actions performed through any surface — application, integration, administrative tool — are recorded in the same audit trail with the same completeness guarantees. Audit completeness is a measured product goal (Goal G-8), with gaps treated as defects.
+   607→
+   608→### 8.9 Problem — Scaling Across the Customer Spectrum
+   609→
+   610→Healthcare software historically scales poorly across the customer size spectrum. Software built for large hospitals is too heavy, too expensive, and too operationally demanding for small clinics. Software built for small clinics does not have the depth, the configurability, or the operational rigour required by large hospitals. Vendors who attempt to serve both segments typically maintain two products, with the resulting duplication and the eventual abandonment of one segment.
+   611→
+   612→**How Ibn Hayan solves it:** Ibn Hayan is a single platform that scales from a solo practitioner to a multinational hospital network without architectural change (Design Principle D-5). The same code paths serve both segments. The configuration surface and the edition packaging allow a small clinic to adopt a small subset of capability and a large hospital to adopt the full surface, without either customer touching a different product.
+   613→
+   614→### 8.10 Problem — Opacity of Vendor Operations
+   615→
+   616→Healthcare software vendors historically operate opaquely — customers do not know what the vendor is doing with their data, what the vendor's uptime actually is, what the vendor's incident response practice is, or what the vendor's roadmap commitments are. The result is a customer relationship built on trust that is rarely verified and frequently broken.
+   617→
+   618→**How Ibn Hayan solves it:** Ibn Hayan operates transparently. Operational telemetry, incident records, audit trails, and roadmap commitments are shared with customers under the customer's contract. The platform's behaviour is documented before it is shipped (Principle P-7). The platform's evolution is governed by amendable principles recorded in this document, not by private preferences.
+   619→
+   620→### 8.11 Problems the Product Does Not Solve
+   621→
+   622→The product does not solve every healthcare problem. The following problems are explicitly out of scope:
+   623→
+   624→- **Direct patient care.** The platform does not provide medical care; it supports the people who do.
+   625→- **Healthcare policy.** The platform does not set healthcare policy; it operates within the policy of each region in which it is used.
+   626→- **Insurance adjudication.** The platform supports billing and claim submission; it does not adjudicate insurance claims.
+   627→- **Pharmaceutical manufacturing.** The platform supports pharmacy operations; it does not manufacture or compound pharmaceuticals.
+   628→- **Medical device operation.** The platform integrates with medical devices; it does not operate them.
+   629→
+   630→The product team refers problems outside this scope to appropriate partners, vendors, or authorities. The platform does not claim to solve problems it does not solve.
+   631→
+   632→---
+   633→
+   634→## 9. Target Customers
+   635→
+   636→### 9.1 Customer Definition
+   637→
+   638→A customer of Ibn Hayan is a healthcare organization that has subscribed to the platform under a commercial agreement and operates one or more tenants within the platform. A customer is not an individual practitioner acting outside an organizational context, not a patient, and not a partner or integrator. The customer is the organizational entity that holds the contractual relationship with Ibn Hayan and that owns the data custodied by the platform on its behalf.
+   639→
+   640→### 9.2 Customer Spectrum
+   641→
+   642→Ibn Hayan serves customers across a wide spectrum of size, specialty, and geography. The spectrum is intentionally broad; it reflects the vision's reach vector and the mission's *every* commitment. The spectrum is organized along three dimensions: size tier, specialty profile, and geographic region.
+   643→
+   644→The breadth of the customer spectrum is a deliberate product decision. A platform that serves only one segment is not an operating system; it is a vertical application. Ibn Hayan's claim to operating-system status rests on its ability to serve the full spectrum with the same code base, the same configuration model, and the same operational runtime.
+   645→
+   646→### 9.3 Customer Size Tiers
+   647→
+   648→Customers are classified into six size tiers based on operational scale rather than revenue. Size tier governs default edition packaging, default onboarding pathway, default support tier, and default configuration complexity.
+   649→
+   650→| Tier | Code | Typical Profile | Typical Facility Count | Typical Active User Count |
+   651→|---|---|---|---|---|
+   652→| Solo | T1 | Single practitioner, single facility | 1 | 1–3 |
+   653→| Small Practice | T2 | Small group practice, single specialty | 1–3 | 4–25 |
+   654→| Mid Practice | T3 | Multi-provider practice, single or few specialties | 3–10 | 26–100 |
+   655→| Large Practice | T4 | Multi-site practice or small hospital | 10–30 | 101–500 |
+   656→| Hospital | T5 | Single hospital or small hospital network | 1–5 | 501–2,000 |
+   657→| Hospital Network | T6 | Multi-hospital network, regional or national | 5+ | 2,000+ |
+   658→
+   659→Size tier is not a fixed property. Customers may move between tiers as they grow or contract. The platform's configuration and edition packaging accommodate tier transitions without re-implementation, in keeping with Design Principle D-5 (Enterprise Scalability).
+   660→
+   661→### 9.4 Customer Specialty Profile
+   662→
+   663→Customers are profiled by the clinical specialties they practise. Specialty profile governs the module set, the configuration templates, and the workflow defaults that the platform applies. The supported specialties are listed in Section 18 alongside the clinic types that typically deliver them.
+   664→
+   665→Specialty profiling is not a marketing segmentation; it is an operational input to configuration. A customer whose specialty profile includes cardiology receives configuration defaults validated for cardiology workflows, not generic encounter templates that the customer must then override.
+   666→
+   667→### 9.5 Customer Geographic Region
+   668→
+   669→Customers are classified by the geographic region in which they operate. Geographic region governs the localization layer applied — language, calendar, regulatory framework, clinical coding system, and payment model. The supported regions are listed in Section 25 (Localization Strategy).
+   670→
+   671→Customers operating across multiple regions receive a multi-region tenant configuration that applies the appropriate localization per facility or per organizational unit. Cross-region operation does not require multiple tenants or multiple code branches.
+   672→
+   673→### 9.6 Customer Maturity Profile
+   674→
+   675→Customers are profiled by their operational maturity with respect to healthcare software. Maturity profile governs the depth of configuration that is appropriate to apply at onboarding and the cadence of subsequent configuration evolution.
+   676→
+   677→| Maturity | Code | Profile | Default Configuration Posture |
+   678→|---|---|---|---|
+   679→| Initial | M1 | First healthcare software; previously paper-based or ad-hoc | Conservative defaults; minimal configuration beyond edition baseline |
+   680→| Transitional | M2 | Migrating from a previous healthcare system | Moderate configuration; mapped from prior system where viable |
+   681→| Operational | M3 | Experienced with healthcare software; clear operational practice | Full configuration; templates and overrides per organizational unit |
+   682→| Advanced | M4 | Sophisticated practice; clinical informatics capacity | Deep configuration; custom workflows within configuration surface |
+   683→
+   684→Maturity profile is assessed at onboarding and revisited annually. A customer's maturity profile is not a judgement of sophistication; it is an input to configuration depth, support tier, and training pathway.
+   685→
+   686→### 9.7 Customer Selection Criteria
+   687→
+   688→Ibn Hayan does not pursue every customer. The product team applies selection criteria to identify customers whose needs align with the platform's current maturity and whose commitment to the decade horizon matches the platform's own. Customers who do not meet the selection criteria are referred to alternative vendors whose posture is better matched.
+   689→
+   690→The selection criteria are:
+   691→
+   692→- The customer operates within a supported clinic type (Section 18) and a supported region (Section 25).
+   693→- The customer accepts configuration as the adaptation mechanism and does not require source-level customization.
+   694→- The customer accepts the platform's data custody model, including the documented offboarding process.
+   695→- The customer is willing to engage with the platform's operational rigour, including audit, observability, and configuration governance.
+   696→- The customer's leadership is aligned with the decade-horizon commitment, not solely with short-term cost optimization.
+   697→
+   698→Customers who require customization, who demand data captivity, who reject operational rigour, or who optimize solely on short-term cost are not Ibn Hayan customers. The product team declines such customers respectfully and refers them to vendors whose posture is better matched.
+   699→
+   700→### 9.8 Customer Lifecycle
+   701→
+   702→The customer lifecycle has six stages, each with defined product, operational, and commercial responsibilities.
+   703→
+   704→| Stage | Code | Description |
+   705→|---|---|---|
+   706→| Prospect | L1 | Customer identified; needs assessed against selection criteria |
+   707→| Onboarding | L2 | Subscription signed; tenant provisioned; configuration applied; first encounter targeted |
+   708→| Active | L3 | Customer in steady-state operation; regular configuration evolution |
+   709→| Expansion | L4 | Customer expanding scope — additional facilities, modules, or specialties |
+   710→| Renewal | L5 | Customer approaching subscription renewal; retention assessment |
+   711→| Offboarding | L6 | Customer departing; data export executed; tenant decommissioned |
+   712→
+   713→The lifecycle is not strictly linear. Customers may enter Expansion from Active and return to Active, or enter Renewal from Expansion. Offboarding is the terminal stage. The platform's data export and decommissioning capabilities are exercised as part of L6, in keeping with Goal G-7 (Open Data Portability Demonstrated).
+   714→
+   715→---
+   716→
+   717→## 10. Stakeholders
+   718→
+   719→### 10.1 Purpose of Stakeholder Mapping
+   720→
+   721→Stakeholder mapping identifies every party whose interests the platform must serve, whose constraints the platform must respect, or whose authority the platform must acknowledge. A product that serves one stakeholder at the expense of others is unstable; a product that serves all stakeholders coherently is durable. The stakeholder map is the basis for product decision trade-off analysis.
+   722→
+   723→### 10.2 Primary Stakeholders
+   724→
+   725→Primary stakeholders are parties whose daily work the platform directly supports. Their experience is the primary measure of product success.
+   726→
+   727→| Stakeholder | Role | Primary Interest |
+   728→|---|---|---|
+   729→| Practitioners | Clinicians, nurses, pharmacists, technicians | Workflow that supports patient care without friction |
+   730→| Patients | Recipients of care | Data privacy, safety, dignity; continuity of care across providers |
+   731→| Operational staff | Receptionists, administrators, schedulers, billers | Workflow that handles operational volume without error |
+   732→| Customer leadership | Chief executives, clinical leaders, operational leaders | Visibility into operations; durable platform commitment |
+   733→
+   734→### 10.3 Operational Stakeholders
+   735→
+   736→Operational stakeholders are parties who operate the platform on behalf of the customer. Their experience governs the platform's operational viability.
+   737→
+   738→| Stakeholder | Role | Primary Interest |
+   739→|---|---|---|
+   740→| Customer IT teams | System administrators, integrators | Manageable configuration; clear documentation; reliable integrations |
+   741→| Customer informatics | Clinical informatics officers, workflow designers | Configuration depth to express validated practice |
+   742→| Customer compliance | Compliance officers, audit teams | Complete audit trails; demonstrable regulatory alignment |
+   743→| Ibn Hayan operations | SRE, support, customer success | Observable platform; manageable incidents; clear escalation |
+   744→
+   745→### 10.4 Governance Stakeholders
+   746→
+   747→Governance stakeholders are parties whose authority the platform must acknowledge. Their constraints are non-negotiable.
+   748→
+   749→| Stakeholder | Role | Primary Interest |
+   750→|---|---|---|
+   751→| Regulatory bodies | Health authorities, data protection authorities | Compliance with regional regulatory frameworks |
+   752→| Accreditation bodies | Accreditation councils, quality bodies | Demonstrable quality and safety practices |
+   753→| Patient representatives | Patient advocacy organizations | Patient data rights; informed consent; dignity |
+   754→| Ibn Hayan Product Council | Product governance body | Coherence of product decisions with principles |
+   755→
+   756→### 10.5 Commercial Stakeholders
+   757→
+   758→Commercial stakeholders are parties whose commercial relationship with the platform must be honoured.
+   759→
+   760→| Stakeholder | Role | Primary Interest |
+   761→|---|---|---|
+   762→| Ibn Hayan investors | Equity holders | Sustainable commercial returns over the decade horizon |
+   763→| Integration partners | Third-party integrators | Clear integration surfaces; predictable evolution |
+   764→| Implementation partners | Implementation consultants | Documented onboarding pathways; configuration tooling |
+   765→| Training partners | Training providers | Documented curricula; role-based training pathways |
+   766→
+   767→### 10.6 Stakeholder Precedence
+   768→
+   769→When stakeholder interests conflict, the following precedence applies:
+   770→
+   771→1. **Patient safety and patient data sovereignty** prevail over all other stakeholder interests. This precedence is non-negotiable and reflects Principle P-1 (Healthcare First) and Belief Four (the patient is the ultimate stakeholder).
+   772→2. **Practitioner experience** prevails over operational convenience and procurement satisfaction. This precedence reflects Principle P-5.
+   773→3. **Customer operational viability** prevails over commercial convenience for Ibn Hayan or its partners. A customer that cannot operate the platform sustainably is a customer that will churn.
+   774→4. **Regulatory compliance** is not a stakeholder interest to be traded; it is a floor below which the platform does not operate.
+   775→5. **Commercial sustainability** of Ibn Hayan is a necessary condition for the decade horizon; it is not traded casually but it does not override the preceding precedences.
+   776→
+   777→### 10.7 Stakeholder Engagement
+   778→
+   779→Each stakeholder class has a defined engagement pathway. Practitioners are engaged through workflow analysis, usability research, and feedback channels integrated into the platform. Operational staff are engaged through operational telemetry review and configuration governance forums. Customer leadership is engaged through quarterly business reviews and roadmap alignment. Regulatory bodies are engaged through compliance documentation and audit cooperation. The Product Council is engaged through the amendment mechanism defined in Section 1.2.
+   780→
+   781→Stakeholder engagement is not a marketing activity; it is a product input. Feedback that reaches the product team is recorded, triaged, and either reflected in product decisions or explicitly declined with recorded reasoning.
+   782→
+   783→---
+   784→
+   785→## 11. Product Scope
+   786→
+   787→### 11.1 Purpose of Scope Definition
+   788→
+   789→Scope definition states what the platform does and does not attempt. Scope is the boundary within which the product team operates. A product without a defined scope expands indefinitely until it loses coherence; a product with a defined scope makes deliberate decisions about what enters and what does not.
+   790→
+   791→### 11.2 In-Scope Capability Categories
+   792→
+   793→The platform's in-scope capability is organized into five categories. Each category is supported by modules defined in Section 19.
+   794→
+   795→| Category | Description | Example Modules |
+   796→|---|---|---|
+   797→| Clinical | Clinical encounter, documentation, orders, results, decision support, clinical coding | Patient, Encounter, Clinical Documentation, Orders & Results, Pharmacy |
+   798→| Operational | Scheduling, queue management, facility operations, document management | Scheduling, Documents, Notifications |
+   799→| Financial | Billing, claims, accounting, financial reporting | Billing, Accounting |
+   800→| Administrative | Patient registration, workforce management, customer relationship management | CRM, HR, Workforce |
+   801→| Platform | Identity, configuration, audit, integration, reporting — shared infrastructure for all other categories | Identity & Access, Configuration, Audit, Integration, Reporting |
+   802→
+   803→The five categories together constitute the platform's capability surface. A capability that does not fit one of these categories is, by definition, out of scope.
+   804→
+   805→### 11.3 Scope Across the Customer Spectrum
+   806→
+   807→The platform's scope is uniform across the customer spectrum. A solo practitioner and a multinational hospital network have access to the same capability surface; they differ in which modules they enable, not in what the modules do. This is a direct consequence of Design Principle D-3 (One Platform, Many Organizations) and Design Principle D-5 (Enterprise Scalability).
+   808→
+   809→A solo practitioner typically enables a small subset of modules — Patient, Encounter, Clinical Documentation, Scheduling, Billing — and operates with conservative configuration. A multinational hospital network typically enables the full module set and operates with deep configuration across multiple facilities, multiple specialties, and multiple regions. Both customers run the same code, the same configuration model, and the same operational runtime.
+   810→
+   811→### 11.4 Scope Across Regions
+   812→
+   813→The platform's scope is uniform across regions, with regional adaptation applied through the localization surface (Design Principle D-6). A clinic in Baghdad and a clinic in Riyadh operate the same modules with different regulatory frameworks, different clinical coding systems, different payment models, and different languages. The scope is uniform; the localization is regional.
+   814→
+   815→Regional scope does not include capabilities that are unique to a single region to the extent that they cannot be generalized. A region-specific capability that cannot be expressed as a configuration of a general module is, by default, out of scope. Exceptions are recorded as ADRs and reflected in the regional adaptation roadmap.
+   816→
+   817→### 11.5 Scope Evolution
+   818→
+   819→Scope evolves deliberately. New capability enters the platform through a defined intake process — workflow analysis, configuration coverage assessment, module design, validation against real operations, and gradual rollout. Capability does not enter the platform through ad hoc customer requests, through sales commitments that bypass the intake process, or through engineering enthusiasm that bypasses product governance.
+   820→
+   821→Scope evolution is recorded in this document through periodic amendment. The current scope is the scope of this version of the document; previous scopes are recorded in the CHANGELOG. Scope contractions are recorded with the same rigour as scope expansions; a capability that is removed is removed deliberately, not by neglect.
+   822→
+   823→### 11.6 Scope Discipline
+   824→
+   825→Scope discipline is the practice of saying no to capabilities that do not belong in the platform, even when the capability is feasible, requested, and commercially attractive. Scope discipline is the single most important practice for preserving the platform's coherence across the decade horizon. Every capability added to the platform is a capability that must be maintained, documented, configured, audited, and supported for the decade. Capabilities that do not justify that commitment are declined.
+   826→
+   827→Scope discipline does not mean the platform is static. It means the platform grows deliberately, with each addition justified by reference to the Core Principles (Section 5), the Design Principles (Section 6), and the Product Goals (Section 7). A capability that cannot be justified by reference to these is not added, regardless of who requests it.
+   828→
+   829→---
+   830→
+   831→## 12. Out of Scope
+   832→
+   833→### 12.1 Purpose of Out-of-Scope Definition
+   834→
+   835→Out-of-scope definition is as important as in-scope definition. A product that does not state what it does not do invites scope creep through ambiguity. A product that states its exclusions explicitly gives the product team, customers, and partners a clear basis for declining requests that do not belong.
+   836→
+   837→### 12.2 Excluded Capability Categories
+   838→
+   839→The following categories of capability are explicitly excluded from the platform's scope. Exclusion is not a judgement of value; it is a statement of boundary.
+   840→
+   841→| Excluded Category | Reason | Referred To |
+   842→|---|---|---|
+   843→| Direct patient care delivery | The platform supports care providers; it does not provide care | Healthcare providers |
+   844→| Healthcare policy setting | The platform operates within policy; it does not set policy | Health authorities |
+   845→| Insurance adjudication | The platform supports claim submission; it does not adjudicate | Insurers, payers |
+   846→| Pharmaceutical manufacturing | The platform supports pharmacy operations; it does not manufacture | Pharmaceutical manufacturers |
+   847→| Medical device operation | The platform integrates with devices; it does not operate them | Device manufacturers |
+   848→| Patient-facing consumer applications | The platform is for healthcare organizations; consumer apps are separate | Consumer health vendors |
+   849→| Medical education and training content | The platform delivers operational training on its own use; it does not deliver medical education | Medical education providers |
+   850→| Research data management | The platform supports operational care; research data management is a separate discipline | Research data platforms |
+   851→| Public health surveillance reporting | The platform supports regulatory reporting; public health surveillance is regionally governed | Public health authorities (selective integration supported) |
+   852→
+   853→### 12.3 Excluded Adaptation Mechanisms
+   854→
+   855→The following adaptation mechanisms are explicitly excluded from the platform's delivery model. Exclusion is absolute, not selective.
+   856→
+   857→| Excluded Mechanism | Reason |
+   858→|---|---|
+   859→| Source-level customization per customer | Incompatible with multi-tenant SaaS and decade horizon (Principle P-2) |
+   860→| Customer-specific code branches | Incompatible with one platform principle (Principle P-3) |
+   861→| Customer-specific build artefacts | Incompatible with one platform principle (Principle P-3) |
+   862→| Customer-specific deployment topologies that require code changes | Incompatible with one platform principle (Principle P-3) |
+   863→| Back-channel configuration that bypasses the configuration surface | Incompatible with Design Principle D-2 and auditability (Design Principle D-10) |
+   864→| Manual database modifications to alter behaviour | Incompatible with auditability and configuration governance |
+   865→
+   866→### 12.4 Excluded Data Practices
+   867→
+   868→The following data practices are explicitly excluded from the platform's operating model.
+   869→
+   870→| Excluded Practice | Reason |
+   871→|---|---|
+   872→| Selling patient data to third parties | Violates Belief Four (patient as ultimate stakeholder) and Principle P-4 |
+   873→| Using patient data for advertising | Violates Belief Four and Principle P-4 |
+   874→| Training public AI models on patient data without explicit consent | Violates Belief Four and Principle P-4 |
+   875→| Holding customer data captive through proprietary formats | Violates Principle P-4 and Design Principle D-8 |
+   876→| Charging prohibitive fees for data export | Violates Principle P-4 and Design Principle D-8 |
+   877→| Retaining customer data beyond the contracted retention period | Violates data custody model |
+   878→
+   879→### 12.5 Excluded Commercial Practices
+   880→
+   881→The following commercial practices are explicitly excluded from the platform's commercial model.
+   882→
+   883→| Excluded Practice | Reason |
+   884→|---|---|
+   885→| Pricing that locks customers through steep switching costs | Incompatible with decade horizon and open data commitment |
+   886→| Sales commitments that bypass product governance | Incompatible with scope discipline (Section 11.6) |
+   887→| Customization as a revenue source | Incompatible with Principle P-2 |
+   888→| Discounting in exchange for case-study rights without consent | Incompatible with patient data sovereignty |
+   889→| Term locks beyond the customer's reasonable evaluation window | Incompatible with retention-by-value posture |
+   890→
+   891→### 12.6 Excluded Implementation Choices
+   892→
+   893→The following implementation choices are excluded from the platform's architecture, in keeping with the technology-agnostic posture of `SYSTEM_ARCHITECTURE.md`. These exclusions are recorded here because they have product-level consequences.
+   894→
+   895→| Excluded Choice | Reason |
+   896→|---|---|
+   897→| Commitment to a single cloud vendor as architectural lock-in | Incompatible with decade horizon and Design Principle D-7 |
+   898→| Commitment to a specific framework as architectural identity | Incompatible with Design Principle D-7 |
+   899→| Commitment to a specific database technology as architectural identity | Incompatible with Design Principle D-7 |
+   900→| Build of customer-specific user-interface surfaces | Incompatible with one platform principle (Principle P-3) |
+   901→| Maintenance of separate code bases per edition | Incompatible with one platform principle (Principle P-3) |
+   902→
+   903→### 12.7 Discipline of Exclusion
+   904→
+   905→Exclusions are not soft preferences. They are recorded commitments that the product team declines to violate, regardless of commercial pressure. When a customer requests a capability that falls under an exclusion, the request is declined with reference to the relevant exclusion, and an alternative path within the platform's scope is proposed if one exists. When a partner proposes a partnership that requires violating an exclusion, the partnership is declined.
+   906→
+   907→Exclusions are amended only through the Product Council, with the amendment recorded in this document and the reasoning explicit. Silent erosion of exclusions is not permitted.
+   908→
+   909→---
+   910→
+   911→## 13. Product Differentiators
+   912→
+   913→### 13.1 Purpose of This Section
+   914→
+   915→This section states what makes Ibn Hayan different from every other healthcare system on the market. The differentiators are not features; they are product-level commitments that, taken together, distinguish the platform in ways that competitors cannot match without abandoning their own posture. A differentiator that a competitor can match by adding a feature is not a differentiator; it is a feature.
+   916→
+   917→The differentiators are stated as contrasts. Each contrast names a class of competitor and the dimension on which Ibn Hayan differs. The contrasts are factual, not dismissive; competitors named in this section are credible organizations with credible products, and the differences are matters of posture and architecture, not of quality.
+   918→
+   919→### 13.2 Differentiator 1 — Healthcare-Native, Not Healthcare-Adapted
+   920→
+   921→Ibn Hayan is built as healthcare software from the first line of the first module. The bounded contexts are organized around healthcare work; the data model centres on the clinical encounter; the configuration surface is expressed in healthcare terms; the role and permission model reflects healthcare operational reality. The platform is not enterprise software adapted to healthcare, not a generic vertical-industry platform repurposed for clinics, and not a horizontal SaaS product with a healthcare skin.
+   922→
+   923→**Contrast with generic enterprise platforms:** generic enterprise platforms (CRM platforms, ERP platforms, low-code platforms) adapt to healthcare by adding healthcare templates, healthcare fields, and healthcare workflows on top of an architecture designed for horizontal use. The adaptation produces software that works for healthcare in the sense that it records healthcare data, but that does not work for healthcare in the sense that it supports healthcare work. The adaptation is visible in every layer — in the data model that has healthcare entities as children of generic entities, in the workflow engine that treats clinical encounters as cases of generic workflows, in the permission model that treats clinical roles as instances of generic roles.
+   924→
+   925→Ibn Hayan's healthcare-native posture means that the platform's architecture begins from healthcare and is judged by healthcare fidelity, not by generic enterprise fitness.
+   926→
+   927→### 13.3 Differentiator 2 — Configuration-Driven, Not Customization-Dependent
+   928→
+   929→Ibn Hayan adapts to customer needs exclusively through configuration. Customization is not a delivery mechanism, not a revenue source, and not an exception. The configuration surface is deep enough to express the operational reality of every supported clinic type without source-level modification.
+   930→
+   931→**Contrast with traditional healthcare software vendors:** traditional healthcare software vendors (including Epic, Cerner/Oracle Health, and Athenahealth) historically deliver customer-specific behaviour through customization — either direct source modification, customer-specific build flags, customer-specific modules maintained outside the main code line, or implementation-time scripting that effectively modifies behaviour outside the configuration surface. Customization is the vendor's revenue source (implementation fees), the customer's lock-in (the customization cannot be ported), and the platform's debt (the customization must be re-applied at every upgrade).
+   932→
+   933→Ibn Hayan's configuration-driven posture means that customers upgrade without re-applying adaptations, that the platform innovates without breaking customer-specific builds, and that customization debt does not accumulate. The cost of this posture is a more demanding configuration surface and a more disciplined product team; the benefit is a platform that remains viable across the decade horizon.
+   934→
+   935→### 13.4 Differentiator 3 — One Platform, Many Organizations
+   936→
+   937→Ibn Hayan is a single code base serving every customer from a solo practitioner to a multinational hospital network. There are no separate products for small clinics and for hospitals, no separate code branches for different customer segments, and no separate deployments for different customer tiers. Variations are expressed as configuration and as edition packaging, not as forks.
+   938→
+   939→**Contrast with segmented product portfolios:** most healthcare software vendors maintain segmented product portfolios — a small-clinic product, a mid-market product, and an enterprise hospital product — each with its own code base, its own release cadence, and its own fate. The small-clinic product is typically neglected once the vendor's enterprise business grows; the enterprise product is typically too heavy for small clinics. Customers who outgrow the small-clinic product face a migration to the enterprise product, which is in practice a rip-and-replace project.
+   940→
+   941→Ibn Hayan's one-platform posture means that customers grow within the platform rather than out of it. A solo practitioner who becomes a 30-provider practice continues on the same platform with deeper configuration and broader module enablement, not on a different product. The platform's commitment to the customer is not segmented by the customer's size.
+   942→
+   943→### 13.5 Differentiator 4 — Unified Platform, Not Acquired Suite
+   944→
+   945→Ibn Hayan is built as a unified platform from inception. The modules are designed to share contracts, share data, share configuration, and share audit. The platform is not a suite of acquired products integrated through post-hoc connectors, and it is not a portfolio of point solutions branded under one name.
+   946→
+   947→**Contrast with acquired healthcare software suites:** several large healthcare software vendors (including Cerner/Oracle Health and, in segments, Athenahealth) are portfolios of acquired products — the clinical product from one acquisition, the billing product from another, the pharmacy product from a third, the analytics product from a fourth. Integration between acquired products is achieved through post-hoc connectors, with the result that data flows between products are fragile, configuration is inconsistent, and the user experience is discontinuous. Acquired suites age as their constituent products diverge; the vendor's integration investment rarely keeps pace with the products' independent evolution.
+   948→
+   949→Ibn Hayan's unified-platform posture means that integration between modules is by design, not by connector; that configuration is consistent across modules; and that the user experience is continuous across the platform's surface.
+   950→
+   951→### 13.6 Differentiator 5 — Globally Adaptable, Not Regionally Fixed
+   952→
+   953→Ibn Hayan is built for global use, with regional adaptation as a first-class architectural concern. Language, calendar, regulatory framework, clinical coding system, payment model, and cultural workflow expectations are pluggable configuration surfaces. The platform supports multiple regulatory regimes per tenant where organizations operate across borders.
+   954→
+   955→**Contrast with regionally fixed healthcare software:** most healthcare software is built for a specific region — US-centric software assumes a particular payment model, a particular regulatory framework, and a particular clinical coding system; software built for other regions makes analogous assumptions. Regional expansion of regionally fixed software requires either forking the code base per region (with the resulting maintenance collapse) or shipping a poorly adapted version that customers reject. Vendors who attempt regional expansion without architectural support typically retreat to their home region.
+   956→
+   957→Ibn Hayan's globally adaptable posture means that regional adaptation does not require forking, that the platform's regional footprint can expand without architectural change, and that customers operating across borders receive coherent multi-region support within a single tenant.
+   958→
+   959→### 13.7 Differentiator 6 — Accessible Across Tiers, Not Enterprise-Only
+   960→
+   961→Ibn Hayan is accessible to healthcare organizations of every size, from a solo practitioner to a multinational hospital network. The platform's edition packaging and pricing model are designed to make the platform viable for small clinics, not only for large hospitals. The same configuration surface, the same module set, and the same operational rigour are available to every customer; what differs is the scope of enablement, not the quality of the platform.
+   962→
+   963→**Contrast with enterprise-only healthcare software:** enterprise healthcare software is priced and operated for hospitals and large networks. Small clinics cannot afford the licensing, cannot resource the implementation, and cannot sustain the operational demands. The result is that small clinics are served either by lower-quality small-clinic software or by paper. The two-tier market — high-quality software for hospitals, low-quality software for clinics — is a market failure that Ibn Hayan's posture addresses directly.
+   964→
+   965→Ibn Hayan's accessible-across-tiers posture means that the platform is operationally viable at T1 (Solo) through T6 (Hospital Network), with edition packaging and pricing that make adoption feasible at every tier. This is a deliberate competitive stance, not a charitable one; small clinics that grow into hospitals become long-term customers, and the platform's reach vector depends on serving them.
+   966→
+   967→### 13.8 Differentiator 7 — Open Data, Not Captive Data
+   968→
+   969→Ibn Hayan holds customer data under explicit custody, not ownership. Data is exposed through documented interfaces, in open formats wherever viable, and export is a first-class operational capability exercised periodically. The offboarding process is documented before the customer onboards, so the path out is known before the customer enters.
+   970→
+   971→**Contrast with captive-data healthcare software:** many healthcare software vendors hold customer data captive through proprietary formats, undocumented data models, exclusionary integration contracts, and exorbitant data-export fees. Customers who wish to change vendors find that their data is, in practice, not portable. The vendor's revenue depends on captivity; the customer's sovereignty depends on portability; the two are in tension, and the vendor's commercial interest prevails.
+   972→
+   973→Ibn Hayan's open-data posture means that customer data is portable by architecture, not by exception. The platform's commercial sustainability depends on retention by value, not by captivity. Customers remain on the platform because it serves them, not because they cannot leave.
+   974→
+   975→### 13.9 Differentiator 8 — Long-Term Product, Not Acquisition Target
+   976→
+   977→Ibn Hayan is built as a durable, independent platform. Acquisition is not a product strategy and is not a goal. Decisions are made on the decade horizon, not on the exit horizon. The platform's architecture, commercial model, and operational posture are designed for independence, not for acquirability.
+   978→
+   979→**Contrast with acquisition-target healthcare software:** many healthcare software vendors operate with an explicit or implicit acquisition strategy — building toward an exit rather than toward durability. Acquisition strategy produces different decisions than durability strategy: features that increase short-term metrics at the cost of long-term debt are favoured; architecture that is acquirable (small, simple, easily absorbed) is favoured over architecture that is durable (deep, demanding, hard to absorb); customer relationships are managed for retention through the exit window rather than for retention across the decade horizon. The result is that acquired products typically degrade after acquisition, as the acquirer's priorities replace the vendor's.
+   980→
+   981→Ibn Hayan's long-term product posture means that the platform is built to outlast its current investors, its current leadership, and its current team. Decisions that increase durability at the cost of acquirability are favoured. Customers who commit to the platform can expect the platform to remain committed to them.
+   982→
+   983→### 13.10 Differentiator 9 — Specialty Depth, Not Generic Templates
+   984→
+   985→Ibn Hayan's modules are designed with specialty depth as a first-class concern. Each supported clinical specialty has workflow analysis, configuration templates, and module extensions specific to its daily work. Specialty depth is measured by the percentage of a specialty's daily workflow that is a first-class capability of the platform, not by the existence of a specialty-named template.
+   986→
+   987→**Contrast with generic-template healthcare software:** most healthcare software serves all specialties at a shallow level — the same encounter template, the same order set, the same documentation structure — with specialty-specific behaviour left to customization or to bolt-on modules. Specialists either work around the platform's generic templates or maintain parallel specialty-specific systems outside the platform. The platform's claimed coverage of the specialty is fictional.
+   988→
+   989→Ibn Hayan's specialty-depth posture means that specialists do not need to leave the platform to do their work. The depth is achieved through configuration templates validated against real specialty workflows, not through generic templates that the customer must override.
+   990→
+   991→### 13.11 Differentiator 10 — Transparent Pricing, Not Opaque Contracting
+   992→
+   993→Ibn Hayan's pricing is transparent and documented. Edition packaging, module pricing, and service tiers are published. Customer contracts do not contain pricing terms that differ materially from the published pricing without explicit justification. The platform's commercial model is not a negotiation; it is a published posture.
+   994→
+   995→**Contrast with opaque-contracting healthcare software:** many healthcare software vendors operate with opaque contracting — pricing is negotiated per customer, with the result that similar customers pay materially different prices, pricing is not published, and the vendor's revenue depends on the customer's negotiating sophistication rather than on the platform's value. Opaque contracting favours large customers with procurement sophistication over small customers without it, and it obscures the platform's actual market position.
+   996→
+   997→Ibn Hayan's transparent-pricing posture means that customers know what they are paying for and what they are paying. Small customers are not disadvantaged by their lack of procurement sophistication. The platform's market position is visible to the market.
+   998→
+   999→### 13.12 Competitive Comparison Matrix
+  1000→
+  1001→The following table summarizes the differentiation against named competitor classes. The comparison is stated at the posture level, not at the feature level. Feature-level comparisons age quickly; posture-level comparisons are stable.
+  1002→
+  1003→| Dimension | Ibn Hayan | Epic | Cerner / Oracle Health | Athenahealth | Odoo Healthcare | ERPNext Healthcare | Generic Clinic Management Systems |
+  1004→|---|---|---|---|---|---|---|---|
+  1005→| Healthcare-native architecture | Yes | Yes | Partial (acquired suite) | Partial | No (vertical module) | No (vertical module) | Varies |
+  1006→| Adaptation mechanism | Configuration only | Configuration + customization | Configuration + customization | Configuration + customization | Configuration + code modification | Configuration + code modification | Configuration + code modification |
+  1007→| Multi-tenant SaaS default | Yes | No (single-tenant) | Partial | Yes | Partial | Self-hosted | Varies |
+  1008→| Single code base across customer spectrum | Yes | No (segmented products) | No (segmented products) | Partial | Yes | Yes | No |
+  1009→| Unified platform (not acquired suite) | Yes | Yes | No (acquired) | No (acquired) | Yes | Yes | Varies |
+  1010→| Global adaptability without fork | Yes | Limited | Limited | Limited (US-centric) | Limited | Limited | Limited |
+  1011→| Accessible to small clinics | Yes | No | No | Partial | Yes | Yes | Yes |
+  1012→| Open data portability by architecture | Yes | No | No | No | Partial | Partial | No |
+  1013→| Long-term product (not acquisition target) | Yes | Yes | No (acquired by Oracle) | No (acquired) | Yes | Yes | Varies |
+  1014→| Specialty depth without customization | Yes | Yes (with customization) | Partial | Partial | No | No | No |
+  1015→| Transparent published pricing | Yes | No | No | Partial | Yes | Yes | Varies |
+  1016→
+  1017→### 13.13 Differentiator Discipline
+  1018→
+  1019→Differentiators are not marketing claims; they are product commitments. Each differentiator in this section is a commitment that the product team is accountable for preserving. A differentiator that erodes through neglect or through commercial pressure is a defect that the Product Council must address. The differentiator list is reviewed annually, with erosion recorded and addressed.
+  1020→
+  1021→A new differentiator is added only when the platform exhibits a product-level commitment that competitors cannot match by adding a feature. A differentiator that competitors can match is removed from this section and demoted to a feature claim in the appropriate module documentation.
+  1022→
+  1023→---
+  1024→
+  1025→## 14. Business Model
+  1026→
+  1027→### 14.1 Purpose of Business Model Definition
+  1028→
+  1029→The business model defines how Ibn Hayan sustains the investment required to deliver the decade-horizon commitment. The business model is not the product; it is the commercial mechanism that makes the product viable. A product without a viable business model is a product that will eventually be abandoned, regardless of its quality. A business model without a coherent product is a commercial exercise that will eventually collapse. The two are interdependent.
+  1030→
+  1031→### 14.2 Revenue Model
+  1032→
+  1033→Ibn Hayan's revenue model is subscription-based, with revenue derived from platform subscriptions, module enablement, and service tiers. The model is designed for alignment with customer success: revenue grows when customers expand their use of the platform, not when customers are locked in or upsold capabilities they do not use.
+  1034→
+  1035→| Revenue Stream | Description | Alignment |
+  1036→|---|---|---|
+  1037→| Platform subscription | Per-customer subscription to the platform, tiered by edition | Aligns with customer commitment to the platform |
+  1038→| Module enablement | Per-module subscription for modules beyond the edition baseline | Aligns with customer expansion of platform use |
+  1039→| Service tier | Per-tier subscription for support, SLA, and operational services | Aligns with customer operational sophistication |
+  1040→| Implementation services | Optional implementation and configuration services | Aligns with customer onboarding success |
+  1041→| Training services | Optional role-based training for customer teams | Aligns with customer operational maturity |
+  1042→
+  1043→Revenue is not derived from customization, from data monetization, from advertising, or from lock-in fees. These revenue sources are excluded by Section 12.4 and Section 12.5.
+  1044→
+  1045→### 14.3 Pricing Principles
+  1046→
+  1047→Pricing is governed by the following principles:
+  1048→
+  1049→| Principle | Description |
+  1050→|---|---|
+  1051→| Transparent | Pricing is published and documented; customers know what they are paying for |
+  1052→| Tiered | Pricing is tiered by edition and service level, not negotiated per customer |
+  1053→| Aligned | Pricing aligns with customer value, not with customer negotiating sophistication |
+  1054→| Predictable | Pricing is predictable across the subscription term; surprise increases are not permitted |
+  1055→| Sustainable | Pricing sustains the platform's investment across the decade horizon |
+  1056→| Accessible | Pricing makes the platform viable at every customer size tier, not only at enterprise tier |
+  1057→
+  1058→### 14.4 Cost Model
+  1059→
+  1060→The platform's cost model is dominated by the following cost categories, in approximate order of magnitude:
+  1061→
+  1062→| Cost Category | Description | Trend |
+  1063→|---|---|---|
+  1064→| Engineering | Product engineering, architecture, configuration framework, module development | Sustained investment; scales sub-linearly with revenue |
+  1065→| Operations | SRE, platform operations, incident response, observability | Scales with customer count and transaction volume |
+  1066→| Customer success | Onboarding, configuration consulting, account management | Scales with customer count and customer complexity |
+  1067→| Support | Tiered support across L1, L2, L3 | Scales with customer count and platform surface |
+  1068→| Compliance and security | Regulatory compliance, security operations, audit | Sustained investment; non-negotiable |
+  1069→| Documentation | Product documentation, configuration guides, training material | Scales with platform surface |
+  1070→| Regional adaptation | Localization, regulatory framework adaptation, regional partnerships | Scales with regional footprint |
+  1071→| Sales and marketing | Customer acquisition, market development | Scales with growth ambition |
+  1072→
+  1073→The cost model favours investment in engineering, operations, customer success, and documentation over investment in sales and marketing. The platform's growth strategy is product-led and retention-led, not sales-led. The ratio of engineering and operations investment to sales and marketing investment is a monitored metric, with erosion treated as a strategic risk.
+  1074→
+  1075→### 14.5 Unit Economics
+  1076→
+  1077→The platform's unit economics are designed for decade-horizon sustainability. The primary unit-economic metrics are:
+  1078→
+  1079→| Metric | Description | Target Posture |
+  1080→|---|---|---|
+  1081→| Customer Lifetime | Median years a customer remains on the platform | 7+ years (decade-horizon ambition) |
+  1082→| Customer Lifetime Value (LTV) | Cumulative gross margin per customer over lifetime | Substantially exceeds CAC |
+  1083→| Customer Acquisition Cost (CAC) | Fully-loaded cost of acquiring a customer | Substantially below LTV; payback within 24 months |
+  1084→| Net Revenue Retention (NRR) | Revenue retained from existing customers, including expansion and churn | Above 110% (target posture) |
+  1085→| Gross Margin | Revenue minus direct delivery cost | Sustained above 70% (SaaS benchmark) |
+  1086→| ARR per customer | Annual recurring revenue per customer | Distributed across customer tiers; not concentrated at enterprise |
+  1087→
+  1088→Unit economics are reviewed quarterly. Erosion in any metric is treated as a strategic risk and addressed through product, operational, or commercial response, not through short-term revenue optimization that compromises the decade horizon.
+  1089→
+  1090→### 14.6 Investment Posture
+  1091→
+  1092→Ibn Hayan's investment posture is patient. The platform is built for decade-horizon durability, and the investment cadence reflects that horizon. Investment decisions are made on the basis of long-term value, not short-term return. The platform's investors are selected for alignment with this horizon; investors with short-term return expectations are not accepted.
+  1093→
+  1094→The investment posture has the following consequences:
+  1095→
+  1096→- Engineering investment is sustained through market cycles, not reduced during downturns.
+  1097→- Configuration depth investment continues even when it does not generate immediate revenue.
+  1098→- Regional adaptation investment continues even when regional revenue is initially low.
+  1099→- Documentation investment is treated as part of the product, not as a residual.
+  1100→- Customer success investment is prioritized over sales investment during the platform's maturation phase.
+  1101→
+  1102→### 14.7 Business Model Alignment with Principles
+  1103→
+  1104→The business model is designed to align with the product principles. The alignment is explicit:
+  1105→
+  1106→| Principle | Business Model Consequence |
+  1107→|---|---|
+  1108→| P-2 (Configuration Before Customization) | Customization is not a revenue source; configuration depth is |
+  1109→| P-3 (One Platform, Many Organizations) | One product, one code base; no segmented product portfolio |
+  1110→| P-4 (Open Data, Open Standards) | Data portability is not a paid add-on; captivity is not a revenue source |
+  1111→| P-5 (Practitioner Experience) | Pricing does not extract from practitioner-facing features |
+  1112→| P-6 (Durable Over Fashionable) | Investment posture is patient; short-term optimization is rejected |
+  1113→| Decade horizon | Unit economics target 7+ year customer lifetime; NRR above 110% |
+  1114→
+  1115→Where the business model and the product principles appear to conflict, the conflict is escalated to the Product Council. The business model is amended to align with the principles, not the reverse.
+  1116→
+  1117→---
+  1118→
+  1119→## 15. SaaS Strategy
+  1120→
+  1121→### 15.1 Purpose of SaaS Strategy
+  1122→
+  1123→The SaaS strategy defines how the platform is delivered to customers as a multi-tenant software-as-a-service offering. The strategy is not a deployment choice; it is a product-level commitment that shapes architecture, operations, commercial model, and customer relationship. The SaaS posture is a direct consequence of Principle P-3 (One Platform, Many Organizations) and Design Principle D-3 (One Platform, Many Organizations).
+  1124→
+  1125→### 15.2 Multi-Tenancy as Default
+  1126→
+  1127→Multi-tenancy is the default delivery model. Every customer operates as a tenant within a shared platform, with logical isolation of data, configuration, and operational state. Multi-tenancy is not a cost optimization; it is the architectural expression of one platform serving many organizations.
+  1128→
+  1129→Multi-tenancy has the following product-level consequences:
+  1130→
+  1131→- Every customer runs the same code paths, with the same bug fixes, the same security patches, and the same feature evolution.
+  1132→- Configuration is the only mechanism by which customers differ in behaviour.
+  1133→- Operational incidents affect the platform, not individual customers, and are addressed at the platform level.
+  1134→- The platform's roadmap is uniform; customers do not negotiate custom roadmaps.
+  1135→
+  1136→### 15.3 Isolation Levels
+  1137→
+  1138→The platform supports three isolation levels, available as deployment choices but never as code branches. The isolation levels are defined in `SYSTEM_ARCHITECTURE.md` and summarized here.
+  1139→
+  1140→| Isolation Level | Description | Typical Customer |
+  1141→|---|---|---|
+  1142→| Logical | Shared compute, shared storage, logical tenant separation | Default; serves the majority of customers |
+  1143→| Logical with Dedicated Compute | Shared storage, dedicated compute per tenant | Customers with specific performance or compliance needs |
+  1144→| Physical | Dedicated infrastructure, single-tenant deployment | Customers with regulatory or contractual physical-separation requirements |
+  1145→
+  1146→All three isolation levels run the same code, the same configuration model, and the same operational runtime. The choice of isolation level is a deployment decision, not a product decision. Customers at the physical isolation level are still on the same platform as customers at the logical isolation level; they are not on a different product.
+  1147→
+  1148→### 15.4 SaaS Operational Posture
+  1149→
+  1150→The SaaS operational posture defines the platform's operational commitments to customers. The posture is documented in service-level agreements and operational runbooks, and is summarized here.
+  1151→
+  1152→| Operational Dimension | Posture |
+  1153→|---|---|
+  1154→| Availability | Documented SLA per edition; measured and reported transparently |
+  1155→| Recoverability | Documented recovery objectives per data class; tested periodically |
+  1156→| Incident response | Documented response process; customer-visible incident records |
+  1157→| Patching | Continuous; security patches deployed within documented windows |
+  1158→| Backup | Continuous; documented retention and restoration procedures |
+  1159→| Audit | Complete audit trail of platform operations; accessible to customers per contract |
+  1160→| Observability | Operational telemetry shared with customers under contract |
+  1161→
+  1162→### 15.5 Customer Tenancy Model
+  1163→
+  1164→Each customer operates one or more tenants within the platform. The tenancy model is defined in `SYSTEM_ARCHITECTURE.md` and summarized here.
+  1165→
+  1166→| Tenancy Pattern | Description | Typical Use |
+  1167→|---|---|---|
+  1168→| Single tenant per customer | One tenant holds all the customer's data and configuration | Default for most customers |
+  1169→| Multi-tenant per customer | Multiple tenants, typically per region or per division | Customers operating across regions with separate data residency |
+  1170→| Sandbox tenant | Non-production tenant for configuration testing and training | All customers; included with editions |
+  1171→
+  1172→The tenancy model accommodates customers who, for regulatory or organizational reasons, require multiple tenants. The platform's configuration surface allows configuration inheritance across tenants within a customer, so that a customer's sandbox inherits from production and a customer's regional tenants inherit from a customer-level baseline.
+  1173→
+  1174→### 15.6 SaaS Versus Self-Hosted
+  1175→
+  1176→Ibn Hayan is a SaaS platform. Self-hosted deployment is available only as the physical isolation level (Section 15.3) and only for customers whose regulatory or contractual requirements demand it. Self-hosted deployment is not a different product; it is the same platform deployed on dedicated infrastructure.
+  1177→
+  1178→The platform does not offer a self-hosted community edition, a self-hosted open-source edition, or a downloadable installer. These delivery models are incompatible with the SaaS posture and with the decade-horizon commitment. Customers who require self-hosted deployment for regulatory reasons receive the same platform, the same configuration surface, and the same operational runtime as SaaS customers, deployed on dedicated infrastructure under a physical-isolation agreement.
+  1179→
+  1180→### 15.7 SaaS Strategy Alignment
+  1181→
+  1182→The SaaS strategy aligns with the product principles as follows:
+  1183→
+  1184→| Principle | SaaS Strategy Consequence |
+  1185→|---|---|
+  1186→| P-3 (One Platform, Many Organizations) | Multi-tenancy as default; no segmented products |
+  1187→| P-6 (Durable Over Fashionable) | SaaS posture enables decade-horizon investment; no rip-and-replace upgrades |
+  1188→| D-5 (Enterprise Scalability) | SaaS posture enables scaling across customer spectrum without architectural change |
+  1189→| D-7 (Future-Proof Architecture) | SaaS posture enables continuous evolution; customers do not face upgrade projects |
+  1190→| Decade horizon | SaaS posture is the only delivery model compatible with the decade horizon |
+  1191→
+  1192→The SaaS posture is not a delivery convenience; it is a product commitment. Customers who require delivery models incompatible with SaaS ( perpetual licensing, on-premise deployment without operational integration, community open-source distribution) are not Ibn Hayan customers and are referred to alternative vendors.
+  1193→
+  1194→---
+  1195→
+  1196→## 16. Editions
+  1197→
+  1198→### 16.1 Purpose of Edition Packaging
+  1199→
+  1200→Edition packaging organizes the platform's capability surface into commercially viable offerings. Editions are not different products; they are different scopes of enablement of the same product. The edition packaging is designed to make the platform accessible across the customer size spectrum (Differentiator 6) while preserving the platform's coherence (Principle P-3).
+  1201→
+  1202→### 16.2 Edition Catalogue
+  1203→
+  1204→The platform is packaged into four editions. The edition catalogue is stable; editions are not added or removed casually, and changes are recorded in this document through amendment.
+  1205→
+  1206→| Edition | Code | Target Customer Tier | Module Scope | Service Tier |
+  1207→|---|---|---|---|---|
+  1208→| Trial | E0 | Prospects evaluating the platform | Subset of Essential | Limited; no SLA |
+  1209→| Essential | E1 | T1 (Solo) and T2 (Small Practice) | Core clinical and operational modules | Standard; business-hours SLA |
+  1210→| Professional | E2 | T3 (Mid Practice) and T4 (Large Practice) | Essential modules + advanced clinical, financial, administrative | Enhanced; extended-hours SLA |
+  1211→| Enterprise | E3 | T5 (Hospital) and T6 (Hospital Network) | Full module set | Premium; 24/7 SLA |
+  1212→
+  1213→### 16.3 Trial Edition (E0)
+  1214→
+  1215→The Trial edition is a non-production edition designed for prospect evaluation. It provides access to a subset of Essential edition modules with limited data volume, limited user count, and no service-level commitment. The Trial edition is time-bounded; prospects either convert to a paid edition within the trial window or the trial tenant is decommissioned.
+  1216→
+  1217→The Trial edition is not a free tier. It is an evaluation tool. Perpetual free use of the platform is not offered, because the platform's sustainability depends on subscription revenue and because free-tier usage typically degrades the platform's operational posture for paying customers.
+  1218→
+  1219→### 16.4 Essential Edition (E1)
+  1220→
+  1221→The Essential edition is designed for solo practitioners and small practices. It includes the core clinical and operational modules required for primary care practice: Patient, Encounter, Clinical Documentation, Orders & Results, Scheduling, Billing, and basic Pharmacy. Configuration depth is available but the default configuration is conservative, in keeping with the typical maturity profile of T1 and T2 customers.
+  1222→
+  1223→The Essential edition is priced to be accessible. Pricing is published and is not negotiated per customer. The edition is designed for self-service onboarding where the customer's maturity profile permits, with optional implementation services available.
+  1224→
+  1225→### 16.5 Professional Edition (E2)
+  1226→
+  1227→The Professional edition is designed for mid and large practices. It includes the Essential modules plus advanced clinical modules (specialty-specific modules), advanced financial modules (Accounting, advanced Billing), and administrative modules (CRM, HR, Workforce). Configuration depth is fuller, and the edition supports multi-facility operation within a single tenant.
+  1228→
+  1229→The Professional edition is priced for practices that have outgrown the Essential edition's scope but do not require the Enterprise edition's scale. The edition is the platform's core commercial offering and the typical entry point for T3 and T4 customers.
+  1230→
+  1231→### 16.6 Enterprise Edition (E3)
+  1232→
+  1233→The Enterprise edition is designed for hospitals and hospital networks. It includes the full module set, full configuration depth, multi-facility and multi-region operation, dedicated support, and premium service-level commitments. The edition supports the operational rigour required by large healthcare organizations, including advanced audit, advanced security, and advanced integration capabilities.
+  1234→
+  1235→The Enterprise edition is priced for the operational commitment it represents. The edition is not a customization vehicle; customers at the Enterprise edition receive the same platform as customers at the Essential edition, with broader module enablement and deeper service commitments.
+  1236→
+  1237→### 16.7 Edition Composition Rules
+  1238→
+  1239→Edition composition is governed by the following rules:
+  1240→
+  1241→| Rule | Description |
+  1242→|---|---|
+  1243→| Single code base | All editions run the same code; editions differ only in configuration |
+  1244→| Module enablement | Editions differ in which modules are enabled by default |
+  1245→| Configuration depth | Editions differ in default configuration depth, not in configuration surface availability |
+  1246→| Service tier | Editions differ in service-level commitment, not in platform quality |
+  1247→| No feature forks | No edition has a feature that is structurally unavailable to other editions |
+  1248→| Upgrade path | Customers can upgrade between editions without re-implementation |
+  1249→
+  1250→### 16.8 Edition Strategy Alignment
+  1251→
+  1252→Edition strategy aligns with the product principles as follows:
+  1253→
+  1254→| Principle | Edition Strategy Consequence |
+  1255→|---|---|
+  1256→| P-3 (One Platform, Many Organizations) | Editions are configuration of one product, not separate products |
+  1257→| D-5 (Enterprise Scalability) | Editions scale across the customer spectrum without architectural change |
+  1258→| Differentiator 6 (Accessible Across Tiers) | Essential edition makes the platform viable at T1 and T2 |
+  1259→| Differentiator 10 (Transparent Pricing) | Edition pricing is published, not negotiated |
+  1260→
+  1261→The edition catalogue is reviewed annually. Editions are not added to chase market segments; they are added only when a coherent customer segment emerges that the existing editions do not serve. Editions are not removed casually; removal strands customers and is undertaken only with multi-year transition support for affected customers.
+  1262→
+  1263→---
+  1264→
+  1265→## 17. Supported Healthcare Organizations
+  1266→
+  1267→### 17.1 Purpose of Organization Cataloguing
+  1268→
+  1269→The platform serves a defined catalogue of healthcare organization types. The catalogue is not a market segmentation; it is an operational input to configuration. A supported organization type has validated configuration templates, validated workflow defaults, and validated module composition. An organization type that is not in the catalogue is not yet supported; engagement with such an organization is treated as a candidate for catalogue expansion, not as a customer engagement.
+  1270→
+  1271→### 17.2 Supported Organization Types
+  1272→
+  1273→The platform supports the following organization types. The catalogue is reviewed annually and amended through the Product Council when new organization types achieve validated-practice status (Principle P-8).
+  1274→
+  1275→| Code | Organization Type | Description | Typical Tiers |
+  1276→|---|---|---|---|
+  1277→| O1 | Solo practice | Single-practitioner clinic, typically single specialty | T1 |
+  1278→| O2 | Group practice | Multi-practitioner single-specialty practice | T2, T3 |
+  1279→| O3 | Multi-specialty practice | Multi-practitioner multi-specialty practice | T3, T4 |
+  1280→| O4 | Primary care network | Network of primary care clinics under shared ownership | T4, T5 |
+  1281→| O5 | Specialty clinic | Single-specialty outpatient clinic (e.g., cardiology, dermatology) | T2, T3, T4 |
+  1282→| O6 | Day surgery centre | Outpatient surgical facility | T4, T5 |
+  1283→| O7 | Diagnostic centre | Imaging, laboratory, or combined diagnostic facility | T3, T4 |
+  1284→| O8 | Pharmacy chain | Multi-location pharmacy operation | T3, T4, T5 |
+  1285→| O9 | Single hospital | Standalone hospital, typically with emergency, inpatient, outpatient | T5 |
+  1286→| O10 | Hospital network | Multi-hospital network, regional or national | T6 |
+  1287→| O11 | Academic medical centre | Hospital with teaching and research affiliation | T5, T6 |
+  1288→| O12 | Public health clinic | Government-operated public health clinic | T3, T4, T5 |
+  1289→| O13 | Occupational health clinic | Employer-operated occupational health facility | T2, T3 |
+  1290→| O14 | Long-term care facility | Nursing home, assisted living, residential care | T4, T5 |
+  1291→| O15 | Home health provider | Organization delivering care in patients' homes | T3, T4 |
+  1292→| O16 | Telehealth provider | Organization delivering care primarily via telehealth | T2, T3, T4 |
+  1293→| O17 | Government health authority | Regional or national health authority operating multiple facilities | T6 |
+  1294→| O18 | NGO healthcare provider | Non-governmental organization operating healthcare facilities | T3, T4, T5 |
+  1295→
+  1296→### 17.3 Organization Configuration Profiles
+  1297→
+  1298→Each supported organization type has a configuration profile that defines the default module set, default workflows, default roles, and default permissions. Configuration profiles are not prescriptions; they are starting points that customers refine through the configuration surface.
+  1299→
+  1300→Configuration profiles are versioned and validated. A profile is upgraded when the platform's module set or configuration surface evolves, and the upgrade is tested against operational reality before becoming the default. Customers are notified of profile upgrades through the platform's change-management channel and may adopt upgrades on their own schedule within documented windows.
+  1301→
+  1302→### 17.4 Organization Type Expansion
+  1303→
+  1304→New organization types are added to the catalogue through the following intake process:
+  1305→
+  1306→1. **Workflow analysis** — operational analysis of the candidate organization type's daily work, with documented workflows and configuration requirements.
+  1307→2. **Configuration coverage assessment** — verification that the platform's existing configuration surface can express the organization type's operational reality without source-level modification.
+  1308→3. **Module gap assessment** — identification of any modules that would need to be added or extended to support the organization type, with each gap justified against the Core Principles.
+  1309→4. **Validation** — pilot deployment with a candidate customer, with operational feedback collected and incorporated.
+  1310→5. **Catalogue amendment** — formal addition to the catalogue through Product Council ratification, with the configuration profile published as a default.
+  1311→
+  1312→The intake process is deliberately demanding. Catalogue expansion that bypasses the process produces an organization type that is nominally supported but operationally defective — a posture that violates Principle P-8 (Verified Practice Over Hypothetical Capability).
+  1313→
+  1314→### 17.5 Unsupported Organization Types
+  1315→
+  1316→The platform does not support the following organization types, either because they fall outside the platform's scope (Section 12) or because they have not yet completed the catalogue expansion process:
+  1317→
+  1318→- Insurance payers (out of scope — Section 12.2)
+  1319→- Pharmaceutical manufacturers (out of scope — Section 12.2)
+  1320→- Medical device manufacturers (out of scope — Section 12.2)
+  1321→- Consumer health applications (out of scope — Section 12.2)
+  1322→- Research institutions (out of scope — Section 12.2)
+  1323→- Veterinary practices (not yet catalogued; potential future expansion)
+  1324→- Dental practices (not yet catalogued; potential future expansion)
+  1325→- Mental health institutions with involuntary commitment authority (not yet catalogued; requires regulatory framework adaptation)
+  1326→
+  1327→Organizations that fall into unsupported categories are referred to alternative vendors whose posture is better matched. Organizations in not-yet-catalogued categories may be engaged as candidate customers for catalogue expansion, with explicit acknowledgment that the platform is not yet production-ready for their organization type.
+  1328→
+  1329→---
+  1330→
+  1331→## 18. Supported Clinic Types
+  1332→
+  1333→### 18.1 Purpose of Clinic Type Cataloguing
+  1334→
+  1335→Clinic types are the operational expression of healthcare delivery within an organization. A single organization may operate multiple clinic types — for example, a hospital network may operate primary care clinics, specialty clinics, and emergency departments. Clinic type governs workflow defaults, encounter templates, documentation requirements, and configuration overlays. The clinic type catalogue is more granular than the organization type catalogue because clinic types reflect operational reality rather than organizational structure.
+  1336→
+  1337→### 18.2 Supported Clinic Types
+  1338→
+  1339→The platform supports the following clinic types. The catalogue is reviewed annually and expanded as configuration coverage is validated for additional clinic types.
+  1340→
+  1341→| Code | Clinic Type | Typical Specialty | Typical Organization Types |
+  1342→|---|---|---|---|
+  1343→| C1 | General practice | Primary care | O1, O2, O4, O12 |
+  1344→| C2 | Family medicine | Primary care | O1, O2, O4, O12 |
+  1345→| C3 | Internal medicine | Primary care | O2, O3, O4 |
+  1346→| C4 | Paediatrics | Specialty | O2, O3, O5 |
+  1347→| C5 | Obstetrics and gynaecology | Specialty | O2, O3, O5 |
+  1348→| C6 | Cardiology | Specialty | O3, O5 |
+  1349→| C7 | Dermatology | Specialty | O3, O5 |
+  1350→| C8 | Endocrinology | Specialty | O3, O5 |
+  1351→| C9 | Gastroenterology | Specialty | O3, O5 |
+  1352→| C10 | Neurology | Specialty | O3, O5 |
+  1353→| C11 | Oncology | Specialty | O3, O5, O11 |
+  1354→| C12 | Ophthalmology | Specialty | O3, O5 |
+  1355→| C13 | Orthopaedics | Specialty | O3, O5, O6 |
+  1356→| C14 | Otolaryngology | Specialty | O3, O5 |
+  1357→| C15 | Psychiatry | Specialty | O3, O5 |
+  1358→| C16 | Pulmonology | Specialty | O3, O5 |
+  1359→| C17 | Urology | Specialty | O3, O5 |
+  1360→| C18 | Emergency department | Emergency | O9, O10, O11 |
+  1361→| C19 | Urgent care clinic | Emergency | O4, O13 |
+  1362→| C20 | Day surgery | Surgical | O6 |
+  1363→| C21 | Inpatient ward | Inpatient | O9, O10, O11 |
+  1364→| C22 | Intensive care unit | Critical care | O9, O10, O11 |
+  1365→| C23 | Pharmacy | Pharmacy | O1, O2, O8 |
+  1366→| C24 | Laboratory | Diagnostic | O7, O9, O10 |
+  1367→| C25 | Imaging centre | Diagnostic | O7, O9, O10 |
+  1368→| C26 | Physical therapy | Rehabilitation | O3, O5 |
+  1369→| C27 | Occupational therapy | Rehabilitation | O3, O5, O13 |
+  1370→| C28 | Mental health clinic | Behavioral health | O3, O5 |
+  1371→| C29 | Substance use treatment clinic | Behavioral health | O3, O14 |
+  1372→| C30 | Long-term care facility | Long-term care | O14 |
+  1373→
+  1374→### 18.3 Clinic Type Configuration Overlays
+  1375→
+  1376→Each clinic type has a configuration overlay that adjusts the platform's default configuration to match the clinic type's operational reality. Overlays cover encounter templates, documentation structure, order sets, role definitions, permission defaults, and reporting views. Overlays are layered on top of the organization's configuration profile, with overlay precedence documented in `CONFIGURATION_ARCHITECTURE.md`.
+  1377→
+  1378→Overlays are validated through workflow analysis with real practitioners of the clinic type. An overlay that has not been validated is a candidate, not a default. Validation includes practitioner feedback on workflow fidelity, configuration coverage assessment for the clinic type's daily activities, and operational testing against representative patient scenarios.
+  1379→
+  1380→### 18.4 Specialty-Specific Module Extensions
+  1381→
+  1382→Some clinic types require specialty-specific module extensions beyond the platform's core modules. These extensions are first-class modules in their own right, with their own contracts, their own configuration surfaces, and their own documentation. Specialty-specific modules are not bolt-on customizations; they are part of the platform's module catalogue.
+  1383→
+  1384→The current specialty-specific module extensions are listed in Section 19. New specialty-specific modules are added through the same intake process as new organization types (Section 17.4), with the additional requirement that the module's bounded context be explicitly defined and aligned with the platform's domain-driven architecture.
+  1385→
+  1386→### 18.5 Clinic Type Expansion
+  1387→
+  1388→The clinic type catalogue is expanded through the intake process defined in Section 17.4, with the additional step that the candidate clinic type's configuration overlay be validated against at least three operational deployments before becoming a default. The three-deployment requirement is a deliberate rigour; it prevents the catalogue from accumulating overlays that have been validated only against a single customer's operational reality.
+  1389→
+  1390→Clinic types that are candidates for catalogue expansion but have not yet completed validation are listed in the regional adaptation roadmap (Section 31) with the validation status documented.
+  1391→
+  1392→---
+  1393→
+  1394→## 19. Product Modules Overview
+  1395→
+  1396→### 19.1 Purpose of Module Cataloguing
+  1397→
+  1398→The module catalogue defines the platform's capability surface at the module level. Modules are the unit of composition, the unit of enablement, and the unit of dependency management. The catalogue is the canonical reference for what modules exist, what each module does, and how modules relate to each other. Module internals — contracts, dependencies, lifecycle, versioning — are defined in `MODULE_ARCHITECTURE.md`.
+  1399→
+  1400→### 19.2 Module Catalogue
+  1401→
+  1402→The platform's module catalogue comprises 19 modules organized into five categories matching the in-scope capability categories defined in Section 11.2.
+  1403→
+  1404→| Code | Module | Category | Purpose |
+  1405→|---|---|---|---|
+  1406→| M01 | Patient | Clinical | Patient registration, identity, demographics, consent, medical record lifecycle |
+  1407→| M02 | Encounter | Clinical | Encounter management across outpatient, inpatient, emergency, telehealth |
+  1408→| M03 | Clinical Documentation | Clinical | Clinical notes, structured documentation, templates, assessments |
+  1409→| M04 | Orders & Results | Clinical | Order entry, result management, decision support, result reporting |
+  1410→| M05 | Pharmacy | Clinical | Medication management, dispensing, inventory, clinical pharmacy |
+  1411→| M06 | Scheduling | Operational | Appointment scheduling, resource scheduling, queue management |
+  1412→| M07 | Documents | Operational | Document management, document templates, document workflow |
+  1413→| M08 | Notifications | Operational | Notifications, reminders, alerts across channels |
+  1414→| M09 | Billing | Financial | Billing, claims, payments, insurance submission |
+  1415→| M10 | Accounting | Financial | General ledger, accounts payable, accounts receivable, financial reporting |
+  1416→| M11 | CRM | Administrative | Patient relationships, outreach, marketing, communications |
+  1417→| M12 | HR | Administrative | Human resources, payroll, employee records, benefits |
+  1418→| M13 | Workforce | Administrative | Workforce scheduling, time and attendance, credentials |
+  1419→| M14 | Identity & Access | Platform | Authentication, authorization, identity, session management |
+  1420→| M15 | Configuration | Platform | Configuration management, validation, versioning, audit |
+  1421→| M16 | Audit | Platform | Audit trail, audit query, audit reporting |
+  1422→| M17 | Integration | Platform | Integration framework, connectors, partner surfaces |
+  1423→| M18 | Reporting | Platform | Operational, analytical, regulatory reporting |
+  1424→| M19 | Localization | Platform | Language, calendar, regulatory framework, clinical coding system adaptation |
+  1425→
+  1426→### 19.3 Module Composition Rules
+  1427→
+  1428→Module composition is governed by the following rules:
+  1429→
+  1430→| Rule | Description |
+  1431→|---|---|
+  1432→| Bounded context alignment | Each module aligns with one or more bounded contexts defined in `SYSTEM_ARCHITECTURE.md` |
+  1433→| Explicit dependencies | Module dependencies are explicit, documented, and acyclic |
+  1434→| Contract-based communication | Modules communicate through contracts — commands, queries, events, configuration schemas — never through direct data access |
+  1435→| Independent enablement | Modules can be enabled or disabled per tenant, subject to dependency constraints |
+  1436→| Edition packaging | Modules are packaged into editions per Section 16; edition packaging does not modify module internals |
+  1437→| Versioned evolution | Module contracts are versioned; breaking changes follow the platform's deprecation policy |
+  1438→
+  1439→### 19.4 Module Dependencies
+  1440→
+  1441→Module dependencies follow the bounded context dependencies defined in `SYSTEM_ARCHITECTURE.md`. The dependency graph is acyclic; circular dependencies are forbidden and treated as architectural defects. The full dependency graph is documented in `MODULE_ARCHITECTURE.md`; the high-level dependency direction is:
+  1442→
+  1443→- Platform modules (M14–M19) depend on each other in defined ways but not on category-specific modules.
+  1444→- Administrative modules (M11–M13) depend on Platform modules and on Patient (M01).
+  1445→- Financial modules (M09–M10) depend on Platform modules and on Patient (M01) and Encounter (M02).
+  1446→- Operational modules (M06–M08) depend on Platform modules and on Patient (M01) and Encounter (M02).
+  1447→- Clinical modules (M01–M05) depend on Platform modules; Clinical modules may depend on each other in defined ways (e.g., Pharmacy depends on Orders & Results for medication orders).
+  1448→
+  1449→### 19.5 Module Lifecycle
+  1450→
+  1451→Each module has a lifecycle that governs its evolution:
+  1452→
+  1453→| Stage | Code | Description |
+  1454→|---|---|---|
+  1455→| Candidate | LC1 | Module under design; not available to customers |
+  1456→| Pilot | LC2 | Module deployed to pilot customers for validation |
+  1457→| General Availability | LC3 | Module available to all customers per edition packaging |
+  1458→| Mature | LC4 | Module in steady-state; long-term support commitment |
+  1459→| Deprecation Candidate | LC5 | Module considered for deprecation; transition planning underway |
+  1460→| Deprecated | LC6 | Module deprecated; new customers cannot enable; existing customers supported through transition window |
+  1461→| Retired | LC7 | Module removed from the platform; transition window closed |
+  1462→
+  1463→Module lifecycle transitions are ratified by the Product Council. Transitions are recorded in the module's documentation and in the platform's CHANGELOG. The transition from General Availability to Mature is automatic after a defined period of stable operation; other transitions are explicit.
+  1464→
+  1465→### 19.6 Module Documentation
+  1466→
+  1467→Each module has dedicated documentation under `docs/11_MODULES/`. Module documentation includes:
+  1468→
+  1469→- Module purpose and scope
+  1470→- Bounded context alignment
+  1471→- Contracts (commands, queries, events, configuration schemas)
+  1472→- Dependencies on other modules
+  1473→- Configuration surface
+  1474→- Role and permission implications
+  1475→- Integration surface
+  1476→- Audit surface
+  1477→- Reporting surface
+  1478→- Known limitations
+  1479→- Lifecycle status
+  1480→
+  1481→Module documentation is part of the definition of done for a module (Principle P-7). A module without complete documentation is not at General Availability, regardless of its operational status.
+  1482→
+  1483→---
+  1484→
+  1485→## 20. User Roles Overview
+  1486→
+  1487→### 20.1 Purpose of Role Cataloguing
+  1488→
+  1489→The role catalogue defines the human and system roles the platform recognizes. Roles are the unit of permission assignment, the unit of workflow responsibility, and the unit of training pathway. The catalogue is the canonical reference for what roles exist, what each role does, and how roles relate to permissions. Role internals — permission granularity, role composition, role lifecycle — are defined in `MODULE_ARCHITECTURE.md` and the security documentation.
+  1490→
+  1491→### 20.2 Role Catalogue
+  1492→
+  1493→The platform's role catalogue comprises 14 roles organized into four categories: clinical, operational, administrative, and platform.
+  1494→
+  1495→| Code | Role | Category | Typical Responsibilities |
+  1496→|---|---|---|---|
+  1497→| R01 | Physician | Clinical | Clinical assessment, diagnosis, treatment, orders, documentation |
+  1498→| R02 | Nurse | Clinical | Nursing assessment, care delivery, medication administration, documentation |
+  1499→| R03 | Pharmacist | Clinical | Medication review, dispensing, clinical pharmacy, medication safety |
+  1500→| R04 | Technician | Clinical | Laboratory, imaging, procedure technical work; result production |
+  1501→| R05 | Allied health professional | Clinical | Physical therapy, occupational therapy, dietetics, mental health |
+  1502→| R06 | Receptionist | Operational | Patient registration, scheduling, check-in, check-out |
+  1503→| R07 | Scheduler | Operational | Appointment management, resource scheduling, queue management |
+  1504→| R08 | Biller | Operational | Billing, claim submission, payment posting, denial management |
+  1505→| R09 | Administrator | Operational | Facility administration, configuration oversight, operational reporting |
+  1506→| R10 | Compliance officer | Administrative | Audit review, regulatory compliance, privacy oversight |
+  1507→| R11 | HR manager | Administrative | Human resources management, payroll oversight, employee records |
+  1508→| R12 | Executive | Administrative | Strategic oversight, financial oversight, governance |
+  1509→| R13 | System administrator | Platform | Tenant configuration, integration management, operational administration |
+  1510→| R14 | Integration account | Platform | System-to-system integration; non-human principal |
+  1511→
+  1512→### 20.3 Role Composition
+  1513→
+  1514→Roles are composable. A user may hold multiple roles simultaneously, with permissions accumulating per defined rules. Role composition is governed by the platform's permission philosophy (Section 21) and is implemented through the Identity & Access module (M14).
+  1515→
+  1516→Role composition is not unlimited. Certain role combinations are prohibited where they create segregation-of-duty conflicts — for example, a single user may not simultaneously hold the Biller role and the Compliance officer role for the same financial scope. Prohibited combinations are documented in the security documentation and enforced by the permission framework.
+  1517→
+  1518→### 20.4 Role Lifecycle
+  1519→
+  1520→Roles have a lifecycle similar to module lifecycle:
+  1521→
+  1522→| Stage | Code | Description |
+  1523→|---|---|---|
+  1524→| Defined | RC1 | Role defined in the catalogue; permissions specified |
+  1525→| Active | RC2 | Role available for assignment to users |
+  1526→| Restricted | RC3 | Role available only with explicit authorization (e.g., for segregated duties) |
+  1527→| Deprecated | RC4 | Role no longer recommended for new assignment; existing assignments supported |
+  1528→| Retired | RC5 | Role removed from the catalogue; existing assignments transitioned to alternative roles |
+  1529→
+  1530→Role lifecycle transitions are ratified by the Product Council and documented in the role's documentation.
+  1531→
+  1532→### 20.5 Custom Roles
+  1533→
+  1534→The platform's configuration surface allows customers to define custom roles within the configuration framework. Custom roles are compositions of existing permissions, not new permissions. A custom role that requires a permission not in the platform's permission catalogue is not possible without platform extension; such extension is treated as a candidate for platform evolution, not as a customer-specific customization.
+  1535→
+  1536→Custom roles are tenant-scoped. A custom role defined by one customer is not available to other customers. Custom roles are subject to the same lifecycle governance as platform-defined roles, with the customer's system administrator responsible for role lifecycle within the tenant.
+  1537→
+  1538→### 20.6 Role-Based Training
+  1539→
+  1540→Each role has an associated training pathway, documented in the platform's training material. Training pathways are role-specific, not generic; a physician's training covers clinical documentation, order entry, and encounter management, while a receptionist's training covers patient registration, scheduling, and check-in workflows.
+  1541→
+  1542→Training pathways are versioned alongside the platform. Role training material is updated when the platform's behaviour for that role evolves, and the update is communicated to customers through the platform's change-management channel.
+  1543→
+  1544→---
+  1545→
+  1546→## 21. Permission Philosophy
+  1547→
+  1548→### 21.1 Purpose of Permission Philosophy
+  1549→
+  1550→The permission philosophy defines how the platform governs what users can do. Permissions are not a feature; they are a primitive that governs every action of consequence. The philosophy is the basis for the permission framework implemented in the Identity & Access module (M14) and is the operational expression of Design Principle D-10 (Observable, Auditable, Accountable).
+  1551→
+  1552→### 21.2 Permission Granularity
+  1553→
+  1554→Permissions are defined at the action level — read, write, execute, administer — on resources — patients, encounters, orders, results, configurations, audits. Permissions are not defined at the page level or the feature level, because page-level and feature-level permissions are too coarse for healthcare operations and too unstable across UI evolution.
+  1555→
+  1556→Action-level permissions on resources produce a permission matrix that is large but stable. The matrix is large because every (action, resource) pair is a permission; it is stable because actions and resources evolve slowly, even as the platform's surface evolves quickly.
+  1557→
+  1558→### 21.3 Permission Assignment
+  1559→
+  1560→Permissions are assigned through roles, not directly to users. Direct user-permission assignment is forbidden; it bypasses the role framework and produces unmanageable permission sprawl. Role-based assignment is the only supported mechanism.
+  1561→
+  1562→Role-permission assignment is governed by the platform's role definitions (Section 20) and may be refined by customer configuration within the framework. Customer-defined custom roles (Section 20.5) compose existing permissions; they do not create new permissions.
+  1563→
+  1564→### 21.4 Permission Scope
+  1565→
+  1566→Permissions are scoped, not global. A user may have read permission on patient records within their facility without having read permission on patient records in another facility. Scoping is by organizational unit, by facility, by care team, by patient cohort, and by other dimensions defined in the platform's permission framework.
+  1567→
+  1568→Scoping is critical for healthcare operations. A clinician seeing patients in clinic A does not automatically have access to patients in clinic B, even within the same organization. The permission framework enforces scoping at the action level, not at the page level; a clinician without read permission on a patient cannot access that patient's record through any surface, including search, list, or direct navigation.
+  1569→
+  1570→### 21.5 Permission Inheritance
+  1571→
+  1572→Permissions inherit through the organizational hierarchy defined in `SYSTEM_ARCHITECTURE.md`. A permission granted at the organization level applies to all facilities within the organization unless overridden. A permission granted at the facility level applies to all departments within the facility unless overridden. Inheritance is explicit, documented, and auditable.
+  1573→
+  1574→Inheritance is not automatic. A role assigned at the organization level does not automatically propagate to lower levels; the role must be explicitly scoped to apply at lower levels. This prevents accidental over-permissioning through inheritance misconfiguration.
+  1575→
+  1576→### 21.6 Permission Override and Emergency Access
+  1577→
+  1578→The platform supports permission overrides for emergency situations — break-glass access to patient records when the user does not have routine permission. Emergency access is:
+  1579→
+  1580→- Explicit — the user takes a deliberate action to invoke emergency access
+  1581→- Audited — every emergency access is recorded with user, time, resource, and justification
+  1582→- Time-bounded — emergency access expires automatically
+  1583→- Reviewed — emergency access events are reviewed by compliance officers
+  1584→
+  1585→Emergency access is not a routine workflow; it is a controlled exception. Frequent use of emergency access indicates a permission configuration defect and is investigated by the customer's compliance team.
+  1586→
+  1587→### 21.7 Permission Audit
+  1588→
+  1589→Every permission check is recorded in the audit trail. The audit record includes the user, the action, the resource, the permission decision, and the scope context. Permission audit records are the basis for compliance reporting, for incident investigation, and for permission configuration review.
+  1590→
+  1591→Permission audit records are immutable. They cannot be modified or deleted, even by system administrators. The immutability is a platform-level guarantee, not a configuration choice, and is a direct consequence of Design Principle D-10.
+  1592→
+  1593→### 21.8 Permission Philosophy Alignment
+  1594→
+  1595→The permission philosophy aligns with the product principles as follows:
+  1596→
+  1597→| Principle | Permission Philosophy Consequence |
+  1598→|---|---|
+  1599→| P-1 (Healthcare First) | Permissions are action-level on resources, enabling healthcare-grade access control |
+  1600→| P-5 (Practitioner Experience) | Emergency access allows clinical work to continue in urgent situations without permanent over-permissioning |
+  1601→| D-10 (Observable, Auditable, Accountable) | Every permission check is audited; audit records are immutable |
+  1602→| Belief Four (Patient as Ultimate Stakeholder) | Patient data access is governed by scoped permissions, not by broad role grants |
+  1603→
+  1604→---
+  1605→
+  1606→## 22. Configuration-Driven Philosophy
+  1607→
+  1608→### 22.1 Purpose of Configuration Philosophy
+  1609→
+  1610→The configuration philosophy defines how the platform adapts to customer needs through configuration. Configuration is the platform's primary adaptation mechanism (Principle P-2) and is a first-class product surface (Design Principle D-2). The philosophy is the basis for the configuration framework implemented in the Configuration module (M15) and defined in detail in `CONFIGURATION_ARCHITECTURE.md`.
+  1611→
+  1612→### 22.2 Configuration Surface
+  1613→
+  1614→The configuration surface is the complete set of configurable behaviours exposed by the platform. The surface is large — every behaviour of consequence is, in principle, configurable — and is organized by module, by capability, and by scope. The surface is documented as a contract, not as an internal artefact; customers and integrators can rely on the documented surface.
+  1615→
+  1616→The configuration surface is not unlimited. Behaviours that would require source-level modification to express are not part of the configuration surface; they are either out of scope or candidates for platform evolution. The boundary between configuration and source is explicit and is governed by the platform's extensibility strategy defined in `SYSTEM_ARCHITECTURE.md`.
+  1617→
+  1618→### 22.3 Configuration Layers
+  1619→
+  1620→Configuration is layered, with explicit precedence. The layers are defined in `CONFIGURATION_ARCHITECTURE.md` and summarized here:
+  1621→
+  1622→| Layer | Code | Scope | Typical Owner |
+  1623→|---|---|---|---|
+  1624→| Platform default | L1 | All customers, all tenants | Ibn Hayan product team |
+  1625→| Edition | L2 | All customers on an edition | Ibn Hayan product team |
+  1626→| Tenant | L3 | A single customer's tenant | Customer system administrator |
+  1627→| Facility | L4 | A facility within a customer | Customer facility administrator |
+  1628→| Department | L5 | A department within a facility | Customer department administrator |
+  1629→| Care team | L6 | A care team within a department | Customer care team lead |
+  1630→| User | L7 | A single user | The user or their delegate |
+  1631→| Session | L8 | A single session | The user, transient |
+  1632→
+  1633→Precedence is from L1 (lowest) to L8 (highest). A configuration at a higher layer overrides a configuration at a lower layer. Overrides are validated, versioned, and auditable. Not all configuration keys are overridable at all layers; some keys are fixed at lower layers for safety or regulatory reasons.
+  1634→
+  1635→### 22.4 Configuration Validation
+  1636→
+  1637→Every configuration change is validated before it is applied. Validation covers five rule categories:
+  1638→
+  1639→| Rule Category | Description |
+  1640→|---|---|
+  1641→| Structural | Configuration conforms to the schema (types, required fields, formats) |
+  1642→| Referential | Configuration references resolve (e.g., a referenced module exists, a referenced role is defined) |
+  1643→| Semantic | Configuration is internally consistent (e.g., a workflow's steps form a valid graph) |
+  1644→| Contextual | Configuration is consistent with its scope (e.g., a facility-level configuration does not contradict a tenant-level invariant) |
+  1645→| Regulatory | Configuration is consistent with the regulatory framework in force for the tenant's region |
+  1646→
+  1647→A configuration that fails validation is not applied. The validation failure is reported to the configurator with diagnostic information. Validation failures are auditable.
+  1648→
+  1649→### 22.5 Configuration Versioning
+  1650→
+  1651→Every configuration change is versioned. The version history is immutable and is the basis for configuration audit, rollback, and change review. Configuration changes can be rolled back to any prior version, with the rollback itself versioned and auditable.
+  1652→
+  1653→Configuration versioning is the configuration-surface equivalent of source-code versioning. It enables controlled evolution, controlled experimentation, and controlled recovery. A customer that applies a configuration change that produces undesired behaviour can roll back without engineering intervention, in keeping with Principle P-2 (Configuration Before Customization).
+  1654→
+  1655→### 22.6 Configuration Audit
+  1656→
+  1657→Every configuration change is recorded in the audit trail, including the configurator, the time, the scope, the previous value, the new value, and the validation result. Configuration audit records are immutable and are the basis for compliance reporting and for incident investigation.
+  1658→
+  1659→Configuration audit is distinct from operational audit (Section 27). Operational audit records what users did; configuration audit records how the platform was configured to behave. Both are required for accountability, and both are governed by Design Principle D-10.
+  1660→
+  1661→### 22.7 Configuration Governance
+  1662→
+  1663→Configuration governance is the practice of managing configuration change over time. Governance includes:
+  1664→
+  1665→- Configuration change approval workflows, with approval required for changes above defined risk thresholds
+  1666→- Configuration change review by compliance officers for changes that affect regulatory alignment
+  1667→- Configuration change testing in sandbox tenants before application to production tenants
+  1668→- Configuration change communication to affected users before application
+  1669→
+  1670→Governance is customer-scoped. Each customer defines their configuration governance within the platform's framework, with the platform providing the tooling and the audit trail. The platform does not impose a specific governance workflow; it imposes the framework within which governance is exercised.
+  1671→
+  1672→### 22.8 Configuration Philosophy Alignment
+  1673→
+  1674→The configuration philosophy aligns with the product principles as follows:
+  1675→
+  1676→| Principle | Configuration Philosophy Consequence |
+  1677→|---|---|
+  1678→| P-2 (Configuration Before Customization) | Configuration is the primary adaptation mechanism; customization is excluded |
+  1679→| P-3 (One Platform, Many Organizations) | Configuration layers enable customer-specific behaviour without forking |
+  1680→| P-7 (Documented Before Shipped) | Configuration surface is documented as a contract |
+  1681→| D-2 (Configuration Before Customization) | Layered configuration, validation, versioning, audit |
+  1682→| D-10 (Observable, Auditable, Accountable) | Configuration changes are audited and immutable |
+  1683→
+  1684→---
+  1685→
+  1686→## 23. Multi-Tenant Philosophy
+  1687→
+  1688→### 23.1 Purpose of Multi-Tenant Philosophy
+  1689→
+  1690→The multi-tenant philosophy defines how the platform serves multiple customers from a single shared runtime. Multi-tenancy is the architectural expression of Principle P-3 (One Platform, Many Organizations) and is the default delivery model (Section 15.2). The philosophy is the basis for the multi-tenant architecture defined in `SYSTEM_ARCHITECTURE.md`.
+  1691→
+  1692→### 23.2 Tenant Isolation
+  1693→
+  1694→Tenant isolation is the practice of ensuring that one customer's data, configuration, and operational state are not accessible to another customer. Isolation is achieved through logical separation by default, with dedicated compute and physical isolation available as deployment choices (Section 15.3). Isolation is enforced at every layer of the platform — at the data layer, at the application layer, at the configuration layer, and at the audit layer.
+  1695→
+  1696→Tenant isolation is not a feature; it is a primitive. Every module's contract enforces tenant isolation. Every query, every command, every event is tenant-scoped. A module that does not enforce tenant isolation is defective and is not shipped.
+  1697→
+  1698→### 23.3 Tenant Lifecycle
+  1699→
+  1700→Tenants have a lifecycle that governs their creation, operation, and decommissioning:
+  1701→
+  1702→| Stage | Code | Description |
+  1703→|---|---|---|
+  1704→| Provisioned | TL1 | Tenant created; default configuration applied |
+  1705→| Onboarding | TL2 | Customer-specific configuration applied; first encounter targeted |
+  1706→| Active | TL3 | Tenant in steady-state operation |
+  1707→| Expansion | TL4 | Tenant expanding scope — additional facilities, modules, specialties |
+  1708→| Suspension | TL5 | Tenant suspended (e.g., for non-payment or security incident); data preserved |
+  1709→| Offboarding | TL6 | Tenant being decommissioned; data export executed |
+  1710→| Decommissioned | TL7 | Tenant removed; data retention period observed |
+  1711→
+  1712→Tenant lifecycle transitions are governed by documented processes. The transition from Active to Suspension is reversible; the transition to Offboarding is reversible within a defined window; the transition to Decommissioned is terminal.
+  1713→
+  1714→### 23.4 Tenant Configuration Inheritance
+  1715→
+  1716→Tenant configuration inherits from the platform default and from the edition, with tenant-level configuration overriding as defined in Section 22.3. Tenants within a customer may inherit from a customer-level baseline, enabling a customer to define common configuration once and apply it across multiple tenants.
+  1717→
+  1718→Inheritance is explicit and documented. A customer's multi-tenant configuration is auditable end-to-end; the audit trail shows which configuration was applied at which layer for any given tenant at any given time.
+  1719→
+  1720→### 23.5 Tenant Data Residency
+  1721→
+  1722→Tenant data residency is governed by the customer's contract and by the regulatory framework in force for the tenant's region. The platform supports regional data residency — a tenant's data is stored in the region specified by the customer's contract, and is not moved across regions without explicit authorization.
+  1723→
+  1724→Data residency is enforced at the storage layer. A tenant's data is partitioned by region, and access to data is governed by the tenant's region. Cross-region data access is permitted only for documented operational reasons (e.g., disaster recovery) and is auditable.
+  1725→
+  1726→### 23.6 Tenant Operational Isolation
+  1727→
+  1728→Tenant operational isolation ensures that one tenant's operational behaviour does not affect another tenant. A tenant that generates high load does not degrade service for other tenants; a tenant that experiences an operational incident does not cause incidents for other tenants. Operational isolation is achieved through resource partitioning, rate limiting, and graceful degradation under load.
+  1729→
+  1730→Operational isolation is not absolute. The platform shares infrastructure across tenants, and shared infrastructure has finite capacity. The platform's scalability strategy (defined in `SYSTEM_ARCHITECTURE.md`) is designed to maintain operational isolation under normal and peak load, with documented degradation behaviour under extreme load.
+  1731→
+  1732→### 23.7 Multi-Tenant Philosophy Alignment
+  1733→
+  1734→The multi-tenant philosophy aligns with the product principles as follows:
+  1735→
+  1736→| Principle | Multi-Tenant Philosophy Consequence |
+  1737→|---|---|
+  1738→| P-3 (One Platform, Many Organizations) | Multi-tenancy is the default; one code base serves all customers |
+  1739→| P-4 (Open Data, Open Standards) | Tenant data is portable; residency is contractual |
+  1740→| D-3 (One Platform, Many Organizations) | Tenant isolation is a primitive, not a feature |
+  1741→| D-5 (Enterprise Scalability) | Operational isolation maintains service quality under load |
+  1742→| D-10 (Observable, Auditable, Accountable) | Tenant lifecycle and configuration are auditable end-to-end |
+  1743→
+  1744→---
+  1745→
+  1746→## 24. Scalability Strategy
+  1747→
+  1748→### 24.1 Purpose of Scalability Strategy
+  1749→
+  1750→The scalability strategy defines how the platform grows to accommodate increasing customers, increasing users, increasing data volume, and increasing geographic distribution. Scalability is the operational expression of Design Principle D-5 (Enterprise Scalability) and is a product-level commitment, not an engineering afterthought. The strategy is the basis for the scalability architecture defined in `SYSTEM_ARCHITECTURE.md`.
+  1751→
+  1752→### 24.2 Scalability Dimensions
+  1753→
+  1754→The platform scales along five dimensions, each with its own strategy:
+  1755→
+  1756→| Dimension | Description | Scaling Strategy |
+  1757→|---|---|---|
+  1758→| Tenant count | Number of customers served | Horizontal scaling of stateless components; partitioning of stateful components by tenant |
+  1759→| User count | Number of concurrent users per tenant | Horizontal scaling of stateless components; rate limiting per tenant; graceful degradation |
+  1760→| Data volume | Volume of data per tenant | Partitioning by tenant and by bounded context; archival of cold data; tiered storage |
+  1761→| Transaction rate | Rate of transactions per tenant | Horizontal scaling of transaction processing; queueing for non-critical transactions; prioritization of clinical transactions |
+  1762→| Geographic distribution | Number of regions served | Regional deployment with data residency; cross-region replication for disaster recovery |
+  1763→
+  1764→The five dimensions are independent but interrelated. Scaling decisions are made per dimension, with the interdependencies considered. A scaling decision that optimizes one dimension at the cost of another is recorded with the trade-off explicit.
+  1765→
+  1766→### 24.3 Scalability Posture
+  1767→
+  1768→The platform's scalability posture is stated as the following commitments:
+  1769→
+  1770→| Commitment | Description |
+  1771→|---|---|
+  1772→| Linear scaling within a tenant | Adding users to a tenant produces proportional load without architectural change |
+  1773→| Sub-linear scaling across tenants | Adding tenants produces sub-proportional infrastructure cost due to shared platform services |
+  1774→| No architectural change across customer spectrum | A solo practitioner and a hospital network run on the same architecture |
+  1775→| Graceful degradation under extreme load | The platform degrades gracefully, preserving clinical safety over convenience |
+  1776→| Regional scaling without forking | The platform scales to new regions through deployment, not through code branching |
+  1777→
+  1778→### 24.4 Scalability and the Decade Horizon
+  1779→
+  1780→Scalability decisions are made on the decade horizon. A scaling strategy that optimizes for the current quarter at the cost of decade-horizon scalability is rejected. Specifically:
+  1781→
+  1782→- The platform does not adopt scaling strategies that require architectural rework to absorb 10x growth.
+  1783→- The platform does not adopt scaling strategies that lock in a specific infrastructure vendor.
+  1784→- The platform does not adopt scaling strategies that compromise tenant isolation under load.
+  1785→- The platform does not adopt scaling strategies that compromise audit completeness under load.
+  1786→
+  1787→### 24.5 Scalability Measurement
+  1788→
+  1789→Scalability is measured continuously through operational telemetry. The primary scalability metrics are:
+  1790→
+  1791→| Metric | Description | Target |
+  1792→|---|---|---|
+  1793→| Practitioner-felt latency | Latency as experienced by practitioners at the point of care | Sub-second for routine actions; documented targets for complex actions |
+  1794→| Tenant isolation integrity | Degree to which one tenant's load affects another's performance | Measurable impact below defined threshold |
+  1795→| Audit completeness under load | Percentage of consequential actions audited, measured under peak load | 100% — no degradation under load |
+  1796→| Regional parity | Degree to which the platform performs equivalently across regions | Regional performance within defined parity threshold |
+  1797→| Cost per tenant | Infrastructure cost per tenant, normalized by tenant size | Sub-linear with tenant count growth |
+  1798→
+  1799→Scalability metrics are reviewed quarterly. Erosion in any metric is treated as a strategic risk and addressed through architectural or operational response.
+  1800→
+  1801→---
+  1802→
+  1803→## 25. Localization Strategy
+  1804→
+  1805→### 25.1 Purpose of Localization Strategy
+  1806→
+  1807→The localization strategy defines how the platform adapts to regional and linguistic contexts. Localization is not a translation pass; it is a comprehensive regional adaptation that covers language, calendar, date and time formats, number formats, currency, regulatory frameworks, clinical coding systems, payment models, and cultural expectations about clinical workflow. The strategy is the operational expression of Design Principle D-6 (Regional Adaptability) and is the basis for the localization architecture defined in `SYSTEM_ARCHITECTURE.md`.
+  1808→
+  1809→### 25.2 Localization Dimensions
+  1810→
+  1811→The platform localizes along the following dimensions:
+  1812→
+  1813→| Dimension | Description | Adaptation Mechanism |
+  1814→|---|---|---|
+  1815→| Language | User-interface language, content language, document language | Translation catalogues; multi-language content per tenant |
+  1816→| Calendar | Calendar system (Gregorian, Hijri, others as required) | Calendar adapters; configurable default per tenant |
+  1817→| Date and time | Date format, time format, timezone | Locale-aware formatting; tenant-configured defaults |
+  1818→| Number and currency | Number format, currency symbol, decimal separator | Locale-aware formatting; tenant-configured defaults |
+  1819→| Regulatory framework | Regional regulatory requirements (data protection, clinical records, prescribing) | Regulatory framework adapters; per-region compliance packs |
+  1820→| Clinical coding system | Regional clinical coding (diagnosis, procedure, medication) | Coding system adapters; per-region coding packs |
+  1821→| Payment model | Regional payment models (insurance, single-payer, out-of-pocket, hybrid) | Payment model adapters; per-region billing packs |
+  1822→| Cultural workflow | Cultural expectations about clinical workflow (e.g., consent, communication, family involvement) | Configuration overlays per region |
+  1823→
+  1824→The eight dimensions are independent but interrelated. Localization decisions are made per dimension, with the interdependencies considered. A localization decision that optimizes one dimension at the cost of another is recorded with the trade-off explicit.
+  1825→
+  1826→### 25.3 Supported Regions
+  1827→
+  1828→The platform supports a defined set of regions, with each region having a validated localization pack. The region catalogue is reviewed annually and expanded as localization packs achieve validated-practice status.
+  1829→
+  1830→| Code | Region | Status |
+  1831→|---|---|---|
+  1832→| MENA-1 | Iraq | Validated |
+  1833→| MENA-2 | Saudi Arabia | Validated |
+  1834→| MENA-3 | United Arab Emirates | Candidate |
+  1835→| MENA-4 | Jordan | Candidate |
+  1836→| MENA-5 | Egypt | Candidate |
+  1837→| GCC-1 | Kuwait | Candidate |
+  1838→| GCC-2 | Qatar | Candidate |
+  1839→| GCC-3 | Bahrain | Candidate |
+  1840→| GCC-4 | Oman | Candidate |
+  1841→| LEV-1 | Lebanon | Future |
+  1842→| NA-1 | United States | Future |
+  1843→| EU-1 | European Union (GDPR) | Future |
+  1844→| UK-1 | United Kingdom | Future |
+  1845→| ASIA-1 | India | Future |
+  1846→| ASIA-2 | Southeast Asia (initial) | Future |
+  1847→
+  1848→Regions marked Validated have complete localization packs with operational validation. Regions marked Candidate have localization packs in development with pilot deployments. Regions marked Future are on the regional adaptation roadmap (Section 31) but do not yet have active localization packs.
+  1849→
+  1850→### 25.4 Multi-Region Tenants
+  1851→
+  1852→A customer operating across multiple regions receives a multi-region tenant configuration. The tenant has a customer-level baseline configuration, with regional overlays applied per facility or per organizational unit. A facility in Baghdad and a facility in Riyadh within the same customer operate with different localization packs but share the customer's baseline configuration.
+  1853→
+  1854→Multi-region tenancy does not require multiple tenants. The platform's configuration surface allows regional variation within a single tenant, with data residency enforced at the storage layer (Section 23.5). A customer that requires strict data segregation between regions may operate multiple tenants, but this is a customer choice, not a platform requirement.
+  1855→
+  1856→### 25.5 Localization and Clinical Safety
+  1857→
+  1858→Localization is a clinical safety concern, not a cosmetic concern. A clinician who reads a medication dosage in the wrong number format, or who records a date in the wrong calendar system, may make a clinical error with patient safety consequences. Localization is therefore subject to the same rigour as clinical safety, with validation including clinical workflow testing by practitioners of the target region.
+  1859→
+  1860→Localization packs are validated by regional clinical informatics specialists, not by translators. A localization pack that has been validated linguistically but not clinically is not validated. The platform's localization governance requires both linguistic validation and clinical validation before a localization pack achieves Validated status.
+  1861→
+  1862→### 25.6 Localization Strategy Alignment
+  1863→
+  1864→The localization strategy aligns with the product principles as follows:
+  1865→
+  1866→| Principle | Localization Strategy Consequence |
+  1867→|---|---|
+  1868→| P-1 (Healthcare First) | Localization is a clinical safety concern; validation includes clinical workflow testing |
+  1869→| P-3 (One Platform, Many Organizations) | Regional adaptation is configuration, not forking |
+  1870→| D-6 (Regional Adaptability) | Eight localization dimensions; multi-region tenants |
+  1871→| Belief Four (Patient as Ultimate Stakeholder) | Patient-facing localization (consent, communication, dignity) is a product commitment |
+  1872→
+  1873→---
+  1874→
+  1875→## 26. Accessibility Strategy
+  1876→
+  1877→### 26.1 Purpose of Accessibility Strategy
+  1878→
+  1879→The accessibility strategy defines how the platform ensures that practitioners and patients with disabilities can use the platform effectively. Accessibility is not a checkbox compliance activity; it is an operational requirement because practitioners include people with disabilities and patients include people with disabilities. The strategy is the basis for the platform's accessibility commitments and is governed by Principle P-5 (Practitioner Experience Over Procurement Satisfaction) and Belief Four (the patient as ultimate stakeholder).
+  1880→
+  1881→### 26.2 Accessibility Scope
+  1882→
+  1883→The platform's accessibility scope covers:
+  1884→
+  1885→| Scope Area | Description |
+  1886→|---|---|
+  1887→| Visual accessibility | Support for screen readers, magnification, high-contrast modes, configurable text size |
+  1888→| Motor accessibility | Keyboard-only navigation, voice control, configurable input timing |
+  1889→| Auditory accessibility | Visual alternatives to audio notifications; captioning for video content |
+  1890→| Cognitive accessibility | Clear language, consistent navigation, configurable complexity |
+  1891→| Localization interaction | Accessibility in all supported languages, including right-to-left languages |
+  1892→| Assistive technology compatibility | Compatibility with commonly used assistive technologies |
+  1893→
+  1894→Accessibility is a platform-level commitment, not a module-level feature. Every module's user-interface surface is required to meet the platform's accessibility standards, and accessibility regression is treated as a defect.
+  1895→
+  1896→### 26.3 Accessibility Standards
+  1897→
+  1898→The platform aligns with recognized accessibility standards. Specific standards are referenced in the platform's accessibility documentation rather than in this product document, because standards evolve and the platform's alignment is maintained continuously rather than fixed at a point in time.
+  1899→
+  1900→The platform's accessibility posture is stated as the following commitments:
+  1901→
+  1902→| Commitment | Description |
+  1903→|---|---|
+  1904→| Continuous alignment | The platform maintains alignment with recognized accessibility standards as they evolve |
+  1905→| Practitioner-first | Accessibility is designed for practitioner daily use, not for procurement-stage demonstration |
+  1906→| Localization-aware | Accessibility works in all supported languages, including right-to-left languages |
+  1907→| Assistive-technology-compatible | The platform works with commonly used assistive technologies |
+  1908→| Documented limitations | Where accessibility is limited, the limitation is documented with workarounds |
+  1909→
+  1910→### 26.4 Accessibility and Practitioner Experience
+  1911→
+  1912→Accessibility is part of practitioner experience, not a separate concern. A platform that is inaccessible to practitioners with disabilities is a platform that fails Principle P-5. Accessibility is therefore designed into workflow, into information architecture, and into interaction patterns, not added as an overlay.
+  1913→
+  1914→The platform's practitioner-experience metrics (Section 24.5) include accessibility-specific measures, such as time-to-complete for common workflows using assistive technologies. These metrics are reviewed alongside other practitioner-experience metrics, with erosion treated as a defect.
+  1915→
+  1916→### 26.5 Accessibility Strategy Alignment
+  1917→
+  1918→The accessibility strategy aligns with the product principles as follows:
+  1919→
+  1920→| Principle | Accessibility Strategy Consequence |
+  1921→|---|---|
+  1922→| P-1 (Healthcare First) | Accessibility is a clinical safety concern; inaccessible software causes clinical errors |
+  1923→| P-5 (Practitioner Experience) | Accessibility is designed for daily use, not for procurement |
+  1924→| Belief Four (Patient as Ultimate Stakeholder) | Patient-facing accessibility (consent, communication, dignity) is a product commitment |
+  1925→| D-6 (Regional Adaptability) | Accessibility works across all supported languages |
+  1926→
+  1927→---
+  1928→
+  1929→## 27. Security Philosophy
+  1930→
+  1931→### 27.1 Purpose of Security Philosophy
+  1932→
+  1933→The security philosophy defines how the platform protects patient data, customer data, operational integrity, and platform availability. Security is not a feature; it is a primitive that governs every architectural and operational decision. The philosophy is the basis for the platform's security architecture, defined in the security documentation under `docs/03_SECURITY/`, and is governed by Principle P-1 (Healthcare First), Belief Four (the patient as ultimate stakeholder), and Design Principle D-10 (Observable, Auditable, Accountable).
+  1934→
+  1935→### 27.2 Security Posture
+  1936→
+  1937→The platform's security posture is stated as the following commitments:
+  1938→
+  1939→| Commitment | Description |
+  1940→|---|---|
+  1941→| Defence in depth | Security is layered; no single layer is relied upon exclusively |
+  1942→| Zero-trust | No implicit trust based on network location; every request is authenticated and authorized |
+  1943→| Least privilege | Users and systems receive the minimum permissions required for their function |
+  1944→| Encryption everywhere | Data is encrypted in transit and at rest; key management is governed |
+  1945→| Continuous monitoring | Security events are monitored continuously; anomalies are investigated |
+  1946→| Incident readiness | Incident response is documented, tested, and improved |
+  1947→| Customer sovereignty | Customers retain control of their data; the platform is custodian, not owner |
+  1948→
+  1949→### 27.3 Security as Primitive
+  1950→
+  1951→Security is a primitive, not a feature. Every module's contract enforces security requirements. Every query, every command, every event is authenticated, authorized, and audited. A module that does not enforce security is defective and is not shipped.
+  1952→
+  1953→Security primitives are implemented at the platform layer, not at the module layer. Modules consume security primitives; they do not implement their own. This ensures consistency across the platform and prevents security gaps from emerging as modules evolve independently.
+  1954→
+  1955→### 27.4 Security and Audit
+  1956→
+  1957→Security and audit are tightly coupled. Every security-relevant action is recorded in the audit trail, and every audit record is protected against tampering. The audit trail is itself a security control — it enables incident investigation, compliance demonstration, and accountability.
+  1958→
+  1959→The relationship between security and audit is governed by Design Principle D-10. Security protects against unauthorized action; audit records what action was taken, by whom, and with what authorization. The two together provide defence in depth against both unauthorized action and undetected action.
+  1960→
+  1961→### 27.5 Security and Compliance
+  1962→
+  1963→The platform's security posture is designed to meet the compliance requirements of the regions in which it operates. Compliance is not a separate activity from security; it is a consequence of the platform's security posture. Where a region's compliance requirements exceed the platform's default posture, the platform's configuration surface and deployment choices accommodate the additional requirements without architectural change.
+  1964→
+  1965→Compliance is documented per region in the platform's compliance documentation. The documentation is updated as regulatory frameworks evolve, with changes communicated to affected customers through the platform's change-management channel.
+  1966→
+  1967→### 27.6 Security Incident Response
+  1968→
+  1969→The platform's security incident response is documented, tested, and improved. The response process covers:
+  1970→
+  1971→- Detection — security events are monitored continuously; anomalies are flagged for investigation
+  1972→- Triage — flagged events are triaged by severity and impact
+  1973→- Containment — confirmed incidents are contained to limit impact
+  1974→- Eradication — the root cause is identified and removed
+  1975→- Recovery — affected systems are restored to normal operation
+  1976→- Post-incident review — incidents are reviewed, lessons are recorded, and improvements are applied
+  1977→- Customer notification — affected customers are notified per contractual and regulatory requirements
+  1978→
+  1979→Incident response is tested periodically through tabletop exercises and through simulated incidents. Test results are recorded and used to improve the response process.
+  1980→
+  1981→### 27.7 Security Philosophy Alignment
+  1982→
+  1983→The security philosophy aligns with the product principles as follows:
+  1984→
+  1985→| Principle | Security Philosophy Consequence |
+  1986→|---|---|
+  1987→| P-1 (Healthcare First) | Security protects patient data and clinical safety |
+  1988→| P-4 (Open Data, Open Standards) | Customer data is custodied, not owned; data is portable |
+  1989→| Belief Four (Patient as Ultimate Stakeholder) | Patient data sovereignty is a security commitment |
+  1990→| D-10 (Observable, Auditable, Accountable) | Every security-relevant action is audited; audit is tamper-proof |
+  1991→
+  1992→---
+  1993→
+  1994→## 28. Offline Strategy
+  1995→
+  1996→### 28.1 Purpose of Offline Strategy
+  1997→
+  1998→The offline strategy defines how the platform operates when network connectivity is degraded, intermittent, or absent. Offline operation is a clinical safety concern because healthcare work continues regardless of network conditions, and software that fails when offline is software that fails clinicians at critical moments. The strategy is the operational expression of Principle P-1 (Healthcare First) and is the basis for the offline-first architecture defined in `SYSTEM_ARCHITECTURE.md`.
+  1999→
+  2000→### 28.2 Offline-First Posture
+
+[showing lines 1-2000 of 2428; use offset=2001 with limit to continue reading]
