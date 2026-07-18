@@ -8,7 +8,7 @@
 | Document Type | Architecture Decision Record |
 | Authority Level | Authoritative — Ratified Decision |
 | Version | 1.0.0 |
-| Status | Proposed |
+| Status | Accepted |
 | Owner | Architecture Council |
 | Custodian | Office of the Chief Software Architect |
 | Review Cadence | On amendment; mandatory review when non-pharmacy inventory module packaging is ready for ratification |
@@ -244,18 +244,21 @@ This ADR operates under the authority of `SYSTEM_ARCHITECTURE.md` and `PRODUCT_B
 
 ### 5.1 Current Status
 
-**Proposed.** This ADR is drafted and submitted to the Architecture Council for ratification. Upon ratification, the Status field is updated to **Ratified**, the Version field is incremented to 1.0.0 (if ratified as-is) or 1.1.0 (if ratified with amendments), and the ADR is added to the canonical ADR index.
+**Accepted.** This ADR was accepted by the Architecture Council on
+2026-07-18. The decision is authoritative and binding on all downstream
+documentation. Any future change or reversal requires a superseding ADR
+accepted through the Architecture Council.
 
-### 5.2 Ratification Criteria
+### 5.2 Accepted Decision Conditions
 
-The Architecture Council ratifies this ADR when:
+The following conditions form part of the accepted decision:
 
-- [ ] The Council confirms that BC09 Inventory is its own bounded context per `SYSTEM_ARCHITECTURE.md` Section 7.2.
-- [ ] The Council confirms that Pharmacy (M05) does not universally own all inventory.
-- [ ] The Council confirms that medication inventory may integrate tightly with Pharmacy (M05).
-- [ ] The Council confirms that non-pharmacy inventory module packaging is deferred to a future ADR (proposed ADR-011).
-- [ ] The Council confirms that `INVENTORY.md` must not claim M07 or any other module code until the future ADR ratifies a module surface.
-- [ ] The Council confirms that the Inventory domain concept is not deleted; BC09 Inventory remains a first-class bounded context.
+- The Council confirms that BC09 Inventory is its own bounded context per `SYSTEM_ARCHITECTURE.md` Section 7.2.
+- The Council confirms that Pharmacy (M05) does not universally own all inventory.
+- The Council confirms that medication inventory may integrate tightly with Pharmacy (M05).
+- The Council confirms that non-pharmacy inventory module packaging is deferred to a future ADR (proposed ADR-011).
+- The Council confirms that `INVENTORY.md` must not claim M07 or any other module code until the future ADR ratifies a module surface.
+- The Council confirms that the Inventory domain concept is not deleted; BC09 Inventory remains a first-class bounded context.
 
 ### 5.3 Implementation Triggers
 

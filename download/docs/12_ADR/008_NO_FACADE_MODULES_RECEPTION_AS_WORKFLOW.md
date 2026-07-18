@@ -8,7 +8,7 @@
 | Document Type | Architecture Decision Record |
 | Authority Level | Authoritative — Ratified Decision |
 | Version | 1.0.0 |
-| Status | Proposed |
+| Status | Accepted |
 | Owner | Architecture Council |
 | Custodian | Office of the Chief Software Architect |
 | Review Cadence | On amendment; mandatory review if a future cross-cutting capability emerges that cannot be cleanly housed elsewhere |
@@ -193,17 +193,20 @@ This ADR operates under the authority of `SYSTEM_ARCHITECTURE.md` and `PRODUCT_B
 
 ### 5.1 Current Status
 
-**Proposed.** This ADR is drafted and submitted to the Architecture Council for ratification. Upon ratification, the Status field is updated to **Ratified**, the Version field is incremented to 1.0.0 (if ratified as-is) or 1.1.0 (if ratified with amendments), and the ADR is added to the canonical ADR index.
+**Accepted.** This ADR was accepted by the Architecture Council on
+2026-07-18. The decision is authoritative and binding on all downstream
+documentation. Any future change or reversal requires a superseding ADR
+accepted through the Architecture Council.
 
-### 5.2 Ratification Criteria
+### 5.2 Accepted Decision Conditions
 
-The Architecture Council ratifies this ADR when:
+The following conditions form part of the accepted decision:
 
-- [ ] The Council confirms that no façade module category is introduced at v1.
-- [ ] The Council confirms that Reception is not a module and is to be reclassified as a workflow / operational process / experience surface.
-- [ ] The Council confirms that the M14 module slot is freed for the canonical Identity & Access module.
-- [ ] The Council commits to reviewing the decision if three or more cross-cutting capabilities emerge that cannot be cleanly housed as workflows or as capabilities within existing modules.
-- [ ] The Council confirms that the rejection is reversible via a future ADR that introduces a façade module category with defined criteria.
+- The Council confirms that no façade module category is introduced at v1.
+- The Council confirms that Reception is not a module and is to be reclassified as a workflow / operational process / experience surface.
+- The Council confirms that the M14 module slot is freed for the canonical Identity & Access module.
+- The Council commits to reviewing the decision if three or more cross-cutting capabilities emerge that cannot be cleanly housed as workflows or as capabilities within existing modules.
+- The Council confirms that the rejection is reversible via a future ADR that introduces a façade module category with defined criteria.
 
 ### 5.3 Implementation Triggers
 

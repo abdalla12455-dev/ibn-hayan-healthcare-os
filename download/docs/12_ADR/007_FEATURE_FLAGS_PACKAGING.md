@@ -8,7 +8,7 @@
 | Document Type | Architecture Decision Record |
 | Authority Level | Authoritative — Ratified Decision |
 | Version | 1.0.0 |
-| Status | Proposed |
+| Status | Accepted |
 | Owner | Architecture Council |
 | Custodian | Office of the Chief Software Architect |
 | Review Cadence | On amendment; mandatory review before v1 general availability |
@@ -196,17 +196,20 @@ This ADR operates under the authority of `SYSTEM_ARCHITECTURE.md` and `PRODUCT_B
 
 ### 5.1 Current Status
 
-**Proposed.** This ADR is drafted and submitted to the Architecture Council for ratification. Upon ratification, the Status field is updated to **Ratified**, the Version field is incremented to 1.0.0 (if ratified as-is) or 1.1.0 (if ratified with amendments), and the ADR is added to the canonical ADR index.
+**Accepted.** This ADR was accepted by the Architecture Council on
+2026-07-18. The decision is authoritative and binding on all downstream
+documentation. Any future change or reversal requires a superseding ADR
+accepted through the Architecture Council.
 
-### 5.2 Ratification Criteria
+### 5.2 Accepted Decision Conditions
 
-The Architecture Council ratifies this ADR when:
+The following conditions form part of the accepted decision:
 
-- [ ] The Council confirms that BC18 Feature Flags is a separate bounded context per `SYSTEM_ARCHITECTURE.md` Section 7.2.
-- [ ] The Council confirms that the v1 implementation packaging within M15 Configuration/Settings is acceptable for v1 general availability.
-- [ ] The Council confirms that the packaging is reversible via a future extraction ADR.
-- [ ] The Council confirms that the audit trail separation (BC18 audit category distinct from BC15 audit category) is a binding commitment of the packaging.
-- [ ] The Council commits to reviewing the decision at v1 general availability and at each major release thereafter.
+- The Council confirms that BC18 Feature Flags is a separate bounded context per `SYSTEM_ARCHITECTURE.md` Section 7.2.
+- The Council confirms that the v1 implementation packaging within M15 Configuration/Settings is acceptable for v1 general availability.
+- The Council confirms that the packaging is reversible via a future extraction ADR.
+- The Council confirms that the audit trail separation (BC18 audit category distinct from BC15 audit category) is a binding commitment of the packaging.
+- The Council commits to reviewing the decision at v1 general availability and at each major release thereafter.
 
 ### 5.3 Implementation Triggers
 

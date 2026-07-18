@@ -8,7 +8,7 @@
 | Document Type | Architecture Decision Record |
 | Authority Level | Authoritative — Ratified Decision |
 | Version | 1.0.0 |
-| Status | Proposed |
+| Status | Accepted |
 | Owner | Architecture Council |
 | Custodian | Office of the Chief Software Architect |
 | Review Cadence | On amendment; mandatory review if subscription billing complexity grows to exceed the M09 Billing module surface |
@@ -216,17 +216,20 @@ This ADR operates under the authority of `SYSTEM_ARCHITECTURE.md` and `PRODUCT_B
 
 ### 5.1 Current Status
 
-**Proposed.** This ADR is drafted and submitted to the Architecture Council for ratification. Upon ratification, the Status field is updated to **Ratified**, the Version field is incremented to 1.0.0 (if ratified as-is) or 1.1.0 (if ratified with amendments), and the ADR is added to the canonical ADR index.
+**Accepted.** This ADR was accepted by the Architecture Council on
+2026-07-18. The decision is authoritative and binding on all downstream
+documentation. Any future change or reversal requires a superseding ADR
+accepted through the Architecture Council.
 
-### 5.2 Ratification Criteria
+### 5.2 Accepted Decision Conditions
 
-The Architecture Council ratifies this ADR when:
+The following conditions form part of the accepted decision:
 
-- [ ] The Council confirms that Subscriptions is not a first-class module and is classified as a capability under M09 Billing.
-- [ ] The Council confirms that the M19 module slot is freed for the canonical Localization module.
-- [ ] The Council confirms that the useful content of `SUBSCRIPTIONS.md` is to be merged into `BILLING.md` as a "Subscription Billing" section.
-- [ ] The Council confirms that entitlement-state computation is a BC07 Billing concern and entitlement enforcement is a BC18 Feature Flags concern (per ADR-007).
-- [ ] The Council commits to reviewing the decision if subscription billing complexity grows beyond what M09 Billing can accommodate.
+- The Council confirms that Subscriptions is not a first-class module and is classified as a capability under M09 Billing.
+- The Council confirms that the M19 module slot is freed for the canonical Localization module.
+- The Council confirms that the useful content of `SUBSCRIPTIONS.md` is to be merged into `BILLING.md` as a "Subscription Billing" section.
+- The Council confirms that entitlement-state computation is a BC07 Billing concern and entitlement enforcement is a BC18 Feature Flags concern (per ADR-007).
+- The Council commits to reviewing the decision if subscription billing complexity grows beyond what M09 Billing can accommodate.
 
 ### 5.3 Implementation Triggers
 
