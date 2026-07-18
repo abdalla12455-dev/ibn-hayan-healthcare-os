@@ -324,6 +324,14 @@ Feature flags are implemented by the Feature Flags bounded context (BC18), as de
 
 The bounded context exposes its configuration surface — the set of flag-related configuration keys it accepts — as part of its contract, per Section 4.1. The configuration surface includes flag definition parameters, evaluation rules, lifecycle thresholds, and audit retention. Changes to the bounded context's configuration surface follow the platform's deprecation policy. The bounded context is itself a module for the purposes of module configuration, and its configuration surface is governed by the same rules as any other module.
 
+### 5.7 v1 Implementation Packaging (ADR-007)
+
+Configuration and Feature Flags are related but distinct mechanisms, as established in Section 5.1. Configuration defines how supported behaviour operates — the continuous behavioural parameters that govern module execution. Feature Flags determine whether capabilities are exposed — the binary or near-binary switches that control capability visibility per tenant, user, or session. The two mechanisms are governed separately, stored separately, evaluated separately, and audited separately; they are not subsumed under a single domain.
+
+For v1 of the platform, feature-flag management may be exposed through the Configuration/Settings module (M15) surface as an implementation-packaging decision ratified by ADR-007. This packaging does not transfer Feature Flags domain ownership to Configuration. The Configuration bounded context (BC16) and the Feature Flags bounded context (BC18) remain conceptually separate: BC16 owns configuration storage, validation, layering, and audit; BC18 owns flag definition, evaluation, lifecycle, and audit. The v1 management-surface packaging inside M15 is an implementation choice that preserves BC18's independent contracts (Section 5.4 evaluation semantics, Section 5.5 governance boundaries), its own audit partition, its own lifecycle (Section 5.3), and its future extractability as a separate deployable unit.
+
+The distinction enforced at architectural review (Section 5.1) is unchanged by the v1 packaging decision. A capability that requires continuous parameterization remains a configuration key, not a feature flag, regardless of where its management surface is exposed; a capability that requires binary exposure remains a feature flag, not a configuration key, regardless of where its management surface is exposed. The packaging decision is reversible through a future ADR without altering the domain boundary between BC16 and BC18.
+
 ---
 
 ## 6. Configuration Storage

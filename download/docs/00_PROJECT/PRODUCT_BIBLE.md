@@ -75,10 +75,10 @@ The scope of this document is the entire Ibn Hayan Healthcare Operating System a
 
 This document holds authority over the following classes of downstream artefacts:
 
-- All product-line documents under `docs/02_PRODUCT/` through `docs/11_MODULES/`.
+- All product-line documents under `docs/02_PRODUCT/` through `docs/07_MODULES/`.
 - All architectural documents under `docs/01_ARCHITECTURE/`, including `SYSTEM_ARCHITECTURE.md`, `SOFTWARE_ARCHITECTURE.md`, `MODULE_ARCHITECTURE.md`, and `CONFIGURATION_ARCHITECTURE.md`.
 - All decision records under `docs/12_ADR/`, which must be consistent with the principles in Section 5 and Section 6.
-- All operational, security, integration, deployment, and future-direction documents under `docs/03_SECURITY/` through `docs/14_FUTURE/`.
+- All operational, security, integration, deployment, and future-direction documents under `docs/08_INTEGRATIONS/` through `docs/14_FUTURE/`.
 
 A downstream artefact that contradicts this document is, by definition, defective. The remedy is to either correct the downstream artefact or amend this document through the Product Council. Silent contradiction is not permitted.
 
@@ -1397,6 +1397,8 @@ Clinic types that are candidates for catalogue expansion but have not yet comple
 
 The module catalogue defines the platform's capability surface at the module level. Modules are the unit of composition, the unit of enablement, and the unit of dependency management. The catalogue is the canonical reference for what modules exist, what each module does, and how modules relate to each other. Module internals — contracts, dependencies, lifecycle, versioning — are defined in `MODULE_ARCHITECTURE.md`.
 
+Module-packaging decisions are ratified through Architecture Decision Records. ADR-007 governs Feature Flags packaging (BC18 remains conceptually separate from Configuration, with v1 management-surface packaging inside M15 as implementation only); ADR-008 ratifies that Reception is a workflow, not a module, and that no façade module category exists; ADR-009 ratifies that Subscriptions is a Billing capability under M09, not a separate module; ADR-010 ratifies that Inventory remains its own bounded context (BC09), that Pharmacy does not universally own Inventory, and that non-pharmacy inventory module packaging is deferred. These ADRs are referenced where relevant in the sections that follow.
+
 ### 19.2 Module Catalogue
 
 The platform's module catalogue comprises 19 modules organized into five categories matching the in-scope capability categories defined in Section 11.2.
@@ -1407,11 +1409,11 @@ The platform's module catalogue comprises 19 modules organized into five categor
 | M02 | Encounter | Clinical | Encounter management across outpatient, inpatient, emergency, telehealth |
 | M03 | Clinical Documentation | Clinical | Clinical notes, structured documentation, templates, assessments |
 | M04 | Orders & Results | Clinical | Order entry, result management, decision support, result reporting |
-| M05 | Pharmacy | Clinical | Medication management, dispensing, inventory, clinical pharmacy |
+| M05 | Pharmacy | Clinical | Medication management, dispensing, clinical pharmacy; integrates with BC09 for medication inventory (ADR-010) |
 | M06 | Scheduling | Operational | Appointment scheduling, resource scheduling, queue management |
 | M07 | Documents | Operational | Document management, document templates, document workflow |
 | M08 | Notifications | Operational | Notifications, reminders, alerts across channels |
-| M09 | Billing | Financial | Billing, claims, payments, insurance submission |
+| M09 | Billing | Financial | Billing, claims, payments, insurance submission, subscription billing (per ADR-009) |
 | M10 | Accounting | Financial | General ledger, accounts payable, accounts receivable, financial reporting |
 | M11 | CRM | Administrative | Patient relationships, outreach, marketing, communications |
 | M12 | HR | Administrative | Human resources, payroll, employee records, benefits |
@@ -1464,7 +1466,7 @@ Module lifecycle transitions are ratified by the Product Council. Transitions ar
 
 ### 19.6 Module Documentation
 
-Each module has dedicated documentation under `docs/11_MODULES/`. Module documentation includes:
+Each module has dedicated documentation under `docs/07_MODULES/`. Module documentation includes:
 
 - Module purpose and scope
 - Bounded context alignment
@@ -1930,7 +1932,7 @@ The accessibility strategy aligns with the product principles as follows:
 
 ### 27.1 Purpose of Security Philosophy
 
-The security philosophy defines how the platform protects patient data, customer data, operational integrity, and platform availability. Security is not a feature; it is a primitive that governs every architectural and operational decision. The philosophy is the basis for the platform's security architecture, defined in the security documentation under `docs/03_SECURITY/`, and is governed by Principle P-1 (Healthcare First), Belief Four (the patient as ultimate stakeholder), and Design Principle D-10 (Observable, Auditable, Accountable).
+The security philosophy defines how the platform protects patient data, customer data, operational integrity, and platform availability. Security is not a feature; it is a primitive that governs every architectural and operational decision. The philosophy is the basis for the platform's security architecture, defined in the security documentation under `docs/09_SECURITY/`, and is governed by Principle P-1 (Healthcare First), Belief Four (the patient as ultimate stakeholder), and Design Principle D-10 (Observable, Auditable, Accountable).
 
 ### 27.2 Security Posture
 
@@ -2061,7 +2063,7 @@ The offline strategy aligns with the product principles as follows:
 
 ### 29.1 Purpose of Integration Philosophy
 
-The integration philosophy defines how the platform connects to external systems — laboratory systems, imaging systems, pharmacy systems, insurance systems, government systems, medical devices, and other healthcare software. Integration is not a feature; it is a fundamental capability of an operating system. The philosophy is the basis for the integration architecture defined in `SYSTEM_ARCHITECTURE.md` and the integration documentation under `docs/04_INTEGRATIONS/`.
+The integration philosophy defines how the platform connects to external systems — laboratory systems, imaging systems, pharmacy systems, insurance systems, government systems, medical devices, and other healthcare software. Integration is not a feature; it is a fundamental capability of an operating system. The philosophy is the basis for the integration architecture defined in `SYSTEM_ARCHITECTURE.md` and the integration documentation under `docs/08_INTEGRATIONS/`.
 
 ### 29.2 Integration Principles
 

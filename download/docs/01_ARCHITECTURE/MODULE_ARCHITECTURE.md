@@ -81,7 +81,7 @@ Cross-references to `SYSTEM_ARCHITECTURE.md` use the form "SYSTEM_ARCHITECTURE S
 
 ### 1.5 Authority and Amendment
 
-This document is authoritative for module architecture. It prevails over downstream implementation documents — per-module specifications under `docs/11_MODULES/`, per-domain specifications, integration contracts — but is subordinate to `SYSTEM_ARCHITECTURE.md` and `PRODUCT_BIBLE.md`. A downstream document that contradicts this document is defective; the remedy is to correct the downstream document or to amend this document through an ADR.
+This document is authoritative for module architecture. It prevails over downstream implementation documents — per-module specifications under `docs/07_MODULES/`, per-domain specifications, integration contracts — but is subordinate to `SYSTEM_ARCHITECTURE.md` and `PRODUCT_BIBLE.md`. A downstream document that contradicts this document is defective; the remedy is to correct the downstream document or to amend this document through an ADR.
 
 Amendment is by Architecture Council ratification only. A proposed amendment is recorded as an ADR, reviewed by the Architecture Council, and ratified or rejected. Ratification is recorded in the ADR's status and in the platform's CHANGELOG, with an explicit version increment. Off-cycle amendment is permitted when a ratified ADR requires it; routine amendment occurs at the quarterly review cadence. Amendments that affect the module catalogue (Section 2) require additional ratification by the Product Council, because the module catalogue is jointly owned by architecture and product governance.
 
@@ -107,23 +107,23 @@ The platform's module catalogue comprises the 19 modules listed below, each alig
 | M02 | Encounter | Clinical | BC02 | Encounter management across outpatient, inpatient, emergency, telehealth |
 | M03 | Clinical Documentation | Clinical | BC03 | Clinical notes, structured documentation, templates, assessments |
 | M04 | Orders & Results | Clinical | BC04 | Diagnostic and therapeutic orders, result management, decision support |
-| M05 | Pharmacy | Clinical | BC05 + BC09 (pharmacy inventory) | Medication management, dispensing, inventory, clinical pharmacy |
+| M05 | Pharmacy | Clinical | BC05; consumes BC09 contracts for medication inventory (ADR-010) | Medication management, dispensing, clinical pharmacy; integrates with BC09 for medication inventory |
 | M06 | Scheduling | Operational | BC06 | Appointment scheduling, resource scheduling, queue management |
 | M07 | Documents | Operational | BC13 | Document management, document templates, document workflow |
 | M08 | Notifications | Operational | BC14 | Notifications, reminders, alerts across channels; consumed by all other modules |
-| M09 | Billing | Financial | BC07 | Billing, claims, payments, insurance submission |
+| M09 | Billing | Financial | BC07 | Billing, claims, payments, insurance submission, subscription billing (per ADR-009) |
 | M10 | Accounting | Financial | BC08 | General ledger, accounts payable, accounts receivable, financial reporting |
 | M11 | CRM | Administrative | BC11 | Patient relationships, outreach, marketing, communications |
 | M12 | HR | Administrative | BC12 | Human resources, payroll inputs, employee records, benefits |
 | M13 | Workforce | Administrative | BC10 | Workforce scheduling, time and attendance, credentials |
 | M14 | Identity & Access | Platform | BC15 | Authentication, authorization, identity, session management |
-| M15 | Configuration | Platform | BC16 + BC18 (feature flags) | Configuration management, validation, versioning, audit; flag lifecycle |
+| M15 | Configuration | Platform | BC16; hosts the BC18 management surface for v1 packaging only (ADR-007) | Configuration management, validation, versioning, audit; exposes Feature Flags management without owning BC18 |
 | M16 | Audit | Platform | BC17 | Audit trail, audit query, audit reporting |
 | M17 | Integration | Platform | Integration Layer surface (no dedicated BC) | Integration framework, connectors, partner surfaces, anticorruption layers |
 | M18 | Reporting | Platform | Reporting Layer surface (no dedicated BC) | Operational, analytical, regulatory reporting |
 | M19 | Localization | Platform | BC19 | Language, calendar, regulatory framework, clinical coding system adaptation |
 
-This catalogue is the architectural reference for module identity. Per-module specifications under `docs/11_MODULES/` must align with this catalogue; a per-module specification that introduces a module not present in this catalogue is defective, and a per-module specification that contradicts the alignment in this catalogue is defective.
+This catalogue is the architectural reference for module identity. Per-module specifications under `docs/07_MODULES/` must align with this catalogue; a per-module specification that introduces a module not present in this catalogue is defective, and a per-module specification that contradicts the alignment in this catalogue is defective.
 
 ### 2.3 Module Classification
 
@@ -143,7 +143,7 @@ The Platform category holds a special position: Platform modules are depended up
 
 The alignment between modules and bounded contexts is governed by SYSTEM_ARCHITECTURE Section 7.7. A bounded context is a domain responsibility area; a module is a deployable unit that implements one or more bounded contexts. The typical mapping is one-to-one, but the architecture permits one-to-many and many-to-one mappings where justified by deployment or evolution requirements.
 
-The current alignment has four documented deviations from strict one-to-one mapping. First, the Inventory bounded context (BC09) is implemented within the Pharmacy module (M05) for pharmacy inventory; non-pharmacy inventory is accommodated within M05's inventory capability surface or, where deployment requires, as a configuration of M05 rather than as a separate module. Second, the Feature Flags bounded context (BC18) is implemented within the Configuration module (M15), because feature flags are a configuration concern (SYSTEM_ARCHITECTURE Section 14.1) and separating them into a dedicated module would split a cohesive configuration surface across two modules. Third, the Integration module (M17) does not correspond to a dedicated bounded context; it is the deployable expression of the Integration Layer (SYSTEM_ARCHITECTURE Section 19) and hosts the anticorruption layers, adapters, and partner surfaces that connect the platform to external systems. Fourth, the Reporting module (M18) does not correspond to a dedicated bounded context; it is the deployable expression of the Reporting Layer (SYSTEM_ARCHITECTURE Section 28) and consumes read models projected from other modules' state.
+The current alignment has documented deviations from strict one-to-one mapping, each ratified by ADR. First, the Inventory bounded context (BC09) remains its own bounded context (ADR-010); medication inventory integrates tightly with the Pharmacy module (M05) for pharmacy-specific inventory flows, while non-pharmacy inventory module packaging is deferred and no Inventory M-code is assigned. The Pharmacy module does not universally own the Inventory context. Second, the Feature Flags bounded context (BC18) remains conceptually separate from Configuration (ADR-007); for v1, its management surface is packaged inside the Configuration module (M15) as an implementation decision, not a domain ownership transfer. BC18's independent contracts, audit semantics, and future extractability are preserved, and the flag lifecycle remains owned by BC18. Third, the Integration module (M17) does not correspond to a dedicated bounded context; it is the deployable expression of the Integration Layer (SYSTEM_ARCHITECTURE Section 19) and hosts the anticorruption layers, adapters, and partner surfaces that connect the platform to external systems. Fourth, the Reporting module (M18) does not correspond to a dedicated bounded context; it is the deployable expression of the Reporting Layer (SYSTEM_ARCHITECTURE Section 28) and consumes read models projected from other modules' state.
 
 These deviations are stable and documented. New deviations require ADR ratification, with the rationale explicit, the alternatives considered recorded, and the transition plan documented (Principle P8). A deviation that emerges without ratification is a defect and is corrected either by aligning the module to the bounded context or by ratifying the deviation through an ADR.
 

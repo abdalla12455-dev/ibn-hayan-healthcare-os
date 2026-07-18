@@ -72,11 +72,11 @@ The scope of this document is the entire Ibn Hayan platform as an architectural 
 
 - `SOFTWARE_ARCHITECTURE.md`, `MODULE_ARCHITECTURE.md`, `CONFIGURATION_ARCHITECTURE.md`, `CODING_STANDARDS.md`, `FOLDER_STRUCTURE.md` — these elaborate the system architecture into implementation-grade specifications.
 - All Architecture Decision Records under `docs/12_ADR/` — these ratify specific architectural decisions and must be consistent with the principles in Section 4.
-- All module specifications under `docs/11_MODULES/` — these define module internals and must align with the module architecture in Section 13.
-- All security documents under `docs/03_SECURITY/` — these define security controls and must align with the security architecture in Section 20.
-- All integration documents under `docs/04_INTEGRATIONS/` — these define integration contracts and must align with the integration architecture in Section 19.
-- All database documents under `docs/06_DATABASE/` — these define data architecture and must align with the bounded contexts in Section 7.
-- All deployment documents under `docs/09_DEPLOYMENT/` — these define deployment models and must align with the deployment models in Section 23.
+- All module specifications under `docs/07_MODULES/` — these define module internals and must align with the module architecture in Section 13.
+- All security documents under `docs/09_SECURITY/` — these define security controls and must align with the security architecture in Section 20.
+- All integration documents under `docs/08_INTEGRATIONS/` — these define integration contracts and must align with the integration architecture in Section 19.
+- All database documents under `docs/04_DATABASE/` — these define data architecture and must align with the bounded contexts in Section 7.
+- All deployment documents under `docs/13_DEPLOYMENT/` — these define deployment models and must align with the deployment models in Section 23.
 
 A downstream artefact that contradicts this document is, by definition, defective. The remedy is to either correct the downstream artefact or amend this document through an ADR. Silent contradiction is not permitted.
 
@@ -716,9 +716,9 @@ The platform is organized into 19 bounded contexts. The contexts are stable; the
 | BC02 | Encounter | Clinical | Encounter management across outpatient, inpatient, emergency, telehealth |
 | BC03 | Clinical Documentation | Clinical | Clinical notes, structured documentation, templates, assessments |
 | BC04 | Orders & Results | Clinical | Order entry, result management, decision support, result reporting |
-| BC05 | Pharmacy | Clinical | Medication management, dispensing, inventory, clinical pharmacy |
+| BC05 | Pharmacy | Clinical | Medication management, dispensing, clinical pharmacy |
 | BC06 | Scheduling | Operational | Appointment scheduling, resource scheduling, queue management |
-| BC07 | Billing | Financial | Billing, claims, payments, insurance submission |
+| BC07 | Billing | Financial | Billing, claims, payments, insurance submission, subscription billing (per ADR-009) |
 | BC08 | Accounting | Financial | General ledger, accounts payable, accounts receivable, financial reporting |
 | BC09 | Inventory | Operational | Inventory management, supply chain, stock movement |
 | BC10 | Workforce | Administrative | Workforce scheduling, time and attendance, credentials |
@@ -770,7 +770,7 @@ New contexts are added only when an enduring domain responsibility is identified
 
 Bounded contexts and modules (Section 13) are related but distinct. A bounded context is a domain responsibility area; a module is a deployable unit that implements one or more bounded contexts. In Ibn Hayan, the typical mapping is one-to-one — one module implements one bounded context — but the architecture allows for one-to-many and many-to-one mappings where justified by deployment or evolution requirements.
 
-The current module catalogue (Section 19 of `PRODUCT_BIBLE.md`) is aligned one-to-one with the bounded context catalogue, with two exceptions: the Inventory context (BC09) is implemented within the Pharmacy module (M05) for pharmacy inventory and as a separate module for non-pharmacy inventory; and the Notifications context (BC14) is implemented as a dedicated module (M08) with consumption by all other modules.
+The current module catalogue (Section 19 of `PRODUCT_BIBLE.md`) is aligned one-to-one with the bounded context catalogue in the typical case. Documented deviations are ratified by ADR. The Inventory bounded context (BC09) remains its own context (ADR-010); medication inventory integrates tightly with the Pharmacy module (M05) for pharmacy-specific inventory flows, while non-pharmacy inventory module packaging is deferred and no Inventory M-code is assigned. The Feature Flags bounded context (BC18) remains conceptually separate from Configuration (ADR-007); for v1 its management surface is packaged inside the Configuration/Settings module (M15) as an implementation decision, not a domain ownership transfer, preserving BC18's independent contracts, audit semantics, and future extractability. The Notifications bounded context (BC14) maps normally to the Notifications module (M08) and is consumed broadly by other modules through its published contract — this broad consumption is the standard integration pattern for a cross-cutting operational capability, not a mapping exception. The Integration module (M17) and the Reporting module (M18) do not correspond to dedicated bounded contexts; they are the deployable expressions of the Integration Layer (Section 19) and the Reporting Layer (Section 28) respectively.
 
 ### 7.8 Context Evolution
 
@@ -1268,6 +1268,10 @@ Feature flags and configuration are distinct architectural concerns:
 
 A capability that requires continuous parameterization is a configuration key, not a feature flag. A capability that requires binary exposure is a feature flag, not a configuration key. The distinction is enforced at architectural review.
 
+### 14.7 v1 Implementation Packaging (ADR-007)
+
+BC18 Feature Flags remains conceptually separate from the Configuration bounded context (BC16). For v1 of the platform, feature-flag management may be packaged inside the Configuration/Settings module (M15) surface as an implementation decision ratified by ADR-007. This packaging does not transfer Feature Flags domain ownership to Configuration. BC18 retains its own bounded context, its own contracts, its own audit semantics, and its own lifecycle (Section 14.3); the v1 management-surface packaging inside M15 preserves BC18's future extractability as a separate deployable unit. The distinction enforced at architectural review (Section 14.6) is unchanged by the v1 packaging decision.
+
 ---
 
 ## 15. Configuration Strategy
@@ -1527,7 +1531,7 @@ The relationship between events and audit is governed by Principle P13 (Auditabi
 
 ### 19.1 Purpose of This Section
 
-This section defines the platform's integration architecture. Integration is a first-class architectural concern that connects the platform to external systems. The detailed treatment of integration contracts is in `docs/04_INTEGRATIONS/`; this section defines the architectural commitments that govern integration.
+This section defines the platform's integration architecture. Integration is a first-class architectural concern that connects the platform to external systems. The detailed treatment of integration contracts is in `docs/08_INTEGRATIONS/`; this section defines the architectural commitments that govern integration.
 
 ### 19.2 Integration Patterns
 
@@ -1585,7 +1589,7 @@ Integration reliability is critical because external systems are outside the pla
 
 ### 20.1 Purpose of This Section
 
-This section defines the platform's security architecture. Security is a primitive (Principle P1, Principle P13) that governs every architectural and operational decision. The detailed treatment of security controls is in `docs/03_SECURITY/`; this section defines the architectural commitments that govern security.
+This section defines the platform's security architecture. Security is a primitive (Principle P1, Principle P13) that governs every architectural and operational decision. The detailed treatment of security controls is in `docs/09_SECURITY/`; this section defines the architectural commitments that govern security.
 
 ### 20.2 Security Posture
 
