@@ -55,3 +55,47 @@ Stage Summary:
 - Cross-references: All 11 unique Section X.X references verified to point to correct renumbered targets
 - Document remains the permanent source of truth for the entire Ibn Hayan project, now with strengthened product identity, explicit competitive positioning, and reusable terminology across the documentation framework.
 
+---
+Task ID: SYSTEM_ARCHITECTURE_v1
+Agent: Main Agent (Chief Software Architect role)
+Task: Fully write docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md — the definitive architectural reference for the entire Ibn Hayan Healthcare Operating System. 30 mandated sections (Architecture Overview through Future Evolution Strategy). Professional English for senior software architects. No marketing, no AI filler, no implementation details, no code, no APIs, no database tables, no UI components, technology-agnostic wherever possible. Must read like the official architecture specification of a world-class Healthcare OS viable for the next decade.
+
+Work Log:
+- Reviewed existing stub at /home/z/my-project/download/docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md (65 lines, 15 empty placeholder sections) — overwritten completely with the user's mandated 30-section structure.
+- Reviewed worklog (PRODUCT_BIBLE_v1 and PRODUCT_BIBLE_v1_1 records) for product posture alignment — confirmed the architecture must serve: multi-tenant SaaS, 4 editions, 30 clinic types, 17 modules, 14 user roles, offline-first operation, configuration-driven behavior, decade horizon.
+- Authored full document in 3 write/edit passes:
+  - Pass 1 (Write): Header + TOC + Sections 1–10 (Architecture Overview, Architectural Vision, System Philosophy, Architectural Principles, High-Level Architecture with Mermaid diagram, Platform Layers, Domain-Driven Architecture, Configuration-Driven Architecture, Modular Architecture, Multi-Tenant Architecture).
+  - Pass 2 (Edit): Sections 11–20 (Organization Hierarchy, Clinic Hierarchy, Module Architecture, Feature Flag Strategy, Configuration Strategy, Workflow Engine Philosophy, State Management Philosophy, Event-Driven Concepts, Integration Architecture, Security Architecture).
+  - Pass 3 (Edit): Sections 21–30 (Scalability Strategy, Extensibility Strategy, Deployment Models, Offline-First Architecture, Synchronization Strategy, Localization Architecture, Audit Architecture, Reporting Architecture, AI Readiness, Future Evolution Strategy).
+- Adhered to all user constraints: zero implementation details, zero code, zero APIs, zero database tables, zero UI components, zero framework mentions (Mermaid is for diagrams, not a framework commitment).
+- Section 5.2 contains a Mermaid flowchart diagram showing all 8 platform layers (Experience, Edge, Orchestration, Domain, Platform Services, Integration, Data, Offline) with their internal components and dependency direction — the single load-bearing architectural diagram of the document.
+- Architectural principles (Section 4) define 18 numbered principles (P1–P18) with explicit precedence: P18 (healthcare safety) overrides all others; P5 (consistency) and P13 (auditability) override P9 (reversibility) and P6 (loose coupling) when clinical/financial correctness is at stake.
+- Bounded contexts (Section 7) define 19 contexts covering Patient, Encounter, Clinical Documentation, Orders & Results, Scheduling, Billing, Inventory, Pharmacy, Workforce, CRM, Accounting, HR, Documents, Notifications, plus 5 platform service contexts (Identity & Access, Configuration, Audit, Feature Flags, Localization).
+- Configuration strategy (Section 15) defines 7 precedence layers (platform default → edition → tenant → facility → department → care team → user → session) and 5 validation rule categories (Structural, Referential, Semantic, Contextual, Regulatory).
+- Multi-tenancy (Section 10) defines 3 isolation levels (Logical, Logical + Dedicated Compute, Physical) and 7 tenant lifecycle stages.
+- Deployment models (Section 23) define 5 models (Multi-Tenant SaaS, Single-Tenant Dedicated, Hybrid, Air-Gapped, Region-Specific) — all running the same multi-tenant code paths.
+- Synchronization (Section 25) defines 3 conflict resolution strategies (Last-Write-Wins, Field-Level Merge, Manual Resolution).
+- Reporting (Section 28) defines 3 reporting categories (Operational, Analytical, Regulatory) with distinct latency requirements and data sources.
+- Document explicitly aligns with and constrains all downstream technical documents (SOFTWARE_ARCHITECTURE, MODULE_ARCHITECTURE, CONFIGURATION_ARCHITECTURE, CODING_STANDARDS, FOLDER_STRUCTURE, all ADRs, SECURITY/*, INTEGRATIONS/*, DATABASE/*).
+- Final validation:
+  - Total lines: 1,717
+  - H2 sections: 30 (matches user-mandated list exactly, in order)
+  - H3 subsections: 207 (every H2 expanded into multiple H3 subsections)
+  - Mermaid diagrams: 1 (high-level architecture in Section 5.2)
+  - Table rows: 219 (rich tabular content across principles, layers, contexts, isolation levels, lifecycle stages, flag types, conflict strategies, reporting categories, deployment models, etc.)
+  - Forbidden-term scan: zero actual matches. Three flagged terms ("React", "Rust", "AWS") were all false-positive substrings of legitimate words ("react" the verb, "trust"/"trusted", "draws"/"laws"). All mentions of "code", "source code", "schema" are at the architectural-decision level (explicitly forbidding code changes/customization, distinguishing configuration from code, declarative configuration/event schemas as data) — consistent with PRODUCT_BIBLE posture and user's mandate.
+  - Document ends cleanly at Section 30.9 "The Decade Commitment" — no artificial end-of-document markers.
+- Version metadata: Authoritative v1.0.0, owned by Office of the Chief Software Architect, quarterly review cadence with off-cycle revision when an ADR is ratified.
+
+Stage Summary:
+- File path: /home/z/my-project/download/docs/01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md
+- Total lines: 1,717
+- Top-level sections: 30 (matches user-mandated list exactly, in order)
+- Subsections: 207 (every H2 expanded into multiple H3 subsections)
+- Tables: 30+ tables across principles, layers, bounded contexts, isolation levels, lifecycle stages, flag types, configuration categories, validation rules, integration patterns, healthcare standards, deployment models, conflict strategies, reporting categories, scaling dimensions
+- Mermaid diagram: 1 comprehensive high-level architecture diagram (Section 5.2) showing all 8 platform layers, internal components, and dependency direction
+- Style: Professional enterprise architecture specification, no marketing language, no AI filler, every paragraph defines an architectural decision or principle. Reads like the official architecture specification of a world-class Healthcare OS.
+- Authority posture: Authoritative v1.0.0, owned by Office of the Chief Software Architect, quarterly review cadence, ADRs are the only amendment mechanism, ad-hoc deviations are defects.
+- Cross-references: Document explicitly references and constrains all downstream architectural documents (SOFTWARE_ARCHITECTURE, MODULE_ARCHITECTURE, CONFIGURATION_ARCHITECTURE, CODING_STANDARDS, FOLDER_STRUCTURE, ADRs, SECURITY/*, INTEGRATIONS/*, DATABASE/*) and aligns upward with PRODUCT_BIBLE.
+- Document is ready to serve as the canonical architectural reference that all future technical documents in the Ibn Hayan framework must align with.
+
