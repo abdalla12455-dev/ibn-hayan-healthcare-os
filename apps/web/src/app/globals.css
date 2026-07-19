@@ -1,99 +1,225 @@
 @import "tailwindcss";
 
 /*
- * Ibn Hayan Healthcare Operating System — Web Styling Foundation
+ * Ibn Hayan Healthcare Operating System — Premium Design System
  *
- * The design system is intentionally restrained: a single neutral palette
- * with one accent colour, a clear typographic scale, and explicit support
- * for both left-to-right (English) and right-to-left (Arabic) layout.
- * All colour pairs meet WCAG AA contrast ratios at typical body sizes.
+ * A restrained, mature visual language for an enterprise healthcare
+ * product. Deep ink/navy as the structural colour, warm ivory
+ * backgrounds, muted sage as a healthcare-supporting accent, and a
+ * restrained bronze as a premium highlight. The system is built on
+ * project-owned tokens — no scattered colour values across components.
+ *
+ * The palette meets WCAG AA contrast ratios at typical body sizes for
+ * both LTR (English) and RTL (Arabic) surfaces.
  */
 
 :root {
-  /* Neutral palette (slate-based, AAA on body text where possible) */
-  --background: #ffffff;
-  --surface: #f8fafc;
-  --surface-border: #e2e8f0;
-  --foreground: #0f172a;
-  --foreground-muted: #475569;
+  /* ----------------------------------------------------------------- */
+  /* Surface palette                                                   */
+  /* ----------------------------------------------------------------- */
 
-  /* Accent palette — healthcare-native teal */
-  --accent: #0f766e;
+  /* Warm ivory page background — soft, calm, premium */
+  --background: #f5efe4;
+
+  /* White surface for primary cards and panels */
+  --surface: #ffffff;
+
+  /* Elevated surface for the most prominent panels (uses shadow) */
+  --surface-elevated: #ffffff;
+
+  /* Muted surface for secondary panels and table rows */
+  --surface-muted: #efe8d8;
+
+  /* ----------------------------------------------------------------- */
+  /* Text palette                                                      */
+  /* ----------------------------------------------------------------- */
+
+  /* Deep ink/navy — the structural text colour */
+  --text-primary: #11203a;
+
+  /* Muted secondary text for labels, captions, descriptions */
+  --text-secondary: #4a5870;
+
+  /* Even more muted text for fine print */
+  --text-muted: #6b7894;
+
+  /* Inverse text on dark surfaces */
+  --text-inverse: #f5efe4;
+
+  /* ----------------------------------------------------------------- */
+  /* Border palette                                                    */
+  /* ----------------------------------------------------------------- */
+
+  /* Subtle warm border for card edges and dividers */
+  --border: #d9d2c2;
+
+  /* Stronger border for interactive emphasis */
+  --border-strong: #b6ad99;
+
+  /* ----------------------------------------------------------------- */
+  /* Brand palette                                                     */
+  /* ----------------------------------------------------------------- */
+
+  /* Deep ink navy as the structural / primary action colour */
+  --primary: #11203a;
+  --primary-hover: #1b2e4f;
+  --primary-foreground: #f5efe4;
+
+  /* Restrained warm bronze as the premium accent */
+  --accent: #8a6a2f;
+  --accent-hover: #a38241;
   --accent-foreground: #ffffff;
-  --accent-muted: #ccfbf1;
+  --accent-muted: #e8dec7;
 
-  /* Status */
-  --status-ok: #15803d;
-  --status-ok-muted: #dcfce7;
+  /* Muted sage as the healthcare-supporting colour */
+  --sage: #4f7a5a;
+  --sage-muted: #d8e2d4;
+  --sage-foreground: #ffffff;
 
-  /* Typography */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
-  --font-arabic: "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  /* ----------------------------------------------------------------- */
+  /* Status palette                                                    */
+  /* ----------------------------------------------------------------- */
 
-  /* Layout */
-  --page-max-width: 64rem;
-  --page-padding-x: 1.25rem;
+  --success: #4f7a5a;
+  --success-muted: #d8e2d4;
+
+  --danger: #9c3a3a;
+  --danger-muted: #f1d9d9;
+
+  --warning: #b58536;
+  --warning-muted: #f0e2c2;
+
+  /* ----------------------------------------------------------------- */
+  /* Focus + shadows                                                   */
+  /* ----------------------------------------------------------------- */
+
+  --focus-ring: #11203a;
+
+  --shadow-sm: 0 1px 2px rgba(17, 32, 58, 0.04),
+    0 1px 1px rgba(17, 32, 58, 0.03);
+  --shadow-md: 0 4px 12px rgba(17, 32, 58, 0.06),
+    0 2px 4px rgba(17, 32, 58, 0.04);
+  --shadow-lg: 0 16px 32px rgba(17, 32, 58, 0.08),
+    0 4px 12px rgba(17, 32, 58, 0.05);
+
+  /* ----------------------------------------------------------------- */
+  /* Radius scale                                                      */
+  /* ----------------------------------------------------------------- */
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+
+  /* ----------------------------------------------------------------- */
+  /* Typography                                                        */
+  /* ----------------------------------------------------------------- */
+
+  /* Latin typography — Inter with strong system fallbacks */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+
+  /* Arabic typography — Tajawal / Noto Sans Arabic with system fallbacks */
+  --font-arabic: "Tajawal", "IBM Plex Sans Arabic", "Noto Sans Arabic",
+    "Segoe UI", Tahoma, "Geeza Pro", sans-serif;
+
+  /* Editorial serif for hero headings (optional, used sparingly) */
+  --font-serif: "Source Serif 4", "Source Serif Pro", Georgia, "Times New Roman",
+    serif;
+
+  /* ----------------------------------------------------------------- */
+  /* Layout                                                            */
+  /* ----------------------------------------------------------------- */
+
+  --page-max-width: 1200px;
+  --page-padding-x: 1.5rem;
   --page-padding-y: 2.5rem;
+
+  /* ----------------------------------------------------------------- */
+  /* Spacing scale (used by components for consistent rhythm)          */
+  /* ----------------------------------------------------------------- */
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
 }
 
+/*
+ * The premium healthcare product is intentionally a light, calm surface.
+ * Dark-mode overrides are not applied — the brand is presented
+ * consistently regardless of OS preference.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b1220;
-    --surface: #111827;
-    --surface-border: #1f2937;
-    --foreground: #e5e7eb;
-    --foreground-muted: #94a3b8;
-    --accent: #5eead4;
-    --accent-foreground: #042f2e;
-    --accent-muted: #134e4a;
-    --status-ok: #4ade80;
-    --status-ok-muted: #052e16;
+    /* No overrides — keep the light premium surface. */
   }
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-foreground: var(--text-primary);
   --color-surface: var(--surface);
-  --color-surface-border: var(--surface-border);
-  --color-foreground-muted: var(--foreground-muted);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --color-accent-muted: var(--accent-muted);
-  --color-status-ok: var(--status-ok);
-  --color-status-ok-muted: var(--status-ok-muted);
+  --color-sage: var(--sage);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
   --font-sans: var(--font-sans);
   --font-arabic: var(--font-arabic);
+  --font-serif: var(--font-serif);
 }
 
 html,
 body {
   background: var(--background);
-  color: var(--foreground);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 16px;
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* RTL adjustments apply automatically when [dir="rtl"] is set on a subtree */
+/*
+ * Language-specific typography. RTL (Arabic) uses the Arabic font
+ * family; LTR (English) uses the Latin font family. The direction
+ * attribute on the root element or any subtree triggers the switch.
+ */
 [dir="rtl"] {
   font-family: var(--font-arabic);
-  text-align: right;
 }
 
 [dir="ltr"] {
-  text-align: left;
+  font-family: var(--font-sans);
 }
 
-/* Visible keyboard focus styles for all interactive elements */
+/*
+ * Visible keyboard focus styles for all interactive elements.
+ * Uses the focus-ring token so the colour stays consistent.
+ */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
-/* Honour reduced-motion preferences globally */
+/*
+ * Honour reduced-motion preferences globally. No component-specific
+ * animations are used; this rule ensures any incidental transitions
+ * are suppressed when the user prefers reduced motion.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -103,4 +229,1247 @@ body {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/*
+ * Subtle scrollbar styling for the premium feel. Only applied to
+ * webkit-based browsers; Firefox uses its default scrollbar.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* ================================================================= */
+/* Component styles                                                  */
+/* ================================================================= */
+
+/*
+ * The component styles below consume only the design tokens defined
+ * at the top of this file. No arbitrary colour values are scattered
+ * through components. Every component uses the project-owned radius,
+ * shadow, border, and spacing tokens so the visual system stays
+ * consistent.
+ *
+ * The styles are written in plain CSS (not Tailwind utilities) for
+ * the project-owned presentation components so they can be reasoned
+ * about independently and so the design tokens stay centralised.
+ * Tailwind utilities are still used for one-off layout adjustments.
+ */
+
+/* ----------------------------------------------------------------- */
+/* Brand mark                                                        */
+/* ----------------------------------------------------------------- */
+
+.ih-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.ih-brand__monogram {
+  display: block;
+  flex-shrink: 0;
+}
+
+.ih-brand__wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.ih-brand__name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.ih-brand__tagline {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+/* ----------------------------------------------------------------- */
+/* Language switch                                                   */
+/* ----------------------------------------------------------------- */
+
+.ih-language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ih-language-switch:hover {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+}
+
+.ih-language-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ih-language-switch svg {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- */
+/* Landing header                                                    */
+/* ----------------------------------------------------------------- */
+
+.ih-header {
+  width: 100%;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+}
+
+.ih-header__inner {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 1rem var(--page-padding-x);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* ----------------------------------------------------------------- */
+/* Landing main container                                            */
+/* ----------------------------------------------------------------- */
+
+.ih-landing-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ----------------------------------------------------------------- */
+/* Hero                                                              */
+/* ----------------------------------------------------------------- */
+
+.ih-hero {
+  width: 100%;
+  background: var(--background);
+  position: relative;
+  overflow: hidden;
+}
+
+.ih-hero__inner {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 3.5rem var(--page-padding-x) 4rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3rem;
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .ih-hero__inner {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 4rem;
+    padding: 5rem var(--page-padding-x) 6rem;
+  }
+}
+
+.ih-hero__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: relative;
+}
+
+.ih-hero__motif {
+  position: absolute;
+  top: -1.5rem;
+  inset-inline-end: -0.5rem;
+  width: 220px;
+  height: 220px;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@media (min-width: 1024px) {
+  .ih-hero__motif {
+    width: 280px;
+    height: 280px;
+    top: -2rem;
+    inset-inline-end: 1rem;
+  }
+}
+
+.ih-hero__text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ih-hero__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.ih-hero__title {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin: 0;
+  max-width: 32rem;
+}
+
+@media (min-width: 768px) {
+  .ih-hero__title {
+    font-size: 2.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ih-hero__title {
+    font-size: 2.85rem;
+  }
+}
+
+.ih-hero__body {
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 36rem;
+}
+
+/* ----------------------------------------------------------------- */
+/* Value grid                                                        */
+/* ----------------------------------------------------------------- */
+
+.ih-value-grid {
+  list-style: none;
+  padding: 0;
+  margin: 1.25rem 0 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .ih-value-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+}
+
+.ih-value-grid__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ih-value-grid__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--sage-muted);
+  color: var(--sage);
+}
+
+.ih-value-grid__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.ih-value-grid__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ih-value-grid__body {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- */
+/* Login panel                                                       */
+/* ----------------------------------------------------------------- */
+
+.ih-login {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 1.75rem;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .ih-login {
+    padding: 2.25rem;
+  }
+}
+
+.ih-login__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.ih-login__title {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ih-login__body {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.ih-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+}
+
+.ih-login__submit {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.ih-login__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.ih-login__note-icon {
+  flex-shrink: 0;
+  color: var(--sage);
+  margin-top: 0.0625rem;
+}
+
+/* ----------------------------------------------------------------- */
+/* UI primitives — Button                                            */
+/* ----------------------------------------------------------------- */
+
+.ih-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, box-shadow 0.15s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ih-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ih-button--primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+
+.ih-button--primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.ih-button--accent {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-color: var(--accent);
+}
+
+.ih-button--accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.ih-button--ghost {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.ih-button--ghost:hover:not(:disabled) {
+  background: var(--surface-muted);
+  border-color: var(--text-secondary);
+}
+
+.ih-button--danger {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+}
+
+.ih-button--danger:hover:not(:disabled) {
+  background: #803030;
+  border-color: #803030;
+}
+
+/* ----------------------------------------------------------------- */
+/* UI primitives — Input                                             */
+/* ----------------------------------------------------------------- */
+
+.ih-input {
+  display: block;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.ih-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ih-input:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+}
+
+.ih-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(17, 32, 58, 0.1);
+}
+
+.ih-input:disabled {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.ih-input--invalid {
+  border-color: var(--danger);
+  background: var(--danger-muted);
+}
+
+.ih-input--invalid:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(156, 58, 58, 0.15);
+}
+
+/* ----------------------------------------------------------------- */
+/* UI primitives — Field                                             */
+/* ----------------------------------------------------------------- */
+
+.ih-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.ih-field__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ih-field__help {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.ih-field__error {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--danger);
+  margin: 0;
+}
+
+/* ----------------------------------------------------------------- */
+/* UI primitives — Surface                                           */
+/* ----------------------------------------------------------------- */
+
+.ih-surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+}
+
+.ih-surface--elevated {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 1.75rem;
+}
+
+.ih-surface--muted {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+}
+
+/* ----------------------------------------------------------------- */
+/* UI primitives — StatusMessage                                     */
+/* ----------------------------------------------------------------- */
+
+.ih-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ih-status--error {
+  background: var(--danger-muted);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-color: rgba(156, 58, 58, 0.3);
+}
+
+.ih-status--success {
+  background: var(--success-muted);
+  color: var(--success);
+  border: 1px solid rgba(79, 122, 90, 0.3);
+}
+
+.ih-status--info {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+/* ----------------------------------------------------------------- */
+/* Public sections (operational clarity, security, growth)           */
+/* ----------------------------------------------------------------- */
+
+.ih-section {
+  width: 100%;
+  padding: 3.5rem var(--page-padding-x);
+  border-top: 1px solid var(--border);
+}
+
+@media (min-width: 768px) {
+  .ih-section {
+    padding: 5rem var(--page-padding-x);
+  }
+}
+
+.ih-section--operational {
+  background: var(--background);
+}
+
+.ih-section--security {
+  background: var(--surface);
+}
+
+.ih-section--growth {
+  background: var(--background);
+}
+
+.ih-section__inner {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.ih-section__inner--split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2.5rem;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .ih-section__inner--split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4rem;
+  }
+}
+
+.ih-section__inner--reverse {
+  direction: rtl;
+}
+
+.ih-section__inner--reverse > * {
+  direction: ltr;
+}
+
+[dir="rtl"] .ih-section__inner--reverse {
+  direction: ltr;
+}
+
+[dir="rtl"] .ih-section__inner--reverse > * {
+  direction: rtl;
+}
+
+@media (min-width: 1024px) {
+  .ih-section--security .ih-section__inner--split {
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+  .ih-section--growth .ih-section__inner--split {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  }
+}
+
+.ih-section__visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--surface-muted);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+
+.ih-section__visual-svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.ih-section__content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ih-section__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ih-section__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.ih-section__title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .ih-section__title {
+    font-size: 2.125rem;
+  }
+}
+
+.ih-section__body {
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 38rem;
+}
+
+.ih-section__points {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .ih-section__points {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.25rem;
+  }
+}
+
+.ih-section__points--compact {
+  grid-template-columns: 1fr;
+  gap: 0.875rem;
+}
+
+@media (min-width: 640px) {
+  .ih-section__points--compact {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ih-section__point {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ih-section--security .ih-section__point {
+  background: var(--background);
+}
+
+.ih-section__point-index {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-family: var(--font-sans);
+  padding-top: 0.125rem;
+  min-width: 1.5rem;
+}
+
+.ih-section__point-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.ih-section__point-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ih-section__point-body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ----------------------------------------------------------------- */
+/* Footer                                                            */
+/* ----------------------------------------------------------------- */
+
+.ih-footer {
+  width: 100%;
+  background: var(--primary);
+  color: var(--text-inverse);
+  padding: 2.5rem var(--page-padding-x);
+  margin-top: auto;
+}
+
+.ih-footer__inner {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+@media (min-width: 768px) {
+  .ih-footer__inner {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.ih-footer__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ih-footer__brand .ih-brand__name {
+  color: var(--text-inverse);
+}
+
+.ih-footer__brand .ih-brand__tagline {
+  color: rgba(245, 239, 228, 0.7);
+}
+
+.ih-footer__tagline {
+  font-size: 0.8125rem;
+  color: rgba(245, 239, 228, 0.7);
+  margin: 0;
+}
+
+.ih-footer__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+@media (min-width: 768px) {
+  .ih-footer__meta {
+    flex-direction: row;
+    align-items: center;
+    gap: 1.5rem;
+  }
+}
+
+.ih-footer__copyright {
+  font-size: 0.8125rem;
+  color: rgba(245, 239, 228, 0.7);
+  margin: 0;
+}
+
+.ih-footer .ih-language-switch {
+  background: rgba(245, 239, 228, 0.08);
+  border-color: rgba(245, 239, 228, 0.2);
+  color: var(--text-inverse);
+}
+
+.ih-footer .ih-language-switch:hover {
+  background: rgba(245, 239, 228, 0.15);
+  border-color: rgba(245, 239, 228, 0.4);
+}
+
+.ih-footer .ih-language-switch svg {
+  color: rgba(245, 239, 228, 0.7);
+}
+
+/* ================================================================= */
+/* Dashboard styles                                                  */
+/* ================================================================= */
+
+.ih-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--background);
+}
+
+.ih-app__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.ih-app__header-inner {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0.75rem var(--page-padding-x);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ih-app__header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.ih-app__header-context {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+@media (min-width: 768px) {
+  .ih-app__header-context {
+    display: inline-flex;
+  }
+}
+
+.ih-app__header-context-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sage);
+  flex-shrink: 0;
+}
+
+.ih-app__header-context-dot--none {
+  background: var(--text-muted);
+}
+
+.ih-app__header-context-label {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ih-app__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ih-app__main {
+  flex: 1;
+  max-width: var(--page-max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem var(--page-padding-x);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ih-app__page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ih-app__page-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ih-app__page-subtitle {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.ih-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ih-card--elevated {
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.ih-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ih-card__title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ih-card__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0;
+}
+
+.ih-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  background: var(--surface-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.ih-empty-state__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ih-empty-state__body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.ih-context-current {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 1rem 1.125rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ih-context-current__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.ih-context-current__value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ih-context-current__meta {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.ih-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ih-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ih-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.ih-option--selected {
+  border-color: var(--primary);
+  border-width: 2px;
+  padding: calc(0.875rem - 1px) calc(1rem - 1px);
+  background: var(--background);
+}
+
+.ih-option__radio {
+  margin-top: 0.125rem;
+  accent-color: var(--primary);
+}
+
+.ih-option__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.ih-option__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ih-option__slug {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.ih-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.ih-account-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.625rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .ih-account-list {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ih-account-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+}
+
+.ih-account-item__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.ih-account-item__value {
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  margin: 0;
+  word-break: break-word;
+}
+
+.ih-memberships {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ih-membership {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.ih-membership__name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ih-membership__meta {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.ih-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--success-muted);
+  color: var(--success);
+  border: 1px solid rgba(79, 122, 90, 0.25);
+  align-self: flex-start;
+}
+
+.ih-status-chip--idle {
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+.ih-app__loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 1.5rem;
+}
+
+/*
+ * Visually hidden — content that is exposed to assistive technology
+ * but not rendered visually. Used for screen-reader-only labels and
+ * for the loading-region text on the dashboard initial mount.
+ */
+.ih-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }

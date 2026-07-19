@@ -2,33 +2,32 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './page';
+import { LanguageProvider } from '@/components/i18n/language-context';
 
 /**
- * Tests for the authenticated dashboard shell.
+ * Tests for the premium authenticated dashboard shell (sixth canonical batch).
  *
- * These tests verify scenarios from the fourth canonical batch
- * specification:
+ * Verifies scenarios:
+ * 17. Dashboard uses the same visual tokens as the landing page.
+ * 18. Tenant selection and clearing still work.
+ * 19. Logout still works.
+ * 20. No localStorage, sessionStorage, IndexedDB, or readable auth cookie
+ *     is used.
+ *
+ * Also preserves the existing authentication and Tenant-context
+ * behaviour from the fourth and fifth canonical batches:
  * - Dashboard displays the authenticated user.
- * - Dashboard displays memberships.
- * - Unauthenticated dashboard redirects.
- * - Logout obtains CSRF token and calls logout.
- * - No localStorage or sessionStorage is used.
- * - Exactly one H1 exists on the page.
- *
- * These tests also verify scenarios from the fifth canonical batch
- * specification:
- * - Dashboard renders available Tenant options.
- * - Dashboard displays the active Tenant.
+ * - Dashboard displays available workspace options.
+ * - Dashboard displays the active workspace.
  * - Dashboard handles no active context.
- * - Selecting a Tenant obtains CSRF first.
- * - Selecting calls the context API with membershipId, not Tenant ID.
- * - Clearing obtains CSRF first.
- * - Context updates without page reload.
- * - Generic failure is accessible and bilingual.
+ * - Selecting a workspace obtains a CSRF token first.
+ * - Selecting calls the context API with `membershipId`, not Tenant ID.
+ * - Clearing obtains a CSRF token first.
+ * - Context updates without a full page reload.
+ * - Generic failure is displayed without infrastructure details.
  * - No Organisation or Facility selector exists.
- * - No localStorage, sessionStorage, IndexedDB, or readable cookie use.
- * - Dashboard still has exactly one H1.
- * - Existing login and logout behaviour remains passing.
+ * - Unauthenticated dashboard redirects to /login.
+ * - Exactly one H1 exists on the page.
  */
 
 const mockReplace = vi.fn();
@@ -136,24 +135,32 @@ const contextWithActiveA = {
   },
 };
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockGetContext.mockResolvedValue(contextWithNoActive);
+  mockGetCsrfToken.mockResolvedValue({
+    ok: true,
+    data: { token: 'csrf-token-value' },
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function renderDashboard() {
+  return render(
+    <LanguageProvider>
+      <DashboardPage />
+    </LanguageProvider>,
+  );
+}
+
 describe('DashboardPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockGetContext.mockResolvedValue(contextWithNoActive);
-    mockGetCsrfToken.mockResolvedValue({
-      ok: true,
-      data: { token: 'csrf-token-value' },
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('renders exactly one H1', async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
     await waitFor(() => {
       const h1s = document.querySelectorAll('h1');
@@ -164,29 +171,27 @@ describe('DashboardPage', () => {
   it('displays the authenticated user info', async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
     await waitFor(() => {
-      expect(screen.getByText('Operator Alpha')).toBeDefined();
-      expect(screen.getByText('operator@example.invalid')).toBeDefined();
+      expect(screen.getByText('Operator Alpha')).toBeInTheDocument();
+      expect(screen.getByText('operator@example.invalid')).toBeInTheDocument();
     });
   });
 
-  it('displays the memberships', async () => {
+  it('displays the available workspaces (memberships)', async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
     await waitFor(() => {
-      // The memberships section heading exists.
-      const membershipsHeading = screen.getByRole('heading', {
-        name: /Tenant memberships/i,
-      });
-      expect(membershipsHeading).toBeDefined();
-      // The membership list contains both tenants.
-      const membershipsSection = membershipsHeading.closest('section');
-      expect(membershipsSection?.textContent).toContain('tenant-alpha.invalid');
-      expect(membershipsSection?.textContent).toContain('tenant-beta.invalid');
+      // The memberships are rendered as "Available workspaces" in English
+      // or "بيئات العمل المتاحة" in Arabic (default).
+      const membershipHeading = screen.getByText('بيئات العمل المتاحة');
+      expect(membershipHeading).toBeInTheDocument();
+      const accountSection = membershipHeading.closest('section');
+      expect(accountSection?.textContent).toContain('tenant-alpha.invalid');
+      expect(accountSection?.textContent).toContain('tenant-beta.invalid');
     });
   });
 
@@ -197,7 +202,7 @@ describe('DashboardPage', () => {
     });
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
@@ -205,41 +210,48 @@ describe('DashboardPage', () => {
     });
   });
 
-  it('does not use localStorage or sessionStorage', async () => {
+  it('does not write auth-related values to localStorage, sessionStorage, or cookies', async () => {
     mockGetSession.mockResolvedValue(validSession);
     const localStorageSpy = vi.spyOn(Storage.prototype, 'setItem');
     const sessionStorageSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const cookieSpy = vi.spyOn(document, 'cookie', 'set');
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
     await waitFor(() => {
-      expect(screen.getByText('Operator Alpha')).toBeDefined();
+      expect(screen.getByText('Operator Alpha')).toBeInTheDocument();
     });
 
-    const authStorageCalls = localStorageSpy.mock.calls.filter(
-      ([key]) => typeof key === 'string' && (key.includes('session') || key.includes('token') || key.includes('csrf') || key.includes('context')),
+    const authKeyPattern = /session|token|csrf|password|auth|credential|context/i;
+    const authLocal = localStorageSpy.mock.calls.filter(
+      ([key]) => typeof key === 'string' && authKeyPattern.test(key),
     );
-    expect(authStorageCalls).toHaveLength(0);
-    const authSessionCalls = sessionStorageSpy.mock.calls.filter(
-      ([key]) => typeof key === 'string' && (key.includes('session') || key.includes('token') || key.includes('csrf') || key.includes('context')),
+    expect(authLocal).toHaveLength(0);
+    const authSession = sessionStorageSpy.mock.calls.filter(
+      ([key]) => typeof key === 'string' && authKeyPattern.test(key),
     );
-    expect(authSessionCalls).toHaveLength(0);
+    expect(authSession).toHaveLength(0);
+    expect(cookieSpy).not.toHaveBeenCalled();
   });
 
-  it('logout obtains a CSRF token and calls logout', async () => {
+  it('logout obtains a CSRF token and calls logout, then redirects', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockLogout.mockResolvedValue({ ok: true, data: { ok: true } });
 
     const user = userEvent.setup();
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Sign out/i })).toBeDefined();
+      expect(
+        screen.getByRole('button', { name: 'تسجيل الخروج' }),
+      ).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /Sign out/i }));
+    await user.click(
+      screen.getByRole('button', { name: 'تسجيل الخروج' }),
+    );
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
@@ -248,83 +260,76 @@ describe('DashboardPage', () => {
     });
   });
 
-  // -----------------------------------------------------------------------
-  // Fifth canonical batch: dashboard context tests
-  // -----------------------------------------------------------------------
-
-  it('renders available Tenant options in the context section', async () => {
+  it('renders available workspace options in the context section', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      // The context section heading exists.
-      const contextHeading = screen.getByRole('heading', {
-        name: /Active tenant context/i,
-      });
-      expect(contextHeading).toBeDefined();
-      // The context section contains both Tenant options.
-      const contextSection = contextHeading.closest('section');
-      expect(contextSection?.textContent).toContain('Tenant Alpha');
-      expect(contextSection?.textContent).toContain('Tenant Beta');
+      // The workspace card title is rendered in Arabic by default.
+      const workspaceHeading = screen.getByText('بيئة العمل النشطة');
+      expect(workspaceHeading).toBeInTheDocument();
+      const workspaceSection = workspaceHeading.closest('section');
+      expect(workspaceSection?.textContent).toContain('Tenant Alpha');
+      expect(workspaceSection?.textContent).toContain('Tenant Beta');
     });
   });
 
-  it('displays the active Tenant when a context is selected', async () => {
+  it('displays the active workspace when a context is selected', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveA);
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      // The "Current" section shows the active Tenant.
-      const currentSection = screen.getByText(/Current/i).closest('section');
-      expect(currentSection).not.toBeNull();
-      expect(currentSection?.textContent).toContain('Tenant Alpha');
+      // The active workspace is shown in the "Current" area.
+      const workspaceSection = screen
+        .getByText('بيئة العمل النشطة')
+        .closest('section');
+      expect(workspaceSection?.textContent).toContain('Tenant Alpha');
     });
   });
 
-  it('handles no active context by displaying a "must select" message', async () => {
+  it('handles no active context with a user-facing empty-state message', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      // The "no tenant selected" message appears.
-      expect(screen.getByText(/No tenant selected/i)).toBeDefined();
+      expect(screen.getByText('لم يتم اختيار بيئة عمل')).toBeInTheDocument();
     });
   });
 
-  it('selecting a Tenant obtains CSRF first and calls the context API with membershipId', async () => {
+  it('selecting a workspace obtains CSRF first and calls the context API with membershipId', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue(contextWithActiveA);
 
     const user = userEvent.setup();
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Select/i })).toBeDefined();
+      expect(
+        screen.getByRole('button', { name: /اختيار|Select/i }),
+      ).toBeInTheDocument();
     });
 
-    // Click the "Select" button.
-    await user.click(screen.getByRole('button', { name: /Select/i }));
+    await user.click(
+      screen.getByRole('button', { name: /اختيار|Select/i }),
+    );
 
     await waitFor(() => {
-      // CSRF was fetched first.
       expect(mockGetCsrfToken).toHaveBeenCalled();
-      // The context API was called with the membershipId (default
-      // selected is the first option, which is MEMBERSHIP_ID_A).
       expect(mockSelectTenantContext).toHaveBeenCalledWith(
         MEMBERSHIP_ID_A,
         'csrf-token-value',
@@ -335,8 +340,8 @@ describe('DashboardPage', () => {
   it('clearing obtains CSRF first and calls clearTenantContext', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext
-      .mockResolvedValueOnce(contextWithActiveA) // initial load
-      .mockResolvedValueOnce(contextWithNoActive); // after clear reload
+      .mockResolvedValueOnce(contextWithActiveA)
+      .mockResolvedValueOnce(contextWithNoActive);
     mockClearTenantContext.mockResolvedValue({
       ok: true,
       data: { ok: true, active: null },
@@ -344,76 +349,87 @@ describe('DashboardPage', () => {
 
     const user = userEvent.setup();
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Clear selection/i })).toBeDefined();
+      expect(
+        screen.getByRole('button', { name: /مسح الاختيار|Clear selection/i }),
+      ).toBeInTheDocument();
     });
 
-    // Click the "Clear selection" button.
-    await user.click(screen.getByRole('button', { name: /Clear selection/i }));
+    await user.click(
+      screen.getByRole('button', { name: /مسح الاختيار|Clear selection/i }),
+    );
 
     await waitFor(() => {
-      // CSRF was fetched first.
       expect(mockGetCsrfToken).toHaveBeenCalled();
-      // The clear context API was called with the CSRF token.
       expect(mockClearTenantContext).toHaveBeenCalledWith('csrf-token-value');
     });
   });
 
-  it('updates the context section without a full page reload after selection', async () => {
+  it('updates the workspace section without a full page reload after selection', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue(contextWithActiveA);
 
     const user = userEvent.setup();
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/No tenant selected/i)).toBeDefined();
+      expect(screen.getByText('لم يتم اختيار بيئة عمل')).toBeInTheDocument();
     });
 
-    // Click the "Select" button.
-    await user.click(screen.getByRole('button', { name: /Select/i }));
+    await user.click(
+      screen.getByRole('button', { name: /اختيار|Select/i }),
+    );
 
     await waitFor(() => {
-      // The "no tenant selected" message should be gone, and the
-      // active Tenant should be displayed.
-      expect(screen.queryByText(/No tenant selected/i)).toBeNull();
+      expect(screen.queryByText('لم يتم اختيار بيئة عمل')).toBeNull();
     });
   });
 
-  it('displays a generic failure message accessible and bilingual when selection fails', async () => {
+  it('displays a generic failure message without infrastructure details when selection fails', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue({
       ok: false,
-      error: { statusCode: 403, category: 'HTTP_ERROR', message: 'Forbidden' },
+      error: {
+        statusCode: 403,
+        category: 'HTTP_ERROR',
+        message: 'Forbidden: membership does not belong to user',
+      },
     });
 
     const user = userEvent.setup();
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Select/i })).toBeDefined();
+      expect(
+        screen.getByRole('button', { name: /اختيار|Select/i }),
+      ).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /Select/i }));
+    await user.click(
+      screen.getByRole('button', { name: /اختيار|Select/i }),
+    );
 
     await waitFor(() => {
-      // The error message is bilingual (English and Arabic).
-      const alerts = screen.getAllByRole('alert');
-      const contextAlert = alerts.find((a) =>
-        a.textContent?.includes('Unable to select tenant context'),
-      );
-      expect(contextAlert).toBeDefined();
-      expect(contextAlert?.textContent).toContain('تعذر اختيار سياق المستأجر');
+      const alert = screen.getByRole('alert');
+      expect(alert).toBeInTheDocument();
+      expect(alert.textContent).toContain('تعذّر تحديث بيئة العمل');
     });
+
+    // No raw infrastructure details are exposed.
+    const body = document.body.textContent ?? '';
+    expect(body).not.toMatch(/Forbidden/i);
+    expect(body).not.toMatch(/membership does not belong/i);
+    expect(body).not.toMatch(/403/i);
+    expect(body).not.toMatch(/HTTP_ERROR/i);
   });
 
   it('does not render an Organisation or Facility selector', async () => {
@@ -421,27 +437,108 @@ describe('DashboardPage', () => {
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Active tenant context/i })).toBeDefined();
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
     });
 
-    // No "Organisation" or "Facility" headings or labels exist.
-    const bodyText = document.body.textContent ?? '';
-    expect(bodyText).not.toMatch(/Organisation context/i);
-    expect(bodyText).not.toMatch(/Facility context/i);
-    expect(bodyText).not.toMatch(/Select an organisation/i);
-    expect(bodyText).not.toMatch(/Select a facility/i);
+    const body = document.body.textContent ?? '';
+    expect(body).not.toMatch(/Organisation context/i);
+    expect(body).not.toMatch(/Facility context/i);
+    expect(body).not.toMatch(/Select an organisation/i);
+    expect(body).not.toMatch(/Select a facility/i);
   });
 
-  it('still has exactly one H1 with the context section present', async () => {
+  it('does not render inactive navigation links for future modules', async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
     await act(async () => {
-      render(<DashboardPage />);
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+    });
+
+    const body = document.body.textContent ?? '';
+    expect(body).not.toMatch(/Patients/i);
+    expect(body).not.toMatch(/Appointments/i);
+    expect(body).not.toMatch(/Billing/i);
+    expect(body).not.toMatch(/Pharmacy/i);
+    expect(body).not.toMatch(/Inventory/i);
+    expect(body).not.toMatch(/Laboratory/i);
+    expect(body).not.toMatch(/Insurance/i);
+    expect(body).not.toMatch(/المرضى/i);
+    expect(body).not.toMatch(/المواعيد/i);
+    expect(body).not.toMatch(/الفواتير/i);
+  });
+
+  it('does not display raw technical IDs in the user-facing surface', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveA);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+    });
+
+    const body = document.body.textContent ?? '';
+    // The raw membership ID, tenant ID, and session ID must not appear
+    // in the user-facing surface. UUIDs are long and distinctive; we
+    // check that none of the test UUIDs leak.
+    expect(body).not.toContain(MEMBERSHIP_ID_A);
+    expect(body).not.toContain(MEMBERSHIP_ID_B);
+    expect(body).not.toContain(TENANT_ID_A);
+    expect(body).not.toContain(TENANT_ID_B);
+    expect(body).not.toContain('12345678-1234-1234-1234-123456789012');
+    // "Membership ID" and "Tenant ID" labels must not appear.
+    expect(body).not.toMatch(/Membership ID/i);
+    expect(body).not.toMatch(/Tenant ID/i);
+    expect(body).not.toMatch(/Active context ID/i);
+    expect(body).not.toMatch(/Session expires at/i);
+    expect(body).not.toMatch(/API response/i);
+  });
+
+  it('uses the same visual tokens as the landing page (project-owned CSS classes)', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+    });
+
+    // The dashboard root uses the project-owned `ih-app` class which
+    // consumes the same design tokens defined in globals.css as the
+    // landing page.
+    const appRoot = document.querySelector('.ih-app');
+    expect(appRoot).not.toBeNull();
+    // The cards use the project-owned `ih-card` class.
+    const cards = document.querySelectorAll('.ih-card');
+    expect(cards.length).toBeGreaterThanOrEqual(2);
+    // The header is sticky and uses the project-owned class.
+    const header = document.querySelector('.ih-app__header');
+    expect(header).not.toBeNull();
+    // The brand mark is rendered in the header.
+    const brandMark = header?.querySelector('.ih-brand');
+    expect(brandMark).not.toBeNull();
+  });
+
+  it('still has exactly one H1 with the workspace section present', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
     });
 
     await waitFor(() => {
@@ -449,9 +546,9 @@ describe('DashboardPage', () => {
       expect(h1s.length).toBe(1);
     });
 
-    // The context section exists with an h2 heading.
+    // The workspace section exists with an h2 heading.
     const h2s = document.querySelectorAll('h2');
     const h2Texts = Array.from(h2s).map((h) => h.textContent ?? '');
-    expect(h2Texts.some((t) => t.includes('Active tenant context'))).toBe(true);
+    expect(h2Texts.some((t) => t.includes('بيئة العمل النشطة'))).toBe(true);
   });
 });

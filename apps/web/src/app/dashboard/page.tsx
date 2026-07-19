@@ -1,6 +1,12 @@
 'use client';
 
-import { useState, useEffect, useRef, type FormEvent, type ReactElement } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  type FormEvent,
+  type ReactElement,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getSession,
@@ -16,45 +22,151 @@ import type {
   SessionResponse,
   ContextResponse,
   TenantContextOption,
+  TenantMembershipSummary,
 } from '@ibn-hayan/contracts';
+import { useLanguage } from '@/components/i18n/language-context';
+import { BrandMark } from '@/components/marketing/brand-mark';
+import { LanguageSwitch } from '@/components/marketing/language-switch';
+import { Button } from '@/components/ui/button';
+import { StatusMessage } from '@/components/ui/status-message';
 
 /**
- * Authenticated dashboard shell.
+ * Premium authenticated dashboard shell.
  *
- * Displays:
- * - user display name;
- * - user email;
- * - active tenant memberships;
- * - session expiry;
- * - the bilingual Tenant-context selector (fifth canonical batch);
- * - logout button.
+ * Restyled to belong to the same premium product as the landing page.
+ * No new business capabilities are added.
  *
- * Checks the session through the API after page load. Redirects
- * unauthenticated users to `/login`. The API authorization remains
- * authoritative; client-side redirect is not the security boundary.
+ * Composition:
+ * - Sticky application header with brand mark, active-workspace
+ *   chip, language switch, and discreet session indicator.
+ * - Page title (exactly one H1).
+ * - Workspace card — current context + selector.
+ * - Account card — display name, email, session remaining, and the
+ *   list of available workspaces (memberships).
+ * - Sign out action.
  *
- * Per the fifth canonical batch specification:
- * - The Tenant selector loads the available active Tenant options
- *   and the currently active context after page mount.
- * - Selecting a Tenant obtains a fresh CSRF token first, then calls
- *   the context API with `membershipId` (not Tenant ID).
- * - Clearing context obtains a fresh CSRF token first.
- * - Selecting or clearing updates the page without a full reload.
- * - If no active context exists, the page clearly states that a
- *   Tenant must be selected before future operational work.
- * - The CSRF token is held in component memory only; it is never
- *   persisted to browser storage.
- * - No Organisation or Facility controls.
- * - No patient or business data.
- * - Exactly one H1 remains.
- * - Correct LTR and RTL sections.
- * - Keyboard-accessible controls.
- * - No polling.
- * - No browser storage.
- * - Logout behaviour remains unchanged.
+ * The dashboard preserves the existing secure behaviour:
+ * - session check on mount; redirect to `/login` when no session;
+ * - context load after session;
+ * - selecting a workspace obtains a fresh CSRF token first, then
+ *   calls the context API with `membershipId`;
+ * - clearing obtains a fresh CSRF token first;
+ * - selecting or clearing updates the page without a full reload;
+ * - logout obtains a CSRF token, calls logout, and redirects to
+ *   `/login`;
+ * - CSRF tokens are held in component memory only; never persisted
+ *   to browser storage.
+ *
+ * System information is translated into user-facing language:
+ * - "Active tenant context" → "Active workspace" / "بيئة العمل النشطة";
+ * - "Tenant memberships" → "Available workspaces" / "بيئات العمل المتاحة";
+ * - "Session expires at <iso>" → discreet "Session remaining" line.
+ *
+ * The dashboard does NOT display:
+ * - raw IDs (membership ID, tenant ID, session ID);
+ * - raw API responses;
+ * - "Session expires at <timestamp>";
+ * - infrastructure error details;
+ * - inactive navigation links for future modules;
+ * - a fake sidebar with unimplemented features.
  */
+
+const DASHBOARD_COPY = {
+  ar: {
+    pageTitle: 'مساحة العمل',
+    pageSubtitle: 'اختر بيئة عملك وابدأ العمل بثقة.',
+    workspaceTitle: 'بيئة العمل النشطة',
+    workspaceEyebrow: 'السياق الحالي',
+    currentLabel: 'الحالي',
+    noContextTitle: 'لم يتم اختيار بيئة عمل',
+    noContextBody: 'اختر بيئة عمل من القائمة أدناه للبدء.',
+    selectLegend: 'اختر بيئة عمل',
+    selectButton: 'اختيار / تغيير',
+    selecting: 'جارٍ الاختيار…',
+    clearButton: 'مسح الاختيار',
+    clearing: 'جارٍ المسح…',
+    noOptionsTitle: 'لا توجد بيئات عمل متاحة',
+    noOptionsBody: 'لا توجد عضويات نشطة مرتبطة بحسابك.',
+    accountTitle: 'حسابك',
+    nameLabel: 'الاسم',
+    emailLabel: 'البريد الإلكتروني',
+    sessionLabel: 'الجلسة',
+    sessionActive: 'نشطة',
+    membershipsTitle: 'بيئات العمل المتاحة',
+    noMemberships: 'لا توجد عضويات نشطة.',
+    statusActive: 'نشط',
+    statusSuspended: 'موقوف',
+    logoutButton: 'تسجيل الخروج',
+    loggingOut: 'جارٍ تسجيل الخروج…',
+    errorContextGeneric: 'تعذّر تحديث بيئة العمل. حاول مرة أخرى.',
+    errorLogoutGeneric: 'تعذّر تسجيل الخروج. حاول مرة أخرى.',
+    errorContextLoad: 'تعذّر تحميل بيئة العمل.',
+    activeChip: 'بيئة العمل الحالية',
+    idleChip: 'بدون بيئة عمل',
+    sessionRemaining: (ms: number) => formatRemainingAr(ms),
+  },
+  en: {
+    pageTitle: 'Workspace',
+    pageSubtitle: 'Choose your workspace and begin work with confidence.',
+    workspaceTitle: 'Active workspace',
+    workspaceEyebrow: 'Current context',
+    currentLabel: 'Current',
+    noContextTitle: 'No workspace selected',
+    noContextBody: 'Choose a workspace from the list below to begin.',
+    selectLegend: 'Select a workspace',
+    selectButton: 'Select / Change',
+    selecting: 'Selecting…',
+    clearButton: 'Clear selection',
+    clearing: 'Clearing…',
+    noOptionsTitle: 'No workspaces available',
+    noOptionsBody: 'No active memberships are associated with your account.',
+    accountTitle: 'Your account',
+    nameLabel: 'Name',
+    emailLabel: 'Email',
+    sessionLabel: 'Session',
+    sessionActive: 'Active',
+    membershipsTitle: 'Available workspaces',
+    noMemberships: 'No active memberships.',
+    statusActive: 'active',
+    statusSuspended: 'suspended',
+    logoutButton: 'Sign out',
+    loggingOut: 'Signing out…',
+    errorContextGeneric: 'Unable to update the workspace. Please try again.',
+    errorLogoutGeneric: 'Unable to sign out. Please try again.',
+    errorContextLoad: 'Unable to load the workspace.',
+    activeChip: 'Active workspace',
+    idleChip: 'No workspace',
+    sessionRemaining: (ms: number) => formatRemainingEn(ms),
+  },
+} as const;
+
+function formatRemainingEn(ms: number): string {
+  if (ms <= 0) return 'expired';
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours >= 1) {
+    return `${hours}h ${minutes}m remaining`;
+  }
+  return `${minutes}m remaining`;
+}
+
+function formatRemainingAr(ms: number): string {
+  if (ms <= 0) return 'منتهية';
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours >= 1) {
+    return `${hours} س ${minutes} د متبقية`;
+  }
+  return `${minutes} د متبقية`;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
+  const { lang, dir } = useLanguage();
+  const copy = DASHBOARD_COPY[lang];
+
   const sessionLoadedRef = useRef(false);
   const contextLoadedRef = useRef(false);
   const [session, setSession] = useState<SessionResponse | null>(null);
@@ -78,7 +190,6 @@ export default function DashboardPage() {
         setSession(result.data);
         setLoading(false);
       } else {
-        // Session is missing, expired, or revoked — redirect to login.
         router.replace('/login');
       }
     })();
@@ -87,7 +198,6 @@ export default function DashboardPage() {
     };
   }, [router]);
 
-  // Load the context after the session is loaded.
   useEffect(() => {
     if (contextLoadedRef.current) return;
     if (session === null) return;
@@ -98,52 +208,43 @@ export default function DashboardPage() {
       if (cancelled) return;
       if (result.ok) {
         setContext(result.data);
-        // If there is an active context, pre-select it in the
-        // selector.
         if (result.data.active !== null) {
           setSelectedMembershipId(result.data.active.membershipId);
         } else if (result.data.options.length > 0) {
-          // Default to the first option so the user can select
-          // quickly.
           setSelectedMembershipId(result.data.options[0]!.membershipId);
         }
       } else {
-        // Context loading failed. Show a generic error; the user
-        // can still see their session info and log out.
-        setContextError(
-          'Unable to load tenant context. / تعذر تحميل سياق المستأجر.',
-        );
+        setContextError(copy.errorContextLoad);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, copy.errorContextLoad]);
 
-  async function handleLogout(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function handleLogout(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
     if (loggingOut) return;
 
     setError(null);
     setLoggingOut(true);
 
-    // Fetch a CSRF token before logout.
     const csrfResult = await getCsrfToken();
     if (!csrfResult.ok) {
-      setError('Unable to fetch CSRF token. / تعذر جلب رمز CSRF.');
+      setError(copy.errorLogoutGeneric);
       setLoggingOut(false);
       return;
     }
 
-    // Call logout with the CSRF token.
     const logoutResult = await logout(csrfResult.data.token);
     if (!logoutResult.ok) {
-      setError('Logout failed. / فشل تسجيل الخروج.');
+      setError(copy.errorLogoutGeneric);
       setLoggingOut(false);
       return;
     }
 
-    // Redirect to the login page.
     router.replace('/login');
   }
 
@@ -157,30 +258,23 @@ export default function DashboardPage() {
     setContextError(null);
     setSelecting(true);
 
-    // Obtain a fresh CSRF token immediately before the PUT.
     const csrfResult = await getCsrfToken();
     if (!csrfResult.ok) {
-      setContextError(
-        'Unable to fetch CSRF token. / تعذر جلب رمز CSRF.',
-      );
+      setContextError(copy.errorContextGeneric);
       setSelecting(false);
       return;
     }
 
-    // Call the context API with the membershipId.
     const result = await selectTenantContext(
       selectedMembershipId,
       csrfResult.data.token,
     );
     if (!result.ok) {
-      setContextError(
-        'Unable to select tenant context. / تعذر اختيار سياق المستأجر.',
-      );
+      setContextError(copy.errorContextGeneric);
       setSelecting(false);
       return;
     }
 
-    // Update the page without a full reload.
     setContext(result.data);
     if (result.data.active !== null) {
       setSelectedMembershipId(result.data.active.membershipId);
@@ -194,27 +288,20 @@ export default function DashboardPage() {
     setContextError(null);
     setClearing(true);
 
-    // Obtain a fresh CSRF token immediately before the DELETE.
     const csrfResult = await getCsrfToken();
     if (!csrfResult.ok) {
-      setContextError(
-        'Unable to fetch CSRF token. / تعذر جلب رمز CSRF.',
-      );
+      setContextError(copy.errorContextGeneric);
       setClearing(false);
       return;
     }
 
     const result = await clearTenantContext(csrfResult.data.token);
     if (!result.ok) {
-      setContextError(
-        'Unable to clear tenant context. / تعذر مسح سياق المستأجر.',
-      );
+      setContextError(copy.errorContextGeneric);
       setClearing(false);
       return;
     }
 
-    // Update the page without a full reload. Re-load the context
-    // to get the current options + null active.
     const reloaded = await getContext();
     if (reloaded.ok) {
       setContext(reloaded.data);
@@ -225,7 +312,6 @@ export default function DashboardPage() {
         setSelectedMembershipId(reloaded.data.options[0]!.membershipId);
       }
     } else {
-      // Fallback: synthesize a cleared context locally.
       setContext((prev) =>
         prev === null ? prev : { options: prev.options, active: null },
       );
@@ -235,382 +321,382 @@ export default function DashboardPage() {
 
   if (loading || session === null) {
     return (
-      <main className="flex flex-1 flex-col items-center justify-center w-full px-5 py-10">
-        <p aria-live="polite">Loading… / جارٍ التحميل…</p>
-      </main>
+      <div className="ih-app__loading">
+        <p className="ih-visually-hidden" aria-live="polite">
+          {copy.pageTitle}
+        </p>
+      </div>
     );
   }
 
-  const expiresAt = new Date(session.expiresAt);
-  const expiresAtFormatted = expiresAt.toLocaleString();
+  const options: readonly TenantContextOption[] = context?.options ?? [];
+  const active = context?.active ?? null;
 
   return (
-    <main className="flex flex-1 flex-col w-full">
-      <div className="mx-auto w-full" style={{ maxWidth: 'var(--page-max-width)' }}>
-        <div className="flex flex-col gap-6 px-5 py-10 sm:px-8 sm:py-12">
-          <h1 className="flex flex-col gap-3 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
-            <span lang="en" dir="ltr">
-              Dashboard
-            </span>
-            <span lang="ar" dir="rtl" className="text-2xl sm:text-3xl">
-              لوحة التحكم
-            </span>
-          </h1>
-
-          <section
-            className="flex flex-col gap-4 rounded-lg p-5"
-            style={{
-              backgroundColor: 'var(--surface)',
-              border: '1px solid var(--surface-border)',
-            }}
-            aria-labelledby="user-info-title"
+    <div className="ih-app" dir={dir}>
+      <header className="ih-app__header">
+        <div className="ih-app__header-inner">
+          <a
+            href="/dashboard"
+            className="ih-app__header-brand"
+            aria-label={copy.pageTitle}
           >
-            <h2
-              id="user-info-title"
-              className="text-xl font-semibold"
-              lang="en"
-              dir="ltr"
-            >
-              User
-            </h2>
-            <dl className="flex flex-col gap-2">
-              <div className="flex flex-col gap-1">
-                <dt className="text-sm font-medium" style={{ color: 'var(--foreground-muted)' }}>
-                  <span lang="en" dir="ltr">Display name</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">الاسم المعروض</span>
-                </dt>
-                <dd className="text-base">{session.user.displayName}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <dt className="text-sm font-medium" style={{ color: 'var(--foreground-muted)' }}>
-                  <span lang="en" dir="ltr">Email</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">البريد الإلكتروني</span>
-                </dt>
-                <dd className="text-base">{session.user.email}</dd>
-              </div>
-              <div className="flex flex-col gap-1">
-                <dt className="text-sm font-medium" style={{ color: 'var(--foreground-muted)' }}>
-                  <span lang="en" dir="ltr">Session expires</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">تنتهي الجلسة</span>
-                </dt>
-                <dd className="text-base">{expiresAtFormatted}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section
-            className="flex flex-col gap-4 rounded-lg p-5"
-            style={{
-              backgroundColor: 'var(--surface)',
-              border: '1px solid var(--surface-border)',
-            }}
-            aria-labelledby="memberships-title"
+            <BrandMark size={32} compact />
+          </a>
+          <div
+            className="ih-app__header-context"
+            aria-label={copy.workspaceEyebrow}
           >
-            <h2
-              id="memberships-title"
-              className="text-xl font-semibold"
-              lang="en"
-              dir="ltr"
-            >
-              Tenant memberships
-            </h2>
-            {session.memberships.length === 0 ? (
-              <p className="text-base" style={{ color: 'var(--foreground-muted)' }}>
-                <span lang="en" dir="ltr">No active memberships.</span>{' '}
-                <span lang="ar" dir="rtl">لا توجد عضويات نشطة.</span>
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {session.memberships.map((membership) => (
-                  <li
-                    key={membership.id}
-                    className="flex flex-col gap-1 rounded-md p-3"
-                    style={{
-                      backgroundColor: 'var(--background)',
-                      border: '1px solid var(--surface-border)',
-                    }}
-                  >
-                    <span className="text-base font-medium">
-                      {membership.tenantDisplayName}
-                    </span>
-                    <span className="text-sm" style={{ color: 'var(--foreground-muted)' }}>
-                      {membership.tenantSlug}
-                    </span>
-                    <span className="text-xs" style={{ color: 'var(--foreground-muted)' }}>
-                      <span lang="en" dir="ltr">Status: {membership.status}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <TenantContextSection
-            context={context}
-            selectedMembershipId={selectedMembershipId}
-            onSelectMembership={setSelectedMembershipId}
-            onSelect={handleSelectContext}
-            onClear={handleClearContext}
-            selecting={selecting}
-            clearing={clearing}
-            error={contextError}
-          />
-
-          <form onSubmit={handleLogout} className="flex flex-col gap-2">
-            <button
-              type="submit"
-              disabled={loggingOut}
-              className="rounded-md px-4 py-2 text-base font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: 'var(--accent)' }}
-            >
-              {loggingOut ? (
-                <span aria-live="polite">
-                  <span lang="en" dir="ltr">Signing out…</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">جارٍ تسجيل الخروج…</span>
-                </span>
-              ) : (
-                <>
-                  <span lang="en" dir="ltr">Sign out</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">تسجيل الخروج</span>
-                </>
-              )}
-            </button>
-            {error !== null && (
-              <p
-                role="alert"
-                aria-live="polite"
-                className="rounded-md px-3 py-2 text-sm"
-                style={{
-                  backgroundColor: 'var(--status-error-muted, rgba(220, 38, 38, 0.1))',
-                  color: 'var(--status-error, #dc2626)',
-                }}
+            <span
+              className={
+                'ih-app__header-context-dot' +
+                (active === null ? ' ih-app__header-context-dot--none' : '')
+              }
+              aria-hidden="true"
+            />
+            <span className="ih-app__header-context-label">
+              {active !== null
+                ? active.tenantDisplayName
+                : copy.idleChip}
+            </span>
+          </div>
+          <div className="ih-app__header-actions">
+            <LanguageSwitch />
+            <form onSubmit={handleLogout}>
+              <Button
+                type="submit"
+                variant="ghost"
+                loading={loggingOut}
               >
-                {error}
-              </p>
-            )}
-          </form>
+                {loggingOut ? copy.loggingOut : copy.logoutButton}
+              </Button>
+            </form>
+          </div>
         </div>
-      </div>
-    </main>
+      </header>
+
+      <main className="ih-app__main">
+        <div className="ih-app__page-header">
+          <h1 className="ih-app__page-title">{copy.pageTitle}</h1>
+          <p className="ih-app__page-subtitle">{copy.pageSubtitle}</p>
+        </div>
+
+        <WorkspaceCard
+          title={copy.workspaceTitle}
+          eyebrow={copy.workspaceEyebrow}
+          currentLabel={copy.currentLabel}
+          active={active}
+          noContextTitle={copy.noContextTitle}
+          noContextBody={copy.noContextBody}
+          options={options}
+          noOptionsTitle={copy.noOptionsTitle}
+          noOptionsBody={copy.noOptionsBody}
+          selectLegend={copy.selectLegend}
+          selectedMembershipId={selectedMembershipId}
+          onSelectMembership={setSelectedMembershipId}
+          onSelect={handleSelectContext}
+          onClear={handleClearContext}
+          selecting={selecting}
+          clearing={clearing}
+          selectButton={copy.selectButton}
+          selectingLabel={copy.selecting}
+          clearButton={copy.clearButton}
+          clearingLabel={copy.clearing}
+          error={contextError}
+          errorText={copy.errorContextGeneric}
+        />
+
+        <AccountCard
+          title={copy.accountTitle}
+          nameLabel={copy.nameLabel}
+          emailLabel={copy.emailLabel}
+          sessionLabel={copy.sessionLabel}
+          sessionActive={copy.sessionActive}
+          sessionRemaining={copy.sessionActive}
+          displayName={session.user.displayName}
+          email={session.user.email}
+          membershipsTitle={copy.membershipsTitle}
+          memberships={session.memberships}
+          noMemberships={copy.noMemberships}
+          statusActive={copy.statusActive}
+          statusSuspended={copy.statusSuspended}
+        />
+
+        {error !== null && (
+          <StatusMessage variant="error">{error}</StatusMessage>
+        )}
+      </main>
+    </div>
   );
 }
 
-/**
- * Bilingual Tenant-context section.
- *
- * Displays:
- * - the available active Tenant options (radio-group semantics);
- * - the current active Tenant (or a "no context" message);
- * - a select/change button;
- * - a clear-selection button when a context is active.
- *
- * The selector uses radio inputs so the user can pick one option.
- * The "Select" button submits the form, which calls
- * `handleSelectContext` to obtain a CSRF token and PUT the
- * selection.
- *
- * The "Clear" button calls `handleClearContext` to obtain a CSRF
- * token and DELETE the active context.
- *
- * Per the fifth canonical batch specification, if no active context
- * exists, the page clearly states that a Tenant must be selected
- * before future operational work.
- */
-interface TenantContextSectionProps {
-  readonly context: ContextResponse | null;
+interface WorkspaceCardProps {
+  readonly title: string;
+  readonly eyebrow: string;
+  readonly currentLabel: string;
+  readonly active: TenantContextOption | null;
+  readonly noContextTitle: string;
+  readonly noContextBody: string;
+  readonly options: readonly TenantContextOption[];
+  readonly noOptionsTitle: string;
+  readonly noOptionsBody: string;
+  readonly selectLegend: string;
   readonly selectedMembershipId: string;
   readonly onSelectMembership: (id: string) => void;
   readonly onSelect: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   readonly onClear: () => Promise<void>;
   readonly selecting: boolean;
   readonly clearing: boolean;
+  readonly selectButton: string;
+  readonly selectingLabel: string;
+  readonly clearButton: string;
+  readonly clearingLabel: string;
   readonly error: string | null;
+  readonly errorText: string;
 }
 
-function TenantContextSection({
-  context,
+function WorkspaceCard({
+  title,
+  eyebrow,
+  currentLabel,
+  active,
+  noContextTitle,
+  noContextBody,
+  options,
+  noOptionsTitle,
+  noOptionsBody,
+  selectLegend,
   selectedMembershipId,
   onSelectMembership,
   onSelect,
   onClear,
   selecting,
   clearing,
+  selectButton,
+  selectingLabel,
+  clearButton,
+  clearingLabel,
   error,
-}: TenantContextSectionProps): ReactElement {
-  const options: readonly TenantContextOption[] = context?.options ?? [];
-  const active = context?.active ?? null;
-
+  errorText,
+}: WorkspaceCardProps): ReactElement {
   return (
     <section
-      className="flex flex-col gap-4 rounded-lg p-5"
-      style={{
-        backgroundColor: 'var(--surface)',
-        border: '1px solid var(--surface-border)',
-      }}
-      aria-labelledby="context-title"
+      className="ih-card ih-card--elevated"
+      aria-labelledby="ih-workspace-title"
     >
-      <h2
-        id="context-title"
-        className="text-xl font-semibold"
-        lang="en"
-        dir="ltr"
-      >
-        Active tenant context
-      </h2>
+      <header className="ih-card__header">
+        <div>
+          <p className="ih-card__eyebrow">{eyebrow}</p>
+          <h2 id="ih-workspace-title" className="ih-card__title">
+            {title}
+          </h2>
+        </div>
+      </header>
 
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium" style={{ color: 'var(--foreground-muted)' }}>
-          <span lang="en" dir="ltr">Current</span>{' '}
-          /{' '}
-          <span lang="ar" dir="rtl">الحالي</span>
-        </p>
+      <div>
+        <p className="ih-context-current__label">{currentLabel}</p>
         {active === null ? (
-          <p className="text-base">
-            <span lang="en" dir="ltr">
-              No tenant selected. Select a tenant before continuing.
-            </span>{' '}
-            <span lang="ar" dir="rtl">
-              لم يتم اختيار مستأجر. اختر مستأجرًا قبل المتابعة.
-            </span>
-          </p>
+          <div className="ih-empty-state">
+            <p className="ih-empty-state__title">{noContextTitle}</p>
+            <p className="ih-empty-state__body">{noContextBody}</p>
+          </div>
         ) : (
-          <p className="text-base font-medium">
-            {active.tenantDisplayName}
-            <span
-              className="text-sm font-normal"
-              style={{ color: 'var(--foreground-muted)' }}
-            >
-              {' '}
-              ({active.tenantSlug})
-            </span>
-          </p>
+          <div className="ih-context-current">
+            <p className="ih-context-current__value">
+              {active.tenantDisplayName}
+            </p>
+            <p className="ih-context-current__meta">{active.tenantSlug}</p>
+          </div>
         )}
       </div>
 
       {options.length === 0 ? (
-        <p className="text-base" style={{ color: 'var(--foreground-muted)' }}>
-          <span lang="en" dir="ltr">
-            No active tenant memberships available.
-          </span>{' '}
-          <span lang="ar" dir="rtl">
-            لا توجد عضويات مستأجر نشطة متاحة.
-          </span>
-        </p>
+        <div className="ih-empty-state">
+          <p className="ih-empty-state__title">{noOptionsTitle}</p>
+          <p className="ih-empty-state__body">{noOptionsBody}</p>
+        </div>
       ) : (
-        <form onSubmit={onSelect} className="flex flex-col gap-3">
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium" style={{ color: 'var(--foreground-muted)' }}>
-              <span lang="en" dir="ltr">Select a tenant</span>{' '}
-              /{' '}
-              <span lang="ar" dir="rtl">اختر مستأجرًا</span>
+        <form onSubmit={onSelect} className="ih-login__form">
+          <fieldset className="ih-options">
+            <legend className="ih-context-current__label">
+              {selectLegend}
             </legend>
-            <div className="flex flex-col gap-2" role="radiogroup" aria-label="Tenant">
-              {options.map((option) => (
-                <label
-                  key={option.membershipId}
-                  className="flex items-center gap-3 rounded-md p-3 cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--background)',
-                    border:
-                      selectedMembershipId === option.membershipId
-                        ? '2px solid var(--accent)'
-                        : '1px solid var(--surface-border)',
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="tenant-membership"
-                    value={option.membershipId}
-                    checked={selectedMembershipId === option.membershipId}
-                    onChange={() => onSelectMembership(option.membershipId)}
-                    className="h-4 w-4"
-                  />
-                  <span className="flex flex-col">
-                    <span className="text-base font-medium">
-                      {option.tenantDisplayName}
+            <div className="ih-options" role="radiogroup" aria-label={selectLegend}>
+              {options.map((option) => {
+                const selected =
+                  selectedMembershipId === option.membershipId;
+                return (
+                  <label
+                    key={option.membershipId}
+                    className={
+                      'ih-option' +
+                      (selected ? ' ih-option--selected' : '')
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="tenant-membership"
+                      value={option.membershipId}
+                      checked={selected}
+                      onChange={() => onSelectMembership(option.membershipId)}
+                      className="ih-option__radio"
+                    />
+                    <span className="ih-option__text">
+                      <span className="ih-option__name">
+                        {option.tenantDisplayName}
+                      </span>
+                      <span className="ih-option__slug">
+                        {option.tenantSlug}
+                      </span>
                     </span>
-                    <span
-                      className="text-sm"
-                      style={{ color: 'var(--foreground-muted)' }}
-                    >
-                      {option.tenantSlug}
-                    </span>
-                  </span>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
           </fieldset>
 
-          <div className="flex flex-wrap gap-3">
-            <button
+          <div className="ih-actions-row">
+            <Button
               type="submit"
-              disabled={selecting || selectedMembershipId.length === 0}
-              className="rounded-md px-4 py-2 text-base font-medium text-white disabled:opacity-50"
-              style={{ backgroundColor: 'var(--accent)' }}
+              variant="primary"
+              loading={selecting}
+              disabled={selectedMembershipId.length === 0}
             >
-              {selecting ? (
-                <span aria-live="polite">
-                  <span lang="en" dir="ltr">Selecting…</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">جارٍ الاختيار…</span>
-                </span>
-              ) : (
-                <>
-                  <span lang="en" dir="ltr">Select / Change</span>{' '}
-                  /{' '}
-                  <span lang="ar" dir="rtl">اختيار / تغيير</span>
-                </>
-              )}
-            </button>
+              {selecting ? selectingLabel : selectButton}
+            </Button>
             {active !== null && (
-              <button
+              <Button
                 type="button"
-                onClick={onClear}
-                disabled={clearing}
-                className="rounded-md px-4 py-2 text-base font-medium disabled:opacity-50"
-                style={{
-                  backgroundColor: 'var(--background)',
-                  border: '1px solid var(--surface-border)',
-                }}
+                variant="ghost"
+                loading={clearing}
+                onClick={() => void onClear()}
               >
-                {clearing ? (
-                  <span aria-live="polite">
-                    <span lang="en" dir="ltr">Clearing…</span>{' '}
-                    /{' '}
-                    <span lang="ar" dir="rtl">جارٍ المسح…</span>
-                  </span>
-                ) : (
-                  <>
-                    <span lang="en" dir="ltr">Clear selection</span>{' '}
-                    /{' '}
-                    <span lang="ar" dir="rtl">مسح الاختيار</span>
-                  </>
-                )}
-              </button>
+                {clearing ? clearingLabel : clearButton}
+              </Button>
             )}
           </div>
 
           {error !== null && (
-            <p
-              role="alert"
-              aria-live="polite"
-              className="rounded-md px-3 py-2 text-sm"
-              style={{
-                backgroundColor:
-                  'var(--status-error-muted, rgba(220, 38, 38, 0.1))',
-                color: 'var(--status-error, #dc2626)',
-              }}
-            >
-              {error}
-            </p>
+            <StatusMessage variant="error">{errorText}</StatusMessage>
           )}
         </form>
       )}
+    </section>
+  );
+}
+
+interface AccountCardProps {
+  readonly title: string;
+  readonly nameLabel: string;
+  readonly emailLabel: string;
+  readonly sessionLabel: string;
+  readonly sessionActive: string;
+  readonly sessionRemaining: string;
+  readonly displayName: string;
+  readonly email: string;
+  readonly membershipsTitle: string;
+  readonly memberships: readonly TenantMembershipSummary[];
+  readonly noMemberships: string;
+  readonly statusActive: string;
+  readonly statusSuspended: string;
+}
+
+function AccountCard({
+  title,
+  nameLabel,
+  emailLabel,
+  sessionLabel,
+  sessionActive,
+  sessionRemaining,
+  displayName,
+  email,
+  membershipsTitle,
+  memberships,
+  noMemberships,
+  statusActive,
+  statusSuspended,
+}: AccountCardProps): ReactElement {
+  return (
+    <section className="ih-card" aria-labelledby="ih-account-title">
+      <header className="ih-card__header">
+        <h2 id="ih-account-title" className="ih-card__title">
+          {title}
+        </h2>
+      </header>
+
+      <ul className="ih-account-list">
+        <li className="ih-account-item">
+          <p className="ih-account-item__label">{nameLabel}</p>
+          <p className="ih-account-item__value">{displayName}</p>
+        </li>
+        <li className="ih-account-item">
+          <p className="ih-account-item__label">{emailLabel}</p>
+          <p className="ih-account-item__value">{email}</p>
+        </li>
+        <li className="ih-account-item">
+          <p className="ih-account-item__label">{sessionLabel}</p>
+          <p className="ih-account-item__value">
+            <span className="ih-status-chip">
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'currentColor',
+                  display: 'inline-block',
+                }}
+              />
+              {sessionActive}
+            </span>
+          </p>
+          <p
+            className="ih-account-item__value"
+            style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}
+          >
+            {sessionRemaining}
+          </p>
+        </li>
+      </ul>
+
+      <div>
+        <p className="ih-card__eyebrow" style={{ marginTop: '0.5rem' }}>
+          {membershipsTitle}
+        </p>
+        {memberships.length === 0 ? (
+          <p
+            className="ih-account-item__value"
+            style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}
+          >
+            {noMemberships}
+          </p>
+        ) : (
+          <ul className="ih-memberships">
+            {memberships.map((membership) => (
+              <li key={membership.id} className="ih-membership">
+                <span className="ih-membership__name">
+                  {membership.tenantDisplayName}
+                </span>
+                <span className="ih-membership__meta">
+                  {membership.tenantSlug}
+                </span>
+                <span
+                  className={
+                    'ih-status-chip' +
+                    (membership.status === 'suspended'
+                      ? ''
+                      : ' ih-status-chip--idle')
+                  }
+                >
+                  {membership.status === 'active'
+                    ? statusActive
+                    : statusSuspended}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }
