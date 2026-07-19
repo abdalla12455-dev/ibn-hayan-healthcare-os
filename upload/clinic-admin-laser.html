@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MediFlow Admin – Clinic Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config={darkMode:"class",theme:{extend:{}}}</script>
+    <style>
+        body{font-family:'Inter',sans-serif;margin:0;padding:0}
+        .rtl{direction:rtl;font-family:'IBM Plex Sans Arabic',sans-serif}
+        .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24}
+        .card{transition:all 0.2s ease}.card:hover{transform:scale(1.01);box-shadow:0 8px 20px rgba(0,0,0,0.1)}
+        #notif-panel{max-height:70vh;overflow-y:auto;position:fixed;z-index:9999;width:320px}
+        /* Dark mode – comprehensive */
+        body.dark-mode{background:#111827!important}
+        body.dark-mode .bg-white,body.dark-mode [class*="bg-surface"]{background-color:#1f2937!important}
+        body.dark-mode .bg-gray-50{background-color:#1f2937!important}
+        body.dark-mode .bg-gray-100{background-color:#374151!important}
+        body.dark-mode table thead tr{background-color:#374151!important}
+        body.dark-mode .border,body.dark-mode [class*="border-gray"]{border-color:#4b5563!important}
+        body.dark-mode input,body.dark-mode select,body.dark-mode textarea{background:#374151!important;border-color:#4b5563!important;color:#f9fafb!important}
+        body.dark-mode,body.dark-mode .text-gray-900,body.dark-mode .text-gray-800,body.dark-mode .text-gray-700,body.dark-mode .text-gray-600{color:#f3f4f6!important}
+        body.dark-mode .text-gray-500,body.dark-mode .text-gray-400{color:#d1d5db!important}
+        body.dark-mode .bg-indigo-100{background-color:#3730a3!important}
+        body.dark-mode .text-indigo-700,.dark-mode .text-indigo-600{color:#a5b4fc!important}
+        body.dark-mode .bg-emerald-100{background-color:#065f46!important}
+        body.dark-mode .text-emerald-700,.dark-mode .text-emerald-600{color:#6ee7b7!important}
+        body.dark-mode .bg-amber-100{background-color:#92400e!important}
+        body.dark-mode .text-amber-700,.dark-mode .text-amber-600{color:#fcd34d!important}
+        body.dark-mode .bg-red-100{background-color:#991b1b!important}
+        body.dark-mode .text-red-700,.dark-mode .text-red-600{color:#fca5a5!important}
+        body.dark-mode .bg-blue-100{background-color:#1e3a5f!important}
+        body.dark-mode .text-blue-700,.dark-mode .text-blue-600{color:#93c5fd!important}
+        body.dark-mode .bg-purple-100{background-color:#4c1d95!important}
+        body.dark-mode .text-purple-700,.dark-mode .text-purple-600{color:#c4b5fd!important}
+        body.dark-mode .bg-pink-100{background-color:#831843!important}
+        body.dark-mode .text-pink-700,.dark-mode .text-pink-600{color:#f9a8d4!important}
+        body.dark-mode .bg-teal-100{background-color:#134e4a!important}
+        body.dark-mode .text-teal-700,.dark-mode .text-teal-600{color:#5eead4!important}
+        /* Calendar colors */
+        .cal-paid{background:#d1fae5;border-left:4px solid #10b981}.dark-mode .cal-paid{background:#064e3b;border-left-color:#34d399}
+        .cal-pending{background:#fef3c7;border-left:4px solid #f59e0b}.dark-mode .cal-pending{background:#78350f;border-left-color:#fbbf24}
+        .cal-confirmed{background:#dbeafe;border-left:4px solid #3b82f6}.dark-mode .cal-confirmed{background:#1e3a5f;border-left-color:#60a5fa}
+        .cal-checked-in{background:#e0e7ff;border-left:4px solid #6366f1}.dark-mode .cal-checked-in{background:#312e81;border-left-color:#818cf8}
+        .cal-with-doctor{background:#fce7f3;border-left:4px solid #ec4899}.dark-mode .cal-with-doctor{background:#831843;border-left-color:#f472b6}
+        .cal-completed{background:#d1fae5;border-left:4px solid #10b981}.dark-mode .cal-completed{background:#064e3b;border-left-color:#34d399}
+        .cal-cancelled{background:#fee2e2;border-left:4px solid #ef4444}.dark-mode .cal-cancelled{background:#7f1d1d;border-left-color:#f87171}
+        .cal-no-show{background:#fce7f3;border-left:4px solid #9ca3af}.dark-mode .cal-no-show{background:#374151;border-left-color:#6b7280}
+    </style>
+<base target="_blank">
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen overflow-hidden">
+<div id="app" class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-[280px] bg-white dark:bg-gray-800 shadow-xl flex flex-col py-6 px-4 gap-4 shrink-0">
+        <div class="flex items-center gap-3 px-2 mb-6"><div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white"><span class="material-symbols-outlined">medical_services</span></div><div><h1 class="text-lg font-bold text-indigo-600 dark:text-indigo-400" data-key="sidebarTitle">إدارة العيادة</h1><p class="text-xs text-gray-500 dark:text-gray-400">Clinic Admin</p></div></div>
+        <nav class="flex-1 space-y-1">
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg font-bold text-left bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-200" data-view="home" onclick="switchView('home')"><span class="material-symbols-outlined">dashboard</span><span data-key="sidebarHome">الرئيسية</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="doctors" onclick="switchView('doctors')"><span class="material-symbols-outlined">medical_services</span><span data-key="sidebarDoctors">إدارة الأطباء</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="employees" onclick="switchView('employees')"><span class="material-symbols-outlined">group</span><span data-key="sidebarEmployees">إدارة الموظفين</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="patients" onclick="switchView('patients')"><span class="material-symbols-outlined">person</span><span data-key="sidebarPatients">المرضى</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="appointments" onclick="switchView('appointments')"><span class="material-symbols-outlined">calendar_month</span><span data-key="sidebarAppointments">المواعيد</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="records" onclick="switchView('records')"><span class="material-symbols-outlined">description</span><span data-key="sidebarRecords">السجلات الطبية</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="finance" onclick="switchView('finance')"><span class="material-symbols-outlined">payments</span><span data-key="sidebarFinance">التقارير المالية</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="inventory" onclick="switchView('inventory')"><span class="material-symbols-outlined">inventory_2</span><span data-key="sidebarInventory">المخازن والعهد</span></button>
+            <button class="nav-item w-full flex items-center gap-3 p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" data-view="settings" onclick="switchView('settings')"><span class="material-symbols-outlined">settings</span><span data-key="sidebarSettings">الإعدادات</span></button>
+        </nav>
+        <div class="mt-auto space-y-2 border-t pt-4">
+            <button class="w-full flex items-center gap-3 p-3 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><span class="material-symbols-outlined">help</span><span data-key="help">المساعدة</span></button>
+            <button class="w-full flex items-center gap-3 p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg"><span class="material-symbols-outlined">logout</span><span data-key="logout">تسجيل الخروج</span></button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="h-16 px-6 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center shrink-0">
+            <div class="flex items-center gap-4"><div class="relative max-w-md hidden md:block"><span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span><input class="pl-10 pr-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-full focus:ring-2 focus:ring-indigo-500 text-sm w-80 dark:text-gray-100" placeholder="بحث..." data-key-ph="search" type="text"></div></div>
+            <div class="flex items-center gap-3">
+                <button class="flex items-center gap-1 p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" onclick="toggleLanguage()"><span class="material-symbols-outlined">language</span><span class="text-xs font-bold uppercase dark:text-gray-300" id="lang-btn">EN</span></button>
+                <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700" onclick="toggleDarkMode()"><span class="material-symbols-outlined dark:text-gray-300" id="dark-mode-icon">dark_mode</span></button>
+                <div class="relative" id="notif-wrapper">
+                    <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 relative" id="notif-bell-btn" onclick="toggleNotifications()"><span class="material-symbols-outlined dark:text-gray-300">notifications</span><span class="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full hidden" id="notif-badge"></span></button>
+                </div>
+                <div class="h-8 w-px bg-gray-300 dark:bg-gray-600"></div>
+                <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold">SA</div><div class="hidden lg:block text-right"><p class="text-sm font-bold dark:text-gray-100">Sarah Jenkins</p><p class="text-[10px] text-gray-500 dark:text-gray-400">Chief Admin</p></div></div>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900" id="content-canvas">
+            <section class="space-y-6 p-4" id="view-home"></section>
+            <section class="hidden space-y-6 p-4" id="view-doctors"></section>
+            <section class="hidden space-y-6 p-4" id="view-employees"></section>
+            <section class="hidden space-y-6 p-4" id="view-patients"></section>
+            <section class="hidden space-y-6 p-4" id="view-appointments"></section>
+            <section class="hidden space-y-6 p-4" id="view-records"></section>
+            <section class="hidden space-y-6 p-4" id="view-finance"></section>
+            <section class="hidden p-4" id="view-inventory"></section>
+            <section class="hidden space-y-6 p-4" id="view-settings"></section>
+        </div>
+    </div>
+
+    <!-- Notification Panel -->
+    <div class="bg-white dark:bg-gray-800 shadow-2xl rounded-xl border border-gray-200 dark:border-gray-700 p-4 hidden" id="notif-panel">
+        <div class="flex justify-between items-center mb-3 border-b pb-2"><h4 class="font-bold text-sm dark:text-gray-100" data-key="notifTitle">الإشعارات</h4><button class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline" onclick="clearNotifications()" data-key="clearNotifications">مسح الكل</button></div>
+        <div class="space-y-2" id="notif-list"></div>
+    </div>
+
+    <!-- Modals Overlay -->
+    <div id="modal-overlay" class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <!-- Edit Doctor Modal -->
+        <div id="editDoctorModal" class="bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden hidden">
+            <div class="p-4 bg-indigo-600 text-white flex justify-between items-center"><h3 class="font-bold" data-key="editDoctorTitle">تعديل بيانات الطبيب</h3><button onclick="closeAllModals()" class="p-1 hover:bg-white/20 rounded-full"><span class="material-symbols-outlined">close</span></button></div>
+            <form class="p-4 space-y-4" onsubmit="saveDoctorChanges(event)">
+                <input type="hidden" id="editDoctorId">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="name">اسم الطبيب</label><input type="text" id="editDoctorName" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="specialty">الاختصاص</label><input type="text" id="editDoctorSpecialty" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="phone">رقم الهاتف</label><input type="text" id="editDoctorPhone" required dir="ltr" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="status">الحالة</label><select id="editDoctorStatus" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><option value="على رأس العمل" data-key="onDuty">على رأس العمل</option><option value="في إجازة" data-key="onLeave">في إجازة</option></select></div>
+                </div>
+                <div class="border-t pt-3">
+                    <h4 class="font-bold mb-2 dark:text-gray-100" data-key="paymentSettingsTitle">إعدادات الدفع</h4>
+                    <div class="flex gap-4 mb-2"><label class="dark:text-gray-300"><input type="checkbox" id="editHasIncentive" onchange="toggleEditIncentiveFields()"> <span data-key="incentive">الحوافز</span></label><label class="dark:text-gray-300"><input type="checkbox" id="editHasSalary" onchange="toggleEditSalaryField()"> <span data-key="salary">الراتب</span></label></div>
+                    <div id="editIncentiveFields" class="grid grid-cols-2 gap-2 hidden">
+                        <div><label class="text-xs dark:text-gray-400" data-key="incentiveRate">سعر الحافز لكل مريض</label><input type="number" id="editIncentiveRate" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                        <div><label class="text-xs dark:text-gray-400" data-key="patientsCount">عدد المرضى</label><input type="number" id="editPatientsCount" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    </div>
+                    <div id="editSalaryField" class="hidden space-y-2">
+                        <div><label class="text-xs dark:text-gray-400" data-key="salaryLabel">الراتب</label><input type="number" id="editDoctorSalary" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                        <div><label class="text-xs dark:text-gray-400" data-key="cycle">الدورة</label><select id="editPaymentCycle" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><option value="daily" data-key="cycleDaily">يومي</option><option value="weekly" data-key="cycleWeekly">أسبوعي</option><option value="biweekly" data-key="cycleBiweekly">كل أسبوعين</option><option value="monthly" data-key="cycleMonthly" selected>شهري</option></select></div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2"><button type="button" onclick="closeAllModals()" class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" data-key="cancel">إلغاء</button><button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-xl" data-key="saveChanges">حفظ التعديلات</button></div>
+            </form>
+        </div>
+        <!-- Add Doctor Modal -->
+        <div id="addDoctorModal" class="bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden hidden">
+            <div class="p-4 bg-indigo-600 text-white flex justify-between items-center"><h3 class="font-bold" data-key="addDoctorTitle">إضافة طبيب جديد</h3><button onclick="closeAllModals()" class="p-1 hover:bg-white/20 rounded-full"><span class="material-symbols-outlined">close</span></button></div>
+            <form class="p-4 space-y-4" onsubmit="saveNewDoctor(event)">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="name">اسم الطبيب</label><input type="text" id="newDoctorName" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="specialty">الاختصاص</label><input type="text" id="newDoctorSpecialty" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="phone">رقم الهاتف</label><input type="text" id="newDoctorPhone" required dir="ltr" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                </div>
+                <div class="border-t pt-3"><h4 class="font-bold mb-2 dark:text-gray-100" data-key="createAccount">إنشاء حساب</h4><div class="grid grid-cols-2 gap-2"><div><label class="block text-sm mb-1 dark:text-gray-300" data-key="email">البريد الإلكتروني</label><input type="email" id="newDoctorEmail" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div><div><label class="block text-sm mb-1 dark:text-gray-300" data-key="password">كلمة المرور</label><input type="password" id="newDoctorPassword" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div></div></div>
+                <div class="border-t pt-3"><h4 class="font-bold mb-2 dark:text-gray-100" data-key="paymentSettingsTitle">إعدادات الدفع</h4><div class="flex gap-4 mb-2"><label class="dark:text-gray-300"><input type="checkbox" id="newHasIncentive" checked onchange="toggleNewIncentiveFields()"> <span data-key="incentive">الحوافز</span></label><label class="dark:text-gray-300"><input type="checkbox" id="newHasSalary" onchange="toggleNewSalaryField()"> <span data-key="salary">الراتب</span></label></div><div id="newIncentiveFields" class="grid grid-cols-2 gap-2"><input type="number" id="newIncentiveRate" placeholder="سعر الحافز" data-key-ph="incentiveRate" class="p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><input type="number" id="newPatientsCount" placeholder="عدد المرضى" data-key-ph="patientsCount" class="p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600" value="0"></div><div id="newSalaryField" class="hidden space-y-2"><input type="number" id="newDoctorSalary" placeholder="الراتب الدوري" data-key-ph="periodicSalary" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><select id="newPaymentCycle" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><option value="daily" data-key="cycleDaily">يومي</option><option value="weekly" data-key="cycleWeekly">أسبوعي</option><option value="biweekly" data-key="cycleBiweekly">كل أسبوعين</option><option value="monthly" data-key="cycleMonthly" selected>شهري</option></select></div></div>
+                <div class="flex justify-end gap-2"><button type="button" onclick="closeAllModals()" class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" data-key="cancel">إلغاء</button><button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-xl" data-key="save">حفظ</button></div>
+            </form>
+        </div>
+        <!-- Pay Doctor Modal -->
+        <div id="payDoctorModal" class="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden hidden">
+            <div class="p-4 bg-emerald-600 text-white flex justify-between items-center"><h3 class="font-bold" data-key="payDoctorTitle">دفع مستحقات الطبيب</h3><button onclick="closeAllModals()" class="p-1 hover:bg-white/20 rounded-full"><span class="material-symbols-outlined">close</span></button></div>
+            <div class="p-4 space-y-4">
+                <input type="hidden" id="payDoctorId">
+                <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="paySalary">الراتب المستحق</label><input type="number" id="paySalaryAmount" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600" oninput="updatePayTotal()"></div>
+                <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="payIncentive">الحوافز المستحقة</label><input type="number" id="payIncentiveAmount" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600" oninput="updatePayTotal()"></div>
+                <div class="flex justify-between font-bold text-lg dark:text-gray-100"><span data-key="payTotal">الإجمالي</span><span id="payTotal">0</span> <span data-key="currency">د.ع</span></div>
+                <div class="flex justify-end gap-2"><button onclick="closeAllModals()" class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" data-key="cancel">إلغاء</button><button onclick="confirmPayDoctor()" class="px-4 py-2 bg-emerald-600 text-white rounded-xl" data-key="confirmPayment">تأكيد الدفع</button></div>
+            </div>
+        </div>
+
+        <!-- Edit Employee Modal -->
+        <div id="editEmployeeModal" class="bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden hidden">
+            <div class="p-4 bg-indigo-600 text-white flex justify-between items-center"><h3 class="font-bold" data-key="editEmployeeTitle">تعديل بيانات الموظف</h3><button onclick="closeAllModals()" class="p-1 hover:bg-white/20 rounded-full"><span class="material-symbols-outlined">close</span></button></div>
+            <form class="p-4 space-y-4" onsubmit="saveEmployeeChanges(event)">
+                <input type="hidden" id="editEmployeeId">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="name">اسم الموظف</label><input type="text" id="editEmployeeName" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="position">المسمى الوظيفي</label><input type="text" id="editEmployeePosition" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="department">القسم</label><input type="text" id="editEmployeeDepartment" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="status">الحالة</label><select id="editEmployeeStatus" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><option value="نشط" data-key="active">نشط</option><option value="متوقف" data-key="inactive">متوقف</option></select></div>
+                </div>
+                <div class="flex justify-end gap-2"><button type="button" onclick="closeAllModals()" class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" data-key="cancel">إلغاء</button><button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-xl" data-key="saveChanges">حفظ التعديلات</button></div>
+            </form>
+        </div>
+        <!-- Add Employee Modal -->
+        <div id="addEmployeeModal" class="bg-white dark:bg-gray-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden hidden">
+            <div class="p-4 bg-indigo-600 text-white flex justify-between items-center"><h3 class="font-bold" data-key="addEmployeeTitle">إضافة موظف جديد</h3><button onclick="closeAllModals()" class="p-1 hover:bg-white/20 rounded-full"><span class="material-symbols-outlined">close</span></button></div>
+            <form class="p-4 space-y-4" onsubmit="saveNewEmployee(event)">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="name">اسم الموظف</label><input type="text" id="newEmployeeName" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="position">المسمى الوظيفي</label><input type="text" id="newEmployeePosition" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="department">القسم</label><input type="text" id="newEmployeeDepartment" required class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"></div>
+                    <div class="col-span-2"><label class="block text-sm font-bold mb-1 dark:text-gray-300" data-key="status">الحالة</label><select id="newEmployeeStatus" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl dark:text-gray-100 dark:border-gray-600"><option value="نشط" data-key="active">نشط</option><option value="متوقف" data-key="inactive">متوقف</option></select></div>
+                </div>
+                <div class="flex justify-end gap-2"><button type="button" onclick="closeAllModals()" class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" data-key="cancel">إلغاء</button><button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded-xl" data-key="save">حفظ</button></div>
+            </form>
+        </div>
+
+        <!-- Confirm Modal -->
+        <div id="confirmModal" class="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl p-6 hidden text-center"><span class="material-symbols-outlined text-red-500 text-[60px] mb-2">warning</span><h3 class="text-xl font-bold mb-2 dark:text-gray-100" data-key="confirm">تأكيد</h3><p class="text-gray-500 dark:text-gray-300 mb-4" id="confirmMsg"></p><div class="flex justify-center gap-2"><button class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" onclick="closeConfirmModal(false)" data-key="cancel">إلغاء</button><button class="px-4 py-2 bg-red-500 text-white rounded-xl" onclick="closeConfirmModal(true)" data-key="confirm">تأكيد</button></div></div>
+        <!-- Prompt Modal -->
+        <div id="promptModal" class="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl p-6 hidden"><h3 class="text-xl font-bold mb-2 dark:text-gray-100" id="promptTitle"></h3><input type="number" id="promptInput" class="w-full p-2 bg-gray-100 dark:bg-gray-700 border rounded-xl mb-3 dark:text-gray-100 dark:border-gray-600"><div class="flex justify-center gap-2"><button class="px-4 py-2 rounded-xl border dark:border-gray-600 dark:text-gray-300" onclick="resolvePrompt(null)" data-key="cancel">إلغاء</button><button class="px-4 py-2 bg-indigo-600 text-white rounded-xl" onclick="resolvePrompt(document.getElementById('promptInput').value)" data-key="confirm">تأكيد</button></div></div>
+    </div>
+</div>
+<script src="clinic-laser.js"></script>
+</body>
+</html>
