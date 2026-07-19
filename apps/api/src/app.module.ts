@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/index.js';
 import { AuthorizationModule } from './modules/authorization/index.js';
 import { SessionContextModule } from './modules/session-context/index.js';
+import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
 
 /**
  * Root application module.
@@ -33,8 +34,15 @@ import { SessionContextModule } from './modules/session-context/index.js';
  *   does not duplicate authentication, CSRF, or Origin logic. The
  *   module imports `DatabaseModule` internally for the session,
  *   membership, tenant, and role-assignment repositories.
+ * - {@link AuditModule} for the audit primitive (ninth canonical
+ *   batch). The audit module imports `DatabaseModule` for the
+ *   transactional outbox repository. The audit-store services use
+ *   the audit-store Prisma client (a separate connection to the
+ *   dedicated audit database). The `RequestIdMiddleware` is
+ *   registered globally to propagate the request ID into audit
+ *   events.
  *
- * No patient, billing, scheduling, inventory, or audit modules are
+ * No patient, billing, scheduling, or inventory modules are
  * imported in this batch. Those arrive in subsequent batches.
  */
 @Module({
@@ -48,9 +56,20 @@ import { SessionContextModule } from './modules/session-context/index.js';
       cache: true,
     }),
     HealthModule,
+    AuditModule,
     AuthModule,
     AuthorizationModule,
     SessionContextModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /**
+   * Register the request-ID middleware globally. The middleware
+   * runs for every request and attaches `requestId` and
+   * `correlationId` to the Express `Request` object. The
+   * `X-Request-Id` response header is set by the middleware.
+   */
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

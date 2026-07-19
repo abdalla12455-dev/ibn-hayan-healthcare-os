@@ -815,3 +815,109 @@ Stage Summary:
 - PostgreSQL 17.10 binaries made available at /home/z/.local/opt/postgresql-17/usr/lib/postgresql/17/bin/ via apt-get download + dpkg-deb -x (no sudo, no system package changes, no project dependency changes, no embedded database libraries).
 - No Batch 9 work started. No new product capability implemented. All corrections are confined to Batch 8 defects.
 - Batch 8 status: ACCEPTED.
+
+---
+Task ID: 9
+Agent: Main Agent (Batch 9)
+Task: Implement Batch 9 — Audit Primitive Foundation
+
+Work Log:
+- Verified git state: HEAD at 108acc238ec0e5d7925355438eeb2c680dce8e2b (Batch 8 corrective commit), branch main, working tree clean.
+- Inspected authoritative references: PRODUCT_BIBLE, SYSTEM_ARCHITECTURE Sections 20 & 27, AUDIT.md, ADR-006, ADR-012, ADR-013, Batch 8 worklog, existing code.
+- Created ADR-014: Audit Store and Integrity Strategy (dedicated PostgreSQL audit database, transactional outbox, HMAC-SHA-256 chained integrity, immutable triggers, idempotent delivery, framework-agnostic contracts).
+- Created Batch 9 worklog: BATCH_09_AUDIT_PRIMITIVE_FOUNDATION.md.
+- Implemented framework-agnostic audit contracts in packages/observability:
+  * Categories, actor types, outcomes, source types.
+  * Stable action-code catalogue (17 action codes across 5 categories).
+  * Audit event draft type and builder.
+  * Canonical serializer (deterministic JSON with lexicographically sorted keys).
+  * Integrity-hash helper (HMAC-SHA-256 chained).
+  * Identifier-HMAC helper (failed-login privacy).
+  * Safe metadata validator (forbidden-key detector, size limits).
+  * Key validation helpers.
+  * Audit-emitter port, audit-outbox port, audit-store append/read ports.
+  * Audit-verification result types.
+  * 83 unit tests (canonical serializer, metadata validator, integrity hash, identifier HMAC, builder, key validation).
+- Created dedicated audit Prisma schema at apps/api/prisma-audit/schema.prisma:
+  * AuditEvent model with all required fields.
+  * AuditChainHead model for chain-head tracking.
+  * Required indexes on all hot query paths.
+- Created audit-store migration 20260719130000_audit_store_foundation:
+  * audit_events and audit_chain_heads tables.
+  * CHECK constraints on category, actor_type, outcome, source, chain_scope, hash formats.
+  * BEFORE UPDATE OR DELETE trigger (rejects mutation).
+  * BEFORE TRUNCATE trigger (rejects truncation).
+  * Conditional GRANT for runtime role (skips if role doesn't exist).
+- Added AuditOutboxEvent model to transactional Prisma schema.
+- Created outbox migration 20260719130000_audit_outbox_foundation:
+  * audit_outbox_events table with unique event_id.
+  * Partial indexes for pending-row lookup and lease-sweep.
+  * CHECK constraints on attempt_count, event_version, delivered_after_created.
+- Updated .env.example with AUDIT_DATABASE_URL, AUDIT_INTEGRITY_HMAC_KEY, AUDIT_INTEGRITY_KEY_VERSION, AUDIT_IDENTIFIER_HMAC_KEY (placeholder values only).
+- Implemented audit infrastructure in apps/api/src/modules/audit/:
+  * AuditPrismaService (dedicated audit-store Prisma client).
+  * AuditConfigurationService (reads and validates audit env vars).
+  * PrismaAuditOutboxRepository (implements AuditOutboxPort).
+  * PrismaAuditStoreAppendRepository (implements AuditStoreAppendPort with row-level locking).
+  * PrismaAuditStoreReadRepository (implements AuditStoreReadPort).
+  * AuditEmitterService (implements AuditEmitterPort).
+  * AuditDispatcherService (bounded retry, idempotent delivery, lease management).
+  * AuditIntegrityVerifierService (detects modified payload, modified previous hash, invalid/missing/duplicated sequence, incorrect key version, chain fork).
+  * AuditHelperService (convenience builder + emitter).
+  * RequestIdMiddleware (X-Request-Id header, X-Correlation-Id, safe format validation).
+  * AuditModule wiring all services.
+- Created CLI scripts: audit-dispatch.ts and audit-verify.ts.
+- Updated API package.json with audit:db:validate, audit:db:generate, audit:db:migrate:deploy, audit:test:database, audit:test:integration, audit:dispatch, audit:verify scripts.
+- Updated AppModule to import AuditModule and register RequestIdMiddleware globally.
+- Updated DatabaseModule to export PrismaService (for the audit outbox repository).
+- Instrumented AuthService:
+  * login: Origin denied audit, failed-login audit (with HMAC identifier hash, no raw email), successful-login audit (atomic with session creation in $transaction).
+  * getSessionFromCookie: session-invalid audit, session-rotated audit (atomic with rotation in $transaction).
+  * logout: Origin denied audit, CSRF denied audit, logout-succeeded audit (atomic with revocation in $transaction).
+- Instrumented AuthorizationGuard:
+  * Origin denied audit, CSRF denied audit.
+  * Authorization allowed audit, authorization denied audit (with reason code).
+- Instrumented SessionContextService:
+  * Context viewed audit.
+  * Context selected audit (atomic with membership update in $transaction).
+  * Context cleared audit (atomic with membership clear in $transaction).
+- Instrumented auth-bootstrap-dev.ts:
+  * R13 role assignment audit (atomic with role-assignment insert in $transaction).
+- Updated test bootstrap (_pg-bootstrap.ts) to create the audit database, set audit env vars, and apply audit migrations.
+- Created vitest configs: vitest.audit-database.config.ts, vitest.audit-integration.config.ts.
+- Created audit-store database tests (16 tests): migrations apply, platform/tenant chains, independent chains, monotonic sequences, idempotent delivery, UPDATE/DELETE/TRUNCATE rejected, unknown enum rejected, forbidden metadata rejected, integrity verification (valid + tampering), identifier hashing deterministic, raw email absent.
+- Created audit integration tests (13 tests): successful login, failed login (no raw email), invalid Origin, allowed authorization, context view/select/clear, logout, request-ID matching, generic error responses unchanged, no secrets in audit data, pending outbox delivery after simulated outage, integrity verification after normal operation.
+- Ran full regression validation:
+  * build:shared:clean — PASSED.
+  * typecheck — PASSED (all 8 workspace projects).
+  * lint — PASSED (after auto-fix).
+  * test — PASSED (contracts 116, api unit 5, web 119 = 240 unit tests).
+  * db:validate — PASSED.
+  * audit:db:validate — PASSED.
+  * test:database — PASSED (81/81).
+  * test:auth — PASSED (35/35).
+  * test:context — PASSED (26/26).
+  * audit:test:database — PASSED (16/16).
+  * audit:test:integration — PASSED (13/13).
+  * web test — PASSED (119/119).
+  * build — PASSED.
+  * git diff --check — PASSED.
+
+Stage Summary:
+- Pre-batch HEAD: 108acc238ec0e5d7925355438eeb2c680dce8e2b
+- ADR-014 created at download/docs/12_ADR/ADR-014_AUDIT_STORE_AND_INTEGRITY_STRATEGY.md (Accepted).
+- Batch worklog at download/docs/99_WORKLOG/BATCH_09_AUDIT_PRIMITIVE_FOUNDATION.md.
+- Transactional migration: 20260719130000_audit_outbox_foundation.
+- Audit-store migration: 20260719130000_audit_store_foundation.
+- New environment variables: AUDIT_DATABASE_URL, AUDIT_INTEGRITY_HMAC_KEY, AUDIT_INTEGRITY_KEY_VERSION, AUDIT_IDENTIFIER_HMAC_KEY.
+- Audit event categories: security, authorization, tenant_context, rbac, audit.
+- Audit action codes: 17 codes (7 authentication, 2 security, 2 authorization, 3 tenant_context, 2 rbac, 3 audit system).
+- Audit-store schema: audit_events (immutable, 30+ fields, 9 indexes, CHECK constraints, immutability triggers) + audit_chain_heads (mutable chain-head tracking).
+- Outbox design: audit_outbox_events in transactional DB, unique event_id, lease-based claiming, bounded retry with backoff.
+- Integrity algorithm: SHA-256 canonical payload hash + HMAC-SHA-256 chained integrity hash binding key version, chain scope, chain sequence, previous integrity hash, payload hash.
+- Immutability controls: BEFORE UPDATE OR DELETE trigger + BEFORE TRUNCATE trigger + conditional runtime-role GRANT (INSERT/SELECT only on audit_events).
+- Events instrumented: login success/fail, logout, session invalid/rotated, Origin denied, CSRF denied, authorization allowed/denied, context viewed/selected/cleared, R13 role assigned, audit integrity verified/failed.
+- Test totals: 81 database + 35 auth + 26 context + 16 audit-store + 13 audit-integration + 116 contracts + 5 api unit + 83 observability unit + 119 web = 494 tests passed, 0 failed.
+- No secrets exposed in audit data. No raw emails in failed-login records. No passwords, tokens, CSRF values, cookies, or authorization headers persisted.
+- Existing API error behaviour and Batch 8 security ordering unchanged (verified by 35 auth + 26 context tests).
+- Batch 9 status: ACCEPTED.

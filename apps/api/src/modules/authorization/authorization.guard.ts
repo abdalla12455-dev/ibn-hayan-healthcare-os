@@ -10,6 +10,8 @@ import type {
 import { AuthService } from '../auth/auth.service.js';
 import { CsrfService } from '../auth/csrf.service.js';
 import { CSRF_HEADER_NAME } from '../auth/auth.constants.js';
+import { AuditHelperService } from '../audit/audit-helper.service.js';
+import type { RequestWithIdentifiers } from '../audit/request-id.middleware.js';
 import {
   AUTHORIZATION_PERMISSION_METADATA,
   AUTHORIZATION_CONTEXT_MODE_METADATA,
@@ -103,6 +105,7 @@ export class AuthorizationGuard implements CanActivate {
     private readonly authService: AuthService,
     private readonly authorizationService: AuthorizationService,
     private readonly csrfService: CsrfService,
+    private readonly auditHelper: AuditHelperService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -133,6 +136,22 @@ export class AuthorizationGuard implements CanActivate {
       const origin = request.headers['origin'];
       const webOrigin = process.env['WEB_ORIGIN'] ?? 'http://localhost:3000';
       if (!this.authService.isOriginAllowed(origin, webOrigin)) {
+        // Emit a direct, non-mutating security audit event for the
+        // denied Origin. Per the ninth canonical batch specification,
+        // direct non-mutating security events are persisted first to
+        // the transactional outbox.
+        await this.auditHelper.emitDirect({
+          action: 'security.origin.denied',
+          outcome: 'denied',
+          reasonCode: 'origin_disallowed',
+          source: 'api',
+          requestId: readRequestId(request),
+          correlationId: readCorrelationId(request),
+          ipAddress: readIpAddress(request),
+          userAgent: readUserAgent(request),
+          scope: 'authorization',
+          metadata: { endpoint: request.path, method },
+        });
         throw originDisallowed();
       }
     }
@@ -157,77 +176,159 @@ export class AuthorizationGuard implements CanActivate {
     if (method === 'PUT' || method === 'DELETE') {
       const csrfToken = readHeader(request, CSRF_HEADER_NAME);
       if (!csrfToken || csrfToken.length === 0) {
+        await this.auditHelper.emitDirect({
+          action: 'security.csrf.denied',
+          outcome: 'denied',
+          reasonCode: 'csrf_missing',
+          source: 'api',
+          actorType: 'USER',
+          actorId: authResult.user.id,
+          sessionId: authResult.session.id,
+          requestId: readRequestId(request),
+          correlationId: readCorrelationId(request),
+          ipAddress: readIpAddress(request),
+          userAgent: readUserAgent(request),
+          scope: 'authorization',
+          metadata: { endpoint: request.path, method },
+        });
         throw csrfInvalid();
       }
       const csrfOk = this.csrfService.verify(authResult.session.id, csrfToken);
       if (!csrfOk) {
+        await this.auditHelper.emitDirect({
+          action: 'security.csrf.denied',
+          outcome: 'denied',
+          reasonCode: 'csrf_invalid',
+          source: 'api',
+          actorType: 'USER',
+          actorId: authResult.user.id,
+          sessionId: authResult.session.id,
+          requestId: readRequestId(request),
+          correlationId: readCorrelationId(request),
+          ipAddress: readIpAddress(request),
+          userAgent: readUserAgent(request),
+          scope: 'authorization',
+          metadata: { endpoint: request.path, method },
+        });
         throw csrfInvalid();
       }
     }
 
     // Perform the authorization check based on the context-
-    // resolution mode.
+    // resolution mode. The audit emission for the authorization
+    // decision (allowed/denied) is done after the check.
     let roleAssignments;
-    if (mode === 'for-user') {
-      // The user's available active memberships. The auth result
-      // already filtered to active memberships; we use their IDs.
-      const membershipIds = authResult.memberships.map(
-        (m: TenantMembership) => m.id,
-      );
-      roleAssignments = await this.authorizationService.authorizeForUser(
-        authResult.user.id,
-        membershipIds,
-        requiredPermission,
-      );
-    } else if (mode === 'for-targeted-membership') {
-      // The membership identified by the request body's
-      // membershipId. The guard validates the body to extract
-      // the membershipId; the controller re-validates the body
-      // defensively.
-      const body = (request as { body?: unknown }).body;
-      const parsed = SelectTenantContextRequestSchema.safeParse(body);
-      if (!parsed.success) {
-        // A malformed body is rejected with `contextSelectionForbidden`
-        // rather than the generic `authorizationForbidden`. This is
-        // consistent with the other targeted-membership failures
-        // (not found, cross-user, suspended) and does not reveal
-        // whether the body would have targeted a real membership.
-        throw contextSelectionForbidden();
-      }
-      const targetMembershipId = parsed.data.membershipId as TenantMembershipId;
-
-      // Verify the targeted membership belongs to the
-      // authenticated user AND is in their active memberships
-      // list (which already filters out suspended memberships
-      // and memberships under suspended Tenants). A mismatch is
-      // denied generically via `contextSelectionForbidden()`:
-      // the same response is returned whether the membership
-      // does not exist, exists for another user, is suspended,
-      // or belongs to a suspended Tenant. This is the
-      // "rejected generically" rule.
-      const targetMembership = authResult.memberships.find(
-        (m: TenantMembership) => m.id === targetMembershipId,
-      );
-      if (targetMembership === undefined) {
-        throw contextSelectionForbidden();
-      }
-
-      roleAssignments =
-        await this.authorizationService.authorizeForTargetedMembership(
+    let authorizedTenantId: string | null = null;
+    try {
+      if (mode === 'for-user') {
+        // The user's available active memberships. The auth result
+        // already filtered to active memberships; we use their IDs.
+        const membershipIds = authResult.memberships.map(
+          (m: TenantMembership) => m.id,
+        );
+        roleAssignments = await this.authorizationService.authorizeForUser(
           authResult.user.id,
-          targetMembershipId,
+          membershipIds,
           requiredPermission,
         );
-    } else {
-      // for-active-membership: the session's currently active
-      // membership.
-      roleAssignments =
-        await this.authorizationService.authorizeForActiveMembership(
-          authResult.user.id,
-          authResult.session.activeTenantMembershipId,
-          requiredPermission,
+        authorizedTenantId = authResult.memberships[0]?.tenantId ?? null;
+      } else if (mode === 'for-targeted-membership') {
+        // The membership identified by the request body's
+        // membershipId. The guard validates the body to extract
+        // the membershipId; the controller re-validates the body
+        // defensively.
+        const body = (request as { body?: unknown }).body;
+        const parsed = SelectTenantContextRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          // A malformed body is rejected with `contextSelectionForbidden`
+          // rather than the generic `authorizationForbidden`. This is
+          // consistent with the other targeted-membership failures
+          // (not found, cross-user, suspended) and does not reveal
+          // whether the body would have targeted a real membership.
+          await this.emitAuthorizationDenied(
+            authResult.user.id,
+            authResult.session.id,
+            requiredPermission,
+            'malformed_body',
+            request,
+          );
+          throw contextSelectionForbidden();
+        }
+        const targetMembershipId = parsed.data
+          .membershipId as TenantMembershipId;
+
+        // Verify the targeted membership belongs to the
+        // authenticated user AND is in their active memberships
+        // list (which already filters out suspended memberships
+        // and memberships under suspended Tenants). A mismatch is
+        // denied generically via `contextSelectionForbidden()`:
+        // the same response is returned whether the membership
+        // does not exist, exists for another user, is suspended,
+        // or belongs to a suspended Tenant. This is the
+        // "rejected generically" rule.
+        const targetMembership = authResult.memberships.find(
+          (m: TenantMembership) => m.id === targetMembershipId,
         );
+        if (targetMembership === undefined) {
+          await this.emitAuthorizationDenied(
+            authResult.user.id,
+            authResult.session.id,
+            requiredPermission,
+            'context_selection_forbidden',
+            request,
+          );
+          throw contextSelectionForbidden();
+        }
+
+        roleAssignments =
+          await this.authorizationService.authorizeForTargetedMembership(
+            authResult.user.id,
+            targetMembershipId,
+            requiredPermission,
+          );
+        authorizedTenantId = targetMembership.tenantId;
+      } else {
+        // for-active-membership: the session's currently active
+        // membership.
+        roleAssignments =
+          await this.authorizationService.authorizeForActiveMembership(
+            authResult.user.id,
+            authResult.session.activeTenantMembershipId,
+            requiredPermission,
+          );
+        // For the active-membership mode, the tenant is the
+        // session's active membership's tenant (if any).
+        const activeMembership = authResult.memberships.find(
+          (m: TenantMembership) =>
+            m.id === authResult.session.activeTenantMembershipId,
+        );
+        authorizedTenantId = activeMembership?.tenantId ?? null;
+      }
+    } catch (err) {
+      // The authorization service throws `authorizationForbidden()`
+      // when the permission is not granted. We emit the denied
+      // audit event and re-throw.
+      if (err instanceof Error && err.constructor.name === 'HttpException') {
+        await this.emitAuthorizationDenied(
+          authResult.user.id,
+          authResult.session.id,
+          requiredPermission,
+          'permission_denied',
+          request,
+        );
+      }
+      throw err;
     }
+
+    // Emit the allowed audit event.
+    await this.emitAuthorizationAllowed(
+      authResult.user.id,
+      authResult.session.id,
+      requiredPermission,
+      roleAssignments.map((a: { roleCode: string }) => a.roleCode),
+      authorizedTenantId,
+      request,
+    );
 
     // Attach the auth result and role assignments to the request
     // so the controller can use them without re-validating the
@@ -242,6 +343,74 @@ export class AuthorizationGuard implements CanActivate {
     };
 
     return true;
+  }
+
+  /**
+   * Emit an `authorization.decision.allowed` audit event. The event
+   * is direct (non-transactional) because the authorization decision
+   * is not a state mutation.
+   */
+  private async emitAuthorizationAllowed(
+    userId: string,
+    sessionId: string,
+    permissionCode: string,
+    roleCodes: readonly string[],
+    tenantId: string | null,
+    request: Request,
+  ): Promise<void> {
+    const result = await this.auditHelper.emitDirect({
+      action: 'authorization.decision.allowed',
+      outcome: 'success',
+      source: 'api',
+      tenantId,
+      actorType: 'USER',
+      actorId: userId,
+      sessionId,
+      permissionCode,
+      roleCodes,
+      requestId: readRequestId(request),
+      correlationId: readCorrelationId(request),
+      ipAddress: readIpAddress(request),
+      userAgent: readUserAgent(request),
+      scope: 'authorization',
+      metadata: { endpoint: request.path, method: request.method },
+    });
+    if (!result.ok) {
+      // Best-effort: do not block the authorized request.
+    }
+  }
+
+  /**
+   * Emit an `authorization.decision.denied` audit event. The event
+   * is direct (non-transactional) because the authorization denial
+   * is not a state mutation.
+   */
+  private async emitAuthorizationDenied(
+    userId: string,
+    sessionId: string,
+    permissionCode: string,
+    reasonCode: string,
+    request: Request,
+  ): Promise<void> {
+    const result = await this.auditHelper.emitDirect({
+      action: 'authorization.decision.denied',
+      outcome: 'denied',
+      reasonCode,
+      source: 'api',
+      actorType: 'USER',
+      actorId: userId,
+      sessionId,
+      permissionCode,
+      requestId: readRequestId(request),
+      correlationId: readCorrelationId(request),
+      ipAddress: readIpAddress(request),
+      userAgent: readUserAgent(request),
+      scope: 'authorization',
+      metadata: { endpoint: request.path, method: request.method },
+    });
+    if (!result.ok) {
+      // Best-effort: do not block the denial.
+    }
   }
 }
 
@@ -324,6 +493,46 @@ function readHeader(req: Request, name: string): string | undefined {
     return value[0];
   }
   return value;
+}
+
+/**
+ * Read the request ID from the request. Falls back to a nil UUID
+ * if the request-ID middleware has not run (defence-in-depth).
+ */
+function readRequestId(req: Request): string {
+  const augmented = req as RequestWithIdentifiers;
+  return augmented.requestId ?? '00000000-0000-0000-0000-000000000000';
+}
+
+/**
+ * Read the correlation ID from the request. Returns `null` if not
+ * set.
+ */
+function readCorrelationId(req: Request): string | null {
+  const augmented = req as RequestWithIdentifiers;
+  return augmented.correlationId ?? null;
+}
+
+/**
+ * Read the client IP address from the request.
+ */
+function readIpAddress(req: Request): string | null {
+  const ip = req.ip ?? req.socket?.remoteAddress ?? null;
+  return ip;
+}
+
+/**
+ * Read the user-agent from the request.
+ */
+function readUserAgent(req: Request): string | null {
+  const ua = req.headers['user-agent'];
+  if (typeof ua === 'string') {
+    return ua;
+  }
+  if (Array.isArray(ua)) {
+    return ua[0] ?? null;
+  }
+  return null;
 }
 
 // Re-export the error helpers so consumers can catch authorization

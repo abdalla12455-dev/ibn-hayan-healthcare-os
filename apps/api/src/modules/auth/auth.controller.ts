@@ -26,7 +26,8 @@ import {
   type LogoutResponse,
 } from '@ibn-hayan/contracts';
 import type { RoleLabelLocale } from '@ibn-hayan/domain';
-import { AuthService } from './auth.service.js';
+import { AuthService, type AuditRequestContext } from './auth.service.js';
+import type { RequestWithIdentifiers } from '../audit/request-id.middleware.js';
 import {
   SESSION_COOKIE_NAME,
   CSRF_HEADER_NAME,
@@ -222,6 +223,7 @@ export class AuthController {
       password: request.password,
       origin,
       webOrigin,
+      auditContext: buildAuditContext(req),
     });
 
     // Set the HttpOnly cookie with the raw session token.
@@ -317,7 +319,10 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<SessionResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    const result = await this.auth.getSessionFromCookie(cookieValue);
+    const result = await this.auth.getSessionFromCookie(
+      cookieValue,
+      buildAuditContext(req),
+    );
     if (result === null) {
       throw sessionRequired();
     }
@@ -372,7 +377,10 @@ export class AuthController {
   })
   async getCsrfToken(@Req() req: Request): Promise<CsrfResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    const result = await this.auth.getSessionFromCookie(cookieValue);
+    const result = await this.auth.getSessionFromCookie(
+      cookieValue,
+      buildAuditContext(req),
+    );
     if (result === null) {
       throw sessionRequired();
     }
@@ -426,6 +434,7 @@ export class AuthController {
       origin,
       csrfToken,
       webOrigin,
+      auditContext: buildAuditContext(req),
     });
 
     // Clear the cookie.
@@ -499,4 +508,27 @@ function resolveLocale(acceptLanguage: string | undefined): RoleLabelLocale {
     return 'en';
   }
   return 'ar';
+}
+
+/**
+ * Build the audit request context from the Express request. Reads
+ * the `requestId` and `correlationId` set by the `RequestIdMiddleware`,
+ * the client IP, and the user-agent. The user-agent is bounded by
+ * the audit-event builder.
+ */
+function buildAuditContext(req: Request): AuditRequestContext {
+  const augmented = req as RequestWithIdentifiers;
+  const requestId =
+    augmented.requestId ?? '00000000-0000-0000-0000-000000000000';
+  const correlationId = augmented.correlationId ?? null;
+  const ipRaw = req.ip ?? req.socket?.remoteAddress ?? null;
+  const ipAddress = ipRaw !== null && ipRaw !== undefined ? ipRaw : null;
+  const uaRaw = req.headers['user-agent'];
+  const userAgent =
+    typeof uaRaw === 'string'
+      ? uaRaw
+      : Array.isArray(uaRaw)
+        ? (uaRaw[0] ?? null)
+        : null;
+  return { requestId, correlationId, ipAddress, userAgent };
 }

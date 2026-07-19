@@ -23,6 +23,9 @@ import {
   TENANT_REPOSITORY,
   TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from '../../infrastructure/database/index.js';
+import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import { sessionFromPrisma } from '../../infrastructure/database/mappers/session.mapper.js';
+import { AuditHelperService } from '../audit/audit-helper.service.js';
 import { PasswordService } from './password.service.js';
 import {
   SessionTokenService,
@@ -46,6 +49,17 @@ import type {
   ActiveTenantContext,
   RoleSummary,
 } from '@ibn-hayan/contracts';
+
+/**
+ * Request context for audit emission. Carries the request-scoped
+ * identifiers and network metadata that the audit emitter needs.
+ */
+export interface AuditRequestContext {
+  readonly requestId: string;
+  readonly correlationId: string | null;
+  readonly ipAddress: string | null;
+  readonly userAgent: string | null;
+}
 
 /**
  * Authentication service.
@@ -98,6 +112,8 @@ export class AuthService {
     @Inject(TENANT_REPOSITORY) private readonly tenants: TenantRepository,
     @Inject(TENANT_ROLE_ASSIGNMENT_REPOSITORY)
     private readonly roleAssignments: TenantRoleAssignmentRepository,
+    private readonly prisma: PrismaService,
+    private readonly auditHelper: AuditHelperService,
     private readonly passwordService: PasswordService,
     private readonly sessionTokens: SessionTokenService,
     private readonly csrfService: CsrfService,
@@ -132,6 +148,7 @@ export class AuthService {
     readonly password: string;
     readonly origin: string | undefined;
     readonly webOrigin: string | string[];
+    readonly auditContext: AuditRequestContext;
   }): Promise<{
     readonly session: Session;
     readonly rawToken: string;
@@ -143,6 +160,24 @@ export class AuthService {
     // disallowed Origin returns the same generic 403 as a disallowed
     // Origin; the response does not reveal whether an account exists.
     if (!this.isOriginAllowed(input.origin, input.webOrigin)) {
+      // Emit a direct, non-mutating security audit event for the
+      // denied Origin. Per the ninth canonical batch specification,
+      // direct non-mutating security events are persisted first to
+      // the transactional outbox. The emission is best-effort: if
+      // the outbox is unavailable, the generic client-facing
+      // security response is preserved.
+      await this.auditHelper.emitDirect({
+        action: 'security.origin.denied',
+        outcome: 'denied',
+        reasonCode: 'origin_disallowed',
+        source: 'api',
+        requestId: input.auditContext.requestId,
+        correlationId: input.auditContext.correlationId,
+        ipAddress: input.auditContext.ipAddress,
+        userAgent: input.auditContext.userAgent,
+        scope: 'pre_authentication',
+        metadata: { endpoint: 'login' },
+      });
       throw originDisallowed();
     }
 
@@ -150,11 +185,24 @@ export class AuthService {
     const user = await this.users.findByNormalisedEmail(normalisedEmail);
     if (user === null) {
       // Unknown email — return the generic 401. Do NOT log the email.
+      // Emit a failed-login audit event with the HMAC of the
+      // normalised identifier. The raw email is NEVER persisted.
+      await this.emitFailedLogin(
+        input.email,
+        'unknown_email',
+        input.auditContext,
+      );
       throw invalidCredentials();
     }
 
     // Disabled users cannot sign in.
     if (user.status === 'disabled') {
+      await this.emitFailedLogin(
+        input.email,
+        'user_disabled',
+        input.auditContext,
+        user.id,
+      );
       throw invalidCredentials();
     }
 
@@ -166,6 +214,12 @@ export class AuthService {
       input.password,
     );
     if (!passwordOk) {
+      await this.emitFailedLogin(
+        input.email,
+        'wrong_password',
+        input.auditContext,
+        user.id,
+      );
       throw invalidCredentials();
     }
 
@@ -175,21 +229,66 @@ export class AuthService {
       (m) => m.status === 'active',
     );
     if (activeMemberships.length === 0) {
+      await this.emitFailedLogin(
+        input.email,
+        'no_active_membership',
+        input.auditContext,
+        user.id,
+      );
       throw invalidCredentials();
     }
 
-    // Create the session. Generate a fresh token, hash it, persist
-    // the hash. The raw token is returned to the caller for cookie-
-    // setting.
+    // Create the session AND the audit outbox row in a single
+    // transaction. Per the ninth canonical batch specification,
+    // the successful login's session creation and audit outbox
+    // insertion must be atomic. A state mutation cannot commit
+    // without its outbox record.
     const now = new Date();
     const expiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS);
     const { raw, hash } = generateSessionTokenAndHash(this.sessionTokens);
 
-    const session = await this.sessions.create({
-      userId: user.id,
-      tokenHash: hash,
-      expiresAt,
-      lastSeenAt: now,
+    // Resolve the tenant for the first active membership (for
+    // audit chain scoping). The login event is tenant-scoped if
+    // the user has at least one active membership; otherwise it
+    // would be platform-scoped (but we already rejected that case
+    // above).
+    const firstMembership = activeMemberships[0]!;
+
+    const session = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.authSession.create({
+        data: {
+          userId: user.id,
+          tokenHash: hash,
+          expiresAt,
+          lastSeenAt: now,
+        },
+      });
+      const createdSession = sessionFromPrisma(row);
+
+      // Emit the successful-login audit event in the same
+      // transaction. The audit helper passes the transaction to
+      // the outbox port, which inserts the outbox row using the
+      // transaction client.
+      await this.auditHelper.emit(
+        {
+          action: 'authentication.login.succeeded',
+          outcome: 'success',
+          source: 'api',
+          tenantId: firstMembership.tenantId,
+          actorType: 'USER',
+          actorId: user.id,
+          sessionId: createdSession.id,
+          requestId: input.auditContext.requestId,
+          correlationId: input.auditContext.correlationId,
+          ipAddress: input.auditContext.ipAddress,
+          userAgent: input.auditContext.userAgent,
+          scope: 'authentication',
+          metadata: { endpoint: 'login' },
+        },
+        { transaction: tx },
+      );
+
+      return createdSession;
     });
 
     this.logger.debug(
@@ -203,6 +302,50 @@ export class AuthService {
       user,
       memberships: activeMemberships,
     };
+  }
+
+  /**
+   * Emit a failed-login audit event with the HMAC of the normalised
+   * identifier. The raw email is NEVER persisted; only the HMAC is
+   * stored in `subject_identifier_hash`.
+   *
+   * Per ADR-014 and the ninth canonical batch specification, the
+   * raw attempted email is NEVER stored in audit data. The
+   * `subjectIdentifierHash` is computed using the identifier HMAC
+   * key, which is separate from the integrity key.
+   *
+   * The emission is best-effort: if the outbox is unavailable, the
+   * generic client-facing security response is preserved. The
+   * failure is logged at error level for operational investigation.
+   */
+  private async emitFailedLogin(
+    rawEmail: string,
+    reasonCode: string,
+    auditContext: AuditRequestContext,
+    userId?: string,
+  ): Promise<void> {
+    const subjectIdentifierHash =
+      this.auditHelper.computeFailedLoginIdentifierHash(rawEmail);
+    const result = await this.auditHelper.emitDirect({
+      action: 'authentication.login.failed',
+      outcome: 'failure',
+      reasonCode,
+      source: 'api',
+      actorType: 'ANONYMOUS',
+      actorId: userId ?? null,
+      subjectIdentifierHash,
+      requestId: auditContext.requestId,
+      correlationId: auditContext.correlationId,
+      ipAddress: auditContext.ipAddress,
+      userAgent: auditContext.userAgent,
+      scope: 'pre_authentication',
+      metadata: { endpoint: 'login' },
+    });
+    if (!result.ok) {
+      this.logger.error(
+        `Failed to emit failed-login audit event: ${result.reason} — ${result.detail}`,
+      );
+    }
   }
 
   /**
@@ -222,7 +365,10 @@ export class AuthService {
    * session was touched but not rotated, `rotatedRawToken` is `null`
    * and the cookie is unchanged.
    */
-  async getSessionFromCookie(cookieValue: string | undefined): Promise<{
+  async getSessionFromCookie(
+    cookieValue: string | undefined,
+    auditContext?: AuditRequestContext,
+  ): Promise<{
     readonly session: Session;
     readonly user: User;
     readonly memberships: TenantMembership[];
@@ -237,11 +383,19 @@ export class AuthService {
     const now = new Date();
     const session = await this.sessions.findActiveByTokenHash(tokenHash, now);
     if (session === null) {
+      // The session is invalid (not found, revoked, or expired).
+      // Emit an audit event if we have a context.
+      if (auditContext !== undefined) {
+        await this.emitSessionInvalid(tokenHash, auditContext);
+      }
       return null;
     }
 
     const user = await this.users.findById(session.userId);
     if (user === null || user.status === 'disabled') {
+      if (auditContext !== undefined) {
+        await this.emitSessionInvalid(tokenHash, auditContext);
+      }
       return null;
     }
 
@@ -264,19 +418,61 @@ export class AuthService {
       // Rotate: generate a new token, replace the stored hash, update
       // the cookie. The previous token is invalidated immediately.
       const generated = generateSessionTokenAndHash(this.sessionTokens);
-      const updated = await this.sessions.rotateToken(
-        session.id,
-        generated.hash,
-        now,
-      );
-      if (updated === null) {
-        // The session was revoked or deleted between our lookup and
-        // our rotation. Treat as invalid.
-        return null;
+
+      // Per the ninth canonical batch specification, session rotation
+      // and its audit outbox record must be atomic. When an audit
+      // context is supplied, we use a transaction that wraps the
+      // rotation, the touch, and the outbox insertion. When no
+      // audit context is supplied (backward compatibility with
+      // existing tests), we use the existing non-transactional
+      // rotation.
+      if (auditContext !== undefined) {
+        const updated = await this.prisma.$transaction(async (tx) => {
+          const row = await tx.authSession.update({
+            where: { id: session.id },
+            data: {
+              tokenHash: generated.hash,
+              rotatedAt: now,
+              lastSeenAt: now,
+            },
+          });
+          await this.auditHelper.emit(
+            {
+              action: 'authentication.session.rotated',
+              outcome: 'success',
+              source: 'api',
+              tenantId: activeMemberships[0]?.tenantId ?? null,
+              actorType: 'USER',
+              actorId: user.id,
+              sessionId: session.id,
+              requestId: auditContext.requestId,
+              correlationId: auditContext.correlationId,
+              ipAddress: auditContext.ipAddress,
+              userAgent: auditContext.userAgent,
+              scope: 'session',
+              metadata: { endpoint: 'session_validation' },
+            },
+            { transaction: tx },
+          );
+          return sessionFromPrisma(row);
+        });
+        if (updated === null) {
+          return null;
+        }
+        rotatedRawToken = generated.raw;
+      } else {
+        const updated = await this.sessions.rotateToken(
+          session.id,
+          generated.hash,
+          now,
+        );
+        if (updated === null) {
+          return null;
+        }
+        rotatedRawToken = generated.raw;
+        // Also touch the lastSeenAt.
+        await this.sessions.touch(session.id, now);
       }
-      rotatedRawToken = generated.raw;
-      // Also touch the lastSeenAt.
-      await this.sessions.touch(session.id, now);
     } else if (sinceLastTouch >= SESSION_IDLE_TOUCH_INTERVAL_MS) {
       // Touch: update lastSeenAt without rotating.
       await this.sessions.touch(session.id, now);
@@ -292,6 +488,35 @@ export class AuthService {
       expiresAt: session.expiresAt,
       rotatedRawToken,
     };
+  }
+
+  /**
+   * Emit a session-invalid audit event. The token hash is NOT
+   * persisted; only a boolean indicator that the session was
+   * invalid is recorded. The raw cookie value is NEVER persisted.
+   */
+  private async emitSessionInvalid(
+    _tokenHash: string,
+    auditContext: AuditRequestContext,
+  ): Promise<void> {
+    const result = await this.auditHelper.emitDirect({
+      action: 'authentication.session.invalid',
+      outcome: 'failure',
+      reasonCode: 'session_invalid',
+      source: 'api',
+      actorType: 'ANONYMOUS',
+      requestId: auditContext.requestId,
+      correlationId: auditContext.correlationId,
+      ipAddress: auditContext.ipAddress,
+      userAgent: auditContext.userAgent,
+      scope: 'session',
+      metadata: { endpoint: 'session_validation' },
+    });
+    if (!result.ok) {
+      this.logger.error(
+        `Failed to emit session-invalid audit event: ${result.reason} — ${result.detail}`,
+      );
+    }
   }
 
   /**
@@ -326,9 +551,24 @@ export class AuthService {
     readonly origin: string | undefined;
     readonly csrfToken: string | undefined;
     readonly webOrigin: string | string[];
+    readonly auditContext?: AuditRequestContext;
   }): Promise<void> {
     // Verify Origin.
     if (!this.isOriginAllowed(input.origin, input.webOrigin)) {
+      if (input.auditContext !== undefined) {
+        await this.auditHelper.emitDirect({
+          action: 'security.origin.denied',
+          outcome: 'denied',
+          reasonCode: 'origin_disallowed',
+          source: 'api',
+          requestId: input.auditContext.requestId,
+          correlationId: input.auditContext.correlationId,
+          ipAddress: input.auditContext.ipAddress,
+          userAgent: input.auditContext.userAgent,
+          scope: 'logout',
+          metadata: { endpoint: 'logout' },
+        });
+      }
       throw originDisallowed();
     }
 
@@ -349,15 +589,90 @@ export class AuthService {
 
     // Verify the CSRF token.
     if (!input.csrfToken || input.csrfToken.length === 0) {
+      if (input.auditContext !== undefined) {
+        await this.auditHelper.emitDirect({
+          action: 'security.csrf.denied',
+          outcome: 'denied',
+          reasonCode: 'csrf_missing',
+          source: 'api',
+          actorType: 'USER',
+          actorId: session.userId,
+          sessionId: session.id,
+          requestId: input.auditContext.requestId,
+          correlationId: input.auditContext.correlationId,
+          ipAddress: input.auditContext.ipAddress,
+          userAgent: input.auditContext.userAgent,
+          scope: 'logout',
+          metadata: { endpoint: 'logout' },
+        });
+      }
       throw csrfInvalid();
     }
     const csrfOk = this.csrfService.verify(session.id, input.csrfToken);
     if (!csrfOk) {
+      if (input.auditContext !== undefined) {
+        await this.auditHelper.emitDirect({
+          action: 'security.csrf.denied',
+          outcome: 'denied',
+          reasonCode: 'csrf_invalid',
+          source: 'api',
+          actorType: 'USER',
+          actorId: session.userId,
+          sessionId: session.id,
+          requestId: input.auditContext.requestId,
+          correlationId: input.auditContext.correlationId,
+          ipAddress: input.auditContext.ipAddress,
+          userAgent: input.auditContext.userAgent,
+          scope: 'logout',
+          metadata: { endpoint: 'logout' },
+        });
+      }
       throw csrfInvalid();
     }
 
-    // Revoke the session and invalidate the CSRF token.
-    await this.sessions.revoke(session.id, now);
+    // Revoke the session and invalidate the CSRF token. Per the
+    // ninth canonical batch specification, session revocation and
+    // the audit outbox entry must commit atomically. When an audit
+    // context is supplied, we use a transaction that wraps the
+    // revocation and the outbox insertion. When no audit context
+    // is supplied (backward compatibility), we use the existing
+    // non-transactional revocation.
+    if (input.auditContext !== undefined) {
+      // Load the user to get the tenant for audit chain scoping.
+      const user = await this.users.findById(session.userId);
+      const memberships = user
+        ? await this.memberships.listForUser(user.id)
+        : [];
+      const activeMemberships = memberships.filter(
+        (m) => m.status === 'active',
+      );
+      await this.prisma.$transaction(async (tx) => {
+        await tx.authSession.updateMany({
+          where: { id: session.id, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        await this.auditHelper.emit(
+          {
+            action: 'authentication.logout.succeeded',
+            outcome: 'success',
+            source: 'api',
+            tenantId: activeMemberships[0]?.tenantId ?? null,
+            actorType: 'USER',
+            actorId: session.userId,
+            sessionId: session.id,
+            requestId: input.auditContext!.requestId,
+            correlationId: input.auditContext!.correlationId,
+            ipAddress: input.auditContext!.ipAddress,
+            userAgent: input.auditContext!.userAgent,
+            scope: 'logout',
+            metadata: { endpoint: 'logout' },
+          },
+          { transaction: tx },
+        );
+      });
+    } else {
+      await this.sessions.revoke(session.id, now);
+    }
     this.csrfService.invalidate(session.id);
 
     this.logger.debug(`Logout succeeded for session ${session.id}.`);

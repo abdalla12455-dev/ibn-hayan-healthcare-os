@@ -1,0 +1,179 @@
+// Prisma schema for the Ibn Hayan Healthcare Operating System
+// DEDICATED AUDIT DATABASE.
+//
+// Per ADR-014 (Audit Store and Integrity Strategy), the audit store
+// is a dedicated PostgreSQL 17 database, separate from the
+// transactional database ratified in ADR-006 and ADR-012. The audit
+// store is accessed through a separate connection string
+// (`AUDIT_DATABASE_URL`) and is managed by an independent Prisma
+// schema and migration history under `apps/api/prisma-audit/`.
+//
+// The audit store holds NO models from the transactional database
+// and NO foreign keys to transactional-store tables. Cross-database
+// referential integrity is not used because PostgreSQL does not
+// enforce foreign keys across databases and because audit must
+// remain appendable even when the transactional store is
+// unavailable.
+//
+// Per ADR-014 §1.1, the audit store is:
+// - Immutable: triggers reject UPDATE, DELETE, and TRUNCATE on the
+//   `audit_events` table.
+// - Append-only: application code exposes no update or delete
+//   repository method.
+// - Tamper-evident: HMAC-SHA-256 chained integrity records.
+// - Tenant-scoped: one chain per tenant (`tenant:<tenantId>`) and
+//   one platform chain (`platform`).
+// - Idempotent: stable `event_id` for idempotent delivery.
+//
+// Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when
+// Prisma's schema language cannot express a PostgreSQL concept that
+// the design requires, the design is PostgreSQL-correct first and
+// the Prisma schema is annotated or supplemented with raw SQL
+// second. The immutability triggers, the runtime-role grants, and
+// the CHECK constraints on enums are added by reviewed raw SQL
+// migrations because Prisma 7 cannot express them in the schema
+// language.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma-audit"
+  // The audit client is generated separately from the transactional
+  // client. The two clients must not be merged: the audit store has
+  // a different connection string, a different schema, and different
+  // immutability controls.
+}
+
+datasource db {
+  provider = "postgresql"
+  // The connection string is read from `AUDIT_DATABASE_URL` at
+  // construction time. The URL is NEVER logged, never persisted, and
+  // never surfaced in error messages.
+}
+
+// ---------------------------------------------------------------------------
+// AuditEvent
+// ---------------------------------------------------------------------------
+
+/// An AuditEvent is an immutable record of a consequential action on
+/// the Ibn Hayan Healthcare Operating System. Per ADR-014 and
+/// `09_SECURITY/AUDIT.md`, audit is a primitive that governs every
+/// consequential action; the audit store is the immutable,
+/// append-only, tamper-evident record of those actions.
+///
+/// Per ADR-014 §1.3, the audit store's `audit_events` table has the
+/// fields documented below. The fields use PostgreSQL-native types
+/// (`timestamptz`, `jsonb`, UUID, `inet`, `text[]`) for performance
+/// and correctness.
+///
+/// Immutability is enforced at the database level by triggers added
+/// in the migration. The runtime role has only INSERT and SELECT
+/// privileges on this table. The migration role is the only role
+/// with ALTER, TRUNCATE, and DDL privileges; the migration role is
+/// not used at runtime.
+///
+/// The integrity fields (`chain_scope`, `chain_sequence`,
+/// `previous_integrity_hash`, `payload_hash`, `integrity_hash`,
+/// `integrity_key_version`) bind the record into the HMAC-SHA-256
+/// chained integrity chain. The chain scope is `tenant:<tenantId>`
+/// for tenant-scoped events and `platform` for tenant-less events.
+/// The chain sequence is allocated atomically by the
+/// `audit_chain_heads` table at append time.
+///
+/// The `event_id` column is unique and is the structural
+/// enforcement of idempotent delivery: a duplicate insert raises a
+/// `PrismaClientKnownRequestError` with code `P2002`, which the
+/// dispatcher treats as an idempotent success.
+///
+/// Per ADR-014 §1.1, no audit event may contain passwords, password
+/// hashes, raw session tokens, session-token hashes, CSRF tokens,
+/// cookies, authorization headers, private keys, connection strings,
+/// environment-variable values, or raw request/response bodies. The
+/// forbidden-key detector in `packages/observability` rejects these
+/// at emission time; the audit-store-append port validates again at
+/// append time (defence-in-depth).
+///
+/// For failed-login events, the raw attempted email is NEVER
+/// persisted. Instead, an HMAC of the normalised identifier is
+/// stored in `subject_identifier_hash` using a separate identifier
+/// key (`AUDIT_IDENTIFIER_HMAC_KEY`).
+model AuditEvent {
+  id                     String   @id @default(uuid()) @db.Uuid
+  eventId                String   @unique @map("event_id") @db.Uuid
+  eventVersion           Int      @map("event_version")
+  occurredAt             DateTime @map("occurred_at") @db.Timestamptz
+  recordedAt             DateTime @default(now()) @map("recorded_at") @db.Timestamptz
+  tenantId               String?  @map("tenant_id") @db.Uuid
+  chainScope             String   @map("chain_scope") @db.VarChar(80)
+  chainSequence          BigInt   @map("chain_sequence")
+  previousIntegrityHash  String?  @map("previous_integrity_hash") @db.Char(64)
+  payloadHash            String   @map("payload_hash") @db.Char(64)
+  integrityHash          String   @map("integrity_hash") @db.Char(64)
+  integrityKeyVersion    Int      @map("integrity_key_version")
+  category               String   @db.VarChar(40)
+  action                 String   @db.VarChar(80)
+  actorType              String   @map("actor_type") @db.VarChar(20)
+  actorId                String?  @map("actor_id") @db.Uuid
+  subjectIdentifierHash  String?  @map("subject_identifier_hash") @db.Char(64)
+  sessionId              String?  @map("session_id") @db.Uuid
+  resourceType           String?  @map("resource_type") @db.VarChar(60)
+  resourceId             String?  @map("resource_id") @db.VarChar(120)
+  permissionCode         String?  @map("permission_code") @db.VarChar(60)
+  roleCodes              String[] @map("role_codes")
+  outcome                String   @db.VarChar(20)
+  reasonCode             String?  @map("reason_code") @db.VarChar(60)
+  source                 String   @db.VarChar(20)
+  requestId              String   @map("request_id") @db.VarChar(80)
+  correlationId          String?  @map("correlation_id") @db.VarChar(80)
+  ipAddress              String?  @map("ip_address") @db.Inet
+  userAgent              String?  @map("user_agent") @db.VarChar(600)
+  scope                  String   @db.VarChar(200)
+  previousState          Json?    @map("previous_state")
+  newState               Json?    @map("new_state")
+  metadata               Json
+
+  @@index([occurredAt], map: "audit_events_occurred_at_idx")
+  @@index([tenantId, occurredAt], map: "audit_events_tenant_id_occurred_at_idx")
+  @@index([actorId], map: "audit_events_actor_id_idx")
+  @@index([action], map: "audit_events_action_idx")
+  @@index([category], map: "audit_events_category_idx")
+  @@index([resourceType, resourceId], map: "audit_events_resource_type_resource_id_idx")
+  @@index([outcome], map: "audit_events_outcome_idx")
+  @@index([requestId], map: "audit_events_request_id_idx")
+  @@index([chainScope, chainSequence], map: "audit_events_chain_scope_chain_sequence_idx")
+  @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// AuditChainHead
+// ---------------------------------------------------------------------------
+
+/// An AuditChainHead is the mutable implementation-metadata row that
+/// tracks the head of an integrity chain. Per ADR-014 §10, the
+/// chain-head table is NOT an audit record; it is excluded from the
+/// integrity chain.
+///
+/// The chain-head row is updated atomically when a new event is
+/// appended to the chain. The update uses `SELECT ... FOR UPDATE`
+/// row-level locking to prevent concurrent appends from producing
+/// duplicate sequence numbers or forks.
+///
+/// The `last_sequence` column is the last allocated sequence number
+/// for this chain. The `last_integrity_hash` column is the integrity
+/// hash of the last event in this chain; it becomes the
+/// `previous_integrity_hash` of the next event.
+///
+/// Per ADR-014 §1.1, the chain-head table is mutable (unlike the
+/// audit_events table). The runtime role has INSERT, UPDATE, and
+/// SELECT privileges on this table; the immutability triggers do
+/// not apply.
+model AuditChainHead {
+  chainScope            String   @id @map("chain_scope") @db.VarChar(80)
+  lastSequence          BigInt   @map("last_sequence")
+  lastIntegrityHash     String?  @map("last_integrity_hash") @db.Char(64)
+  lastEventId           String?  @map("last_event_id") @db.Uuid
+  lastEventRecordedAt   DateTime? @map("last_event_recorded_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("audit_chain_heads")
+}

@@ -1,7 +1,9 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import argon2 from 'argon2';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import { buildAuditEventDraft } from '@ibn-hayan/observability';
 
 /**
  * Development-only bootstrap command.
@@ -305,15 +307,69 @@ async function main(): Promise<void> {
       },
     });
     if (existingAssignment === null) {
-      await prisma.tenantRoleAssignment.create({
-        data: {
-          tenantMembershipId: membershipId,
-          roleCode: 'R13_SYSTEM_ADMINISTRATOR',
-        },
+      // Per the ninth canonical batch specification, audit the R13
+      // role assignment when the development bootstrap creates the
+      // role assignment and audit configuration is available. The
+      // audit emission is atomic with the role-assignment insert:
+      // both are in the same transaction. If the audit outbox
+      // insert fails, the role-assignment insert is rolled back
+      // (fail-closed). The audit event is emitted to the
+      // transactional outbox; the dispatcher will deliver it to the
+      // audit store asynchronously.
+      const auditEventId = randomUUID();
+      const auditDraft = buildAuditEventDraft({
+        action: 'rbac.role.assigned',
+        outcome: 'success',
+        source: 'bootstrap',
+        tenantId: tenant.id,
+        actorType: 'SYSTEM',
+        eventId: auditEventId,
+        resourceType: 'tenant_membership',
+        resourceId: membershipId,
+        roleCodes: ['R13_SYSTEM_ADMINISTRATOR'],
+        reasonCode: 'dev_bootstrap',
+        requestId: randomUUID(),
+        scope: 'rbac',
+        metadata: { roleCode: 'R13_SYSTEM_ADMINISTRATOR' },
       });
-      logger.log(
-        `Assigned role R13_SYSTEM_ADMINISTRATOR to membership ${membershipId}.`,
-      );
+      if (auditDraft.ok) {
+        await prisma.$transaction(async (tx) => {
+          await tx.tenantRoleAssignment.create({
+            data: {
+              tenantMembershipId: membershipId,
+              roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+            },
+          });
+          await tx.auditOutboxEvent.create({
+            data: {
+              eventId: auditEventId,
+              eventVersion: auditDraft.draft.eventVersion,
+              canonicalEventDraft: auditDraft.draft as never,
+              createdAt: new Date(auditDraft.draft.occurredAt),
+            },
+          });
+        });
+        logger.log(
+          `Assigned role R13_SYSTEM_ADMINISTRATOR to membership ${membershipId} (audit event ${auditEventId}).`,
+        );
+      } else {
+        // If the audit draft build fails, fall back to the
+        // non-audited assignment. The role assignment is still
+        // created; the audit event is not. This is a best-effort
+        // fallback for the development bootstrap only.
+        logger.warn(
+          `Audit draft build failed (${auditDraft.reason}); creating role assignment without audit event.`,
+        );
+        await prisma.tenantRoleAssignment.create({
+          data: {
+            tenantMembershipId: membershipId,
+            roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+          },
+        });
+        logger.log(
+          `Assigned role R13_SYSTEM_ADMINISTRATOR to membership ${membershipId}.`,
+        );
+      }
     } else {
       logger.log(
         `Role R13_SYSTEM_ADMINISTRATOR already assigned to membership ${membershipId}.`,

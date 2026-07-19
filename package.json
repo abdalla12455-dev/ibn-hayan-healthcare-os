@@ -18,7 +18,9 @@
     "test:integration": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:integration",
     "test:database": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:database",
     "test:auth": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:auth",
-    "test:context": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:context"
+    "test:context": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:context",
+    "test:audit:database": "pnpm run build:shared && pnpm --filter @ibn-hayan/api audit:test:database",
+    "test:audit:integration": "pnpm run build:shared && pnpm --filter @ibn-hayan/api audit:test:integration"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

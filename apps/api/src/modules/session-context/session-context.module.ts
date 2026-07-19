@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/index.js';
 import { AuthorizationModule } from '../authorization/index.js';
+import { AuditModule } from '../audit/index.js';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
 import { SessionContextController } from './session-context.controller.js';
 import { SessionContextService } from './session-context.service.js';
@@ -11,7 +12,9 @@ import { SessionContextService } from './session-context.service.js';
  * Wires the session-context controller and service. Imports
  * `AuthModule` to access `AuthService` and `CsrfService`; imports
  * `AuthorizationModule` to apply the `AuthorizationGuard` to the
- * context routes; imports `DatabaseModule` to access the session,
+ * context routes; imports `AuditModule` (ninth canonical batch) to
+ * emit context-viewed, context-selected, and context-cleared audit
+ * events; imports `DatabaseModule` to access the session,
  * membership, tenant, and role-assignment repositories.
  *
  * Per the fifth canonical batch specification, the session-context
@@ -35,7 +38,7 @@ import { SessionContextService } from './session-context.service.js';
  * routes do not inherit the login-specific throttle limit."
  */
 @Module({
-  imports: [AuthModule, AuthorizationModule, DatabaseModule],
+  imports: [AuthModule, AuthorizationModule, AuditModule, DatabaseModule],
   controllers: [SessionContextController],
   providers: [SessionContextService],
   exports: [SessionContextService],

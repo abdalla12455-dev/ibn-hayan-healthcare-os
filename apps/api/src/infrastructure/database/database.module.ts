@@ -101,7 +101,19 @@ export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
   // The LocalCredentialService IS exported because it is consumed by
   // the auth module's PasswordService. It is an infrastructure-only
   // service (no domain port); the auth module imports it directly.
+  //
+  // Per the ninth canonical batch specification (audit primitive
+  // foundation), PrismaService is now also exported because the
+  // audit outbox repository (which lives in the audit module) needs
+  // direct access to the transactional Prisma client to insert
+  // outbox rows in the caller's transaction. The audit module
+  // imports DatabaseModule; the audit outbox repository injects
+  // PrismaService directly. This is a deliberate cross-module
+  // dependency: the audit outbox is a transactional-store concern
+  // (the outbox table lives in the transactional database), but
+  // the audit module owns the outbox-repository implementation.
   exports: [
+    PrismaService,
     TENANT_REPOSITORY,
     ORGANISATION_REPOSITORY,
     FACILITY_REPOSITORY,

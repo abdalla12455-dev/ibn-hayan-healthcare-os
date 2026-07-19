@@ -1,0 +1,12 @@
+# Prisma migration lock for the audit store.
+#
+# Per ADR-014, the audit store has its own migration history under
+# `apps/api/prisma-audit/migrations/`. The migration lock ensures
+# that the audit store uses the same migration provider as the
+# transactional store (PostgreSQL), preventing accidental
+# cross-provider migration.
+#
+# This file is the audit-store analogue of
+# `apps/api/prisma/migrations/migration_lock.toml`.
+
+provider = "postgresql"

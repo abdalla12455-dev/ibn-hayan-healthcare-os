@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
+import { AuditModule } from '../audit/index.js';
 import { AuthService } from './auth.service.js';
 import { AuthController } from './auth.controller.js';
 import { PasswordService } from './password.service.js';
@@ -15,6 +16,8 @@ import { CsrfService } from './csrf.service.js';
  * Wires the auth controller, auth service, and supporting services
  * (password, session-token, csrf). Imports `DatabaseModule` to
  * access the user, membership, session, and credential repositories.
+ * Imports `AuditModule` (ninth canonical batch) to emit audit events
+ * for login, logout, session rotation, and Origin/CSRF denials.
  *
  * Per ADR-013 §1.1, throttling is applied at the login endpoint via
  * `@nestjs/throttler`. The `ThrottlerModule` is configured with a
@@ -42,6 +45,7 @@ import { CsrfService } from './csrf.service.js';
   imports: [
     ConfigModule,
     DatabaseModule,
+    AuditModule,
     ThrottlerModule.forRoot([
       {
         name: 'default',

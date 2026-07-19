@@ -19,7 +19,9 @@ import {
   TENANT_REPOSITORY,
   TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from '../../infrastructure/database/index.js';
-import { AuthService } from '../auth/auth.service.js';
+import { PrismaService } from '../../infrastructure/database/prisma.service.js';
+import { AuthService, type AuditRequestContext } from '../auth/auth.service.js';
+import { AuditHelperService } from '../audit/audit-helper.service.js';
 import type {
   ContextResponse,
   TenantContextOption,
@@ -88,7 +90,9 @@ export class SessionContextService {
     @Inject(TENANT_REPOSITORY) private readonly tenants: TenantRepository,
     @Inject(TENANT_ROLE_ASSIGNMENT_REPOSITORY)
     private readonly roleAssignments: TenantRoleAssignmentRepository,
+    private readonly prisma: PrismaService,
     private readonly authService: AuthService,
+    private readonly auditHelper: AuditHelperService,
   ) {}
 
   /**
@@ -152,13 +156,41 @@ export class SessionContextService {
   async loadContext(
     cookieValue: string | undefined,
     acceptLanguage: string | undefined = undefined,
+    auditContext?: AuditRequestContext,
   ): Promise<ContextResponse | null> {
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
+    const authResult = await this.authService.getSessionFromCookie(
+      cookieValue,
+      auditContext,
+    );
     if (authResult === null) {
       return null;
     }
 
     const locale = this.resolveLocale(acceptLanguage);
+
+    // Emit a tenant_context.viewed audit event (direct, non-
+    // transactional — viewing context is not a state mutation).
+    if (auditContext !== undefined) {
+      await this.auditHelper.emitDirect({
+        action: 'tenant_context.viewed',
+        outcome: 'success',
+        source: 'api',
+        tenantId: authResult.session.activeTenantMembershipId
+          ? (authResult.memberships.find(
+              (m) => m.id === authResult.session.activeTenantMembershipId,
+            )?.tenantId ?? null)
+          : null,
+        actorType: 'USER',
+        actorId: authResult.user.id,
+        sessionId: authResult.session.id,
+        requestId: auditContext.requestId,
+        correlationId: auditContext.correlationId,
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+        scope: 'tenant_context',
+        metadata: { endpoint: 'context_view' },
+      });
+    }
 
     // Load the user's memberships and the related tenants.
     const userMemberships = await this.memberships.listForUser(
@@ -235,8 +267,12 @@ export class SessionContextService {
     cookieValue: string | undefined,
     membershipId: TenantMembershipId,
     acceptLanguage: string | undefined = undefined,
+    auditContext?: AuditRequestContext,
   ): Promise<ContextResponse | null> {
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
+    const authResult = await this.authService.getSessionFromCookie(
+      cookieValue,
+      auditContext,
+    );
     if (authResult === null) {
       return null;
     }
@@ -261,18 +297,57 @@ export class SessionContextService {
       throw contextSelectionForbidden();
     }
 
-    // Set the active membership for this session only.
+    // Set the active membership for this session only. Per the
+    // ninth canonical batch specification, context mutation and the
+    // outbox record must be atomic. When an audit context is
+    // supplied, we use a transaction that wraps the membership
+    // update and the outbox insertion. When no audit context is
+    // supplied (backward compatibility), we use the existing
+    // non-transactional update.
     const now = new Date();
-    const updated = await this.sessions.setActiveTenantMembership(
-      authResult.session.id,
-      membershipId,
-      now,
-    );
-    if (updated === null) {
-      // The session was revoked or deleted between our auth check
-      // and our update. Treat as a forbidden selection so we do not
-      // reveal that the session disappeared.
-      throw contextSelectionForbidden();
+    if (auditContext !== undefined) {
+      const updated = await this.prisma
+        .$transaction(async (tx) => {
+          const row = await tx.authSession.update({
+            where: { id: authResult.session.id },
+            data: { activeTenantMembershipId: membershipId },
+          });
+          await this.auditHelper.emit(
+            {
+              action: 'tenant_context.selected',
+              outcome: 'success',
+              source: 'api',
+              tenantId: tenant.id,
+              actorType: 'USER',
+              actorId: authResult.user.id,
+              sessionId: authResult.session.id,
+              resourceType: 'tenant_membership',
+              resourceId: membershipId,
+              requestId: auditContext.requestId,
+              correlationId: auditContext.correlationId,
+              ipAddress: auditContext.ipAddress,
+              userAgent: auditContext.userAgent,
+              scope: 'tenant_context',
+              metadata: { endpoint: 'context_select' },
+            },
+            { transaction: tx },
+          );
+          return row;
+        })
+        .then(() => true)
+        .catch(() => false);
+      if (!updated) {
+        throw contextSelectionForbidden();
+      }
+    } else {
+      const updated = await this.sessions.setActiveTenantMembership(
+        authResult.session.id,
+        membershipId,
+        now,
+      );
+      if (updated === null) {
+        throw contextSelectionForbidden();
+      }
     }
 
     // Build and return the complete ContextResponse.
@@ -331,14 +406,61 @@ export class SessionContextService {
    */
   async clearContext(
     cookieValue: string | undefined,
+    auditContext?: AuditRequestContext,
   ): Promise<{ ok: true; active: null } | null> {
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
+    const authResult = await this.authService.getSessionFromCookie(
+      cookieValue,
+      auditContext,
+    );
     if (authResult === null) {
       return null;
     }
 
     const now = new Date();
-    await this.sessions.clearActiveTenantMembership(authResult.session.id, now);
+    // Per the ninth canonical batch specification, context mutation
+    // and the outbox record must be atomic. When an audit context is
+    // supplied, we use a transaction that wraps the membership clear
+    // and the outbox insertion. When no audit context is supplied
+    // (backward compatibility), we use the existing non-transactional
+    // clear.
+    if (auditContext !== undefined) {
+      // Determine the tenant that was active before clearing (for
+      // audit chain scoping).
+      const previousTenantId = authResult.session.activeTenantMembershipId
+        ? (authResult.memberships.find(
+            (m) => m.id === authResult.session.activeTenantMembershipId,
+          )?.tenantId ?? null)
+        : null;
+      await this.prisma.$transaction(async (tx) => {
+        await tx.authSession.update({
+          where: { id: authResult.session.id },
+          data: { activeTenantMembershipId: null },
+        });
+        await this.auditHelper.emit(
+          {
+            action: 'tenant_context.cleared',
+            outcome: 'success',
+            source: 'api',
+            tenantId: previousTenantId,
+            actorType: 'USER',
+            actorId: authResult.user.id,
+            sessionId: authResult.session.id,
+            requestId: auditContext.requestId,
+            correlationId: auditContext.correlationId,
+            ipAddress: auditContext.ipAddress,
+            userAgent: auditContext.userAgent,
+            scope: 'tenant_context',
+            metadata: { endpoint: 'context_clear' },
+          },
+          { transaction: tx },
+        );
+      });
+    } else {
+      await this.sessions.clearActiveTenantMembership(
+        authResult.session.id,
+        now,
+      );
+    }
 
     return { ok: true, active: null };
   }

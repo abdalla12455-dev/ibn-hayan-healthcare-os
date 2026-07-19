@@ -306,6 +306,39 @@ async function ensureCluster(): Promise<ClusterHandle> {
   // and `prisma migrate deploy` both see it.
   process.env['DATABASE_URL'] = databaseUrl;
 
+  // Per the ninth canonical batch specification (audit primitive
+  // foundation), the test environment also needs an audit database.
+  // The disposable cluster creates a second database on the same
+  // PostgreSQL server for the audit store. The audit database uses
+  // a separate connection URL and separate migrations.
+  const auditDatabaseName = 'ibn_hayan_audit_test';
+  runPgSync(psql, [
+    '-h',
+    '127.0.0.1',
+    '-p',
+    String(pgPort),
+    '-U',
+    superuser,
+    '-d',
+    'postgres',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-c',
+    `CREATE DATABASE "${auditDatabaseName}";`,
+  ]);
+  const auditDatabaseUrl = `postgresql://${superuser}@127.0.0.1:${pgPort}/${auditDatabaseName}`;
+  process.env['AUDIT_DATABASE_URL'] = auditDatabaseUrl;
+
+  // Set the audit integrity and identifier keys for tests. These are
+  // test-only keys; they are NOT the placeholder values from
+  // `.env.example`. They are sufficiently long (≥ 32 bytes) to pass
+  // the key validation. They are distinct from each other.
+  process.env['AUDIT_INTEGRITY_HMAC_KEY'] =
+    'test-integrity-key-with-sufficient-entropy-32B!';
+  process.env['AUDIT_IDENTIFIER_HMAC_KEY'] =
+    'test-identifier-key-with-sufficient-entropy-32B!';
+  process.env['AUDIT_INTEGRITY_KEY_VERSION'] = '1';
+
   handle = {
     mode: 'owned',
     rootTmp,
@@ -346,6 +379,12 @@ async function ensureCluster(): Promise<ClusterHandle> {
       }
       // Unset DATABASE_URL (defence-in-depth, same reason as afterAll).
       delete process.env['DATABASE_URL'];
+      // Per the ninth canonical batch specification, also unset the
+      // audit env vars.
+      delete process.env['AUDIT_DATABASE_URL'];
+      delete process.env['AUDIT_INTEGRITY_HMAC_KEY'];
+      delete process.env['AUDIT_IDENTIFIER_HMAC_KEY'];
+      delete process.env['AUDIT_INTEGRITY_KEY_VERSION'];
     }
   });
 
@@ -407,17 +446,40 @@ function verifyConnectivity(psql: string, databaseUrl: string): void {
 }
 
 /**
- * Apply the committed Prisma migration to the cluster (owned or
+ * Apply the committed Prisma migrations to the cluster (owned or
  * external). Uses the normal production-style migration command
  * `prisma migrate deploy` via pnpm, run from the API package
  * directory.
+ *
+ * Per the ninth canonical batch specification, two sets of
+ * migrations are applied:
+ * 1. The transactional-store migrations (`prisma/schema.prisma`).
+ * 2. The audit-store migrations (`prisma-audit/schema.prisma`).
  */
 function applyMigrations(): void {
   const apiDir = resolve(__dirname, '..', '..');
+  // Apply the transactional-store migrations.
   runPgSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
     cwd: apiDir,
     env: { ...process.env },
   });
+  // Apply the audit-store migrations. The audit database URL is
+  // already set in the process environment by the caller.
+  runPgSync(
+    'pnpm',
+    [
+      'exec',
+      'prisma',
+      'migrate',
+      'deploy',
+      '--config',
+      'prisma-audit.config.ts',
+    ],
+    {
+      cwd: apiDir,
+      env: { ...process.env },
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +571,12 @@ export function setupDatabaseTests(): void {
       // `ensureCluster()` would see the stale DATABASE_URL, skip
       // booting a fresh cluster, and fail connectivity verification.
       delete process.env['DATABASE_URL'];
+      // Per the ninth canonical batch specification, also unset the
+      // audit env vars.
+      delete process.env['AUDIT_DATABASE_URL'];
+      delete process.env['AUDIT_INTEGRITY_HMAC_KEY'];
+      delete process.env['AUDIT_IDENTIFIER_HMAC_KEY'];
+      delete process.env['AUDIT_INTEGRITY_KEY_VERSION'];
     }
     handle = null;
   });

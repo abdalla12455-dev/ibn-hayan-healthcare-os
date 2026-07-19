@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/index.js';
+import { AuditModule } from '../audit/index.js';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
 import { AuthorizationService } from './authorization.service.js';
 import { AuthorizationGuard } from './authorization.guard.js';
@@ -11,7 +12,8 @@ import { AuthorizationGuard } from './authorization.guard.js';
  * to access `AuthService` (for session validation and Origin
  * enforcement); imports `DatabaseModule` to access the
  * `TenantRoleAssignmentRepository` (for loading a membership's
- * role assignments).
+ * role assignments); imports `AuditModule` (ninth canonical batch)
+ * to emit authorization decision audit events.
  *
  * Per the eighth canonical batch specification, the authorization
  * module does NOT duplicate authentication, token parsing, cookie
@@ -26,7 +28,7 @@ import { AuthorizationGuard } from './authorization.guard.js';
  * required permission explicitly."
  */
 @Module({
-  imports: [AuthModule, DatabaseModule],
+  imports: [AuthModule, DatabaseModule, AuditModule],
   providers: [AuthorizationService, AuthorizationGuard],
   exports: [AuthorizationService, AuthorizationGuard],
 })

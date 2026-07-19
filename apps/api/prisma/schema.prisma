@@ -530,3 +530,78 @@ model AuthSession {
   @@index([activeTenantMembershipId], map: "auth_sessions_active_tenant_membership_id_idx")
   @@map("auth_sessions")
 }
+
+// ---------------------------------------------------------------------------
+// AuditOutboxEvent
+// ---------------------------------------------------------------------------
+
+/// An AuditOutboxEvent is a delivery mechanism for audit events from
+/// the transactional store to the dedicated audit store.
+///
+/// Per ADR-014 (Audit Store and Integrity Strategy) and the ninth
+/// canonical batch specification, the transactional outbox pattern is
+/// the ratified durable delivery mechanism. A state mutation (e.g.
+/// session creation, session rotation, logout, context selection,
+/// context clearing, role assignment) and its outbox record commit
+/// atomically in the same transaction. The mutation cannot commit
+/// without its outbox record.
+///
+/// The outbox is NOT the final audit trail. The final audit trail
+/// lives in the dedicated audit database (`audit_events` table in
+/// `apps/api/prisma-audit/schema.prisma`). The outbox is mutable
+/// (the dispatcher updates `attempt_count`, `delivered_at`,
+/// `last_failure_code`, `last_failure_at`, `lease_owner`,
+/// `lease_expires_at`); the audit_events table is immutable.
+///
+/// The dispatcher claims pending outbox rows using PostgreSQL-safe
+/// claiming (`FOR UPDATE SKIP LOCKED`), appends each to the audit
+/// store, and marks the row delivered only after successful
+/// audit-store insertion. An existing `event_id` in the audit store
+/// is treated as an idempotent success: the outbox row is marked
+/// delivered without producing a duplicate audit record.
+///
+/// The `event_id` column is unique; it is the structural enforcement
+/// of idempotent delivery at the outbox level. A duplicate insert
+/// raises a Prisma `PrismaClientKnownRequestError` with code `P2002`.
+///
+/// The `canonical_event_draft` column is a JSONB column that holds
+/// the canonical serialization of the `AuditEventDraft` (defined in
+/// `packages/observability`). The dispatcher reads the JSONB,
+/// deserialises it into an `AuditEventDraft`, and passes it to the
+/// audit store for appending.
+///
+/// The `delivered_at` column is null for pending events and non-null
+/// for delivered events. The partial index
+/// `audit_outbox_events_delivered_at_null_idx` (added in the
+/// migration) allows the dispatcher to claim pending rows
+/// efficiently.
+///
+/// The `lease_owner` and `lease_expires_at` columns support safe
+/// concurrent dispatch. The dispatcher sets these when it claims a
+/// row; another dispatcher that finds a row with an expired lease
+/// may steal it. The partial index
+/// `audit_outbox_events_lease_expires_at_not_null_idx` allows the
+/// lease-sweep to find candidate rows efficiently.
+///
+/// Per ADR-014 §1.1 and the ninth canonical batch specification, the
+/// outbox does NOT store secrets. The `canonical_event_draft` is
+/// sanitised through the forbidden-key detector before insertion.
+model AuditOutboxEvent {
+  id                   String   @id @default(uuid()) @db.Uuid
+  eventId              String   @unique @map("event_id") @db.Uuid
+  eventVersion         Int      @map("event_version")
+  canonicalEventDraft  Json     @map("canonical_event_draft")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  availableAt          DateTime @default(dbgenerated("CURRENT_TIMESTAMP")) @map("available_at") @db.Timestamptz
+  attemptCount         Int      @default(0) @map("attempt_count")
+  deliveredAt          DateTime? @map("delivered_at") @db.Timestamptz
+  lastFailureCode      String?  @map("last_failure_code") @db.VarChar(60)
+  lastFailureAt        DateTime? @map("last_failure_at") @db.Timestamptz
+  leaseOwner           String?  @map("lease_owner") @db.VarChar(80)
+  leaseExpiresAt       DateTime? @map("lease_expires_at") @db.Timestamptz
+
+  @@index([deliveredAt, availableAt], map: "audit_outbox_events_delivered_at_available_at_idx")
+  @@index([leaseExpiresAt], map: "audit_outbox_events_lease_expires_at_idx")
+  @@index([createdAt], map: "audit_outbox_events_created_at_idx")
+  @@map("audit_outbox_events")
+}

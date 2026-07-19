@@ -2,13 +2,32 @@
   "name": "@ibn-hayan/observability",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "description": "Framework-agnostic audit emission, canonical serialization, integrity hashing, PHI redaction, and audit verification types for Ibn Hayan Healthcare OS. Pure TypeScript: no NestJS, Prisma, React, or generated database types.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./audit": {
+      "types": "./dist/audit/index.d.ts",
+      "import": "./dist/audit/index.js",
+      "require": "./dist/audit/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc --noEmit",
-    "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests in @ibn-hayan/observability yet' && exit 0"
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "vitest": "^3.0.0"
   }
 }

@@ -26,6 +26,8 @@ import type {
 import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
 import type { TenantMembershipId } from '@ibn-hayan/domain';
 import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
+import type { AuditRequestContext } from '../auth/auth.service.js';
+import type { RequestWithIdentifiers } from '../audit/request-id.middleware.js';
 import { SessionContextService } from './session-context.service.js';
 import {
   sessionRequired,
@@ -166,6 +168,7 @@ export class SessionContextController {
     const result = await this.contextService.loadContext(
       cookieValue,
       acceptLanguage,
+      buildAuditContext(req),
     );
     if (result === null) {
       throw sessionRequired();
@@ -278,6 +281,7 @@ export class SessionContextController {
       cookieValue,
       request.membershipId as TenantMembershipId,
       acceptLanguage,
+      buildAuditContext(req),
     );
     if (result === null) {
       // The service returns null when the session is no longer
@@ -361,7 +365,10 @@ export class SessionContextController {
     // Delegate to the service for the persistence (clear active
     // membership).
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    const result = await this.contextService.clearContext(cookieValue);
+    const result = await this.contextService.clearContext(
+      cookieValue,
+      buildAuditContext(req),
+    );
     if (result === null) {
       throw sessionRequired();
     }
@@ -410,4 +417,26 @@ function readHeader(req: Request, name: string): string | undefined {
     return value[0];
   }
   return value;
+}
+
+/**
+ * Build the audit request context from the Express request. Reads
+ * the `requestId` and `correlationId` set by the
+ * `RequestIdMiddleware`, the client IP, and the user-agent.
+ */
+function buildAuditContext(req: Request): AuditRequestContext {
+  const augmented = req as RequestWithIdentifiers;
+  const requestId =
+    augmented.requestId ?? '00000000-0000-0000-0000-000000000000';
+  const correlationId = augmented.correlationId ?? null;
+  const ipRaw = req.ip ?? req.socket?.remoteAddress ?? null;
+  const ipAddress = ipRaw !== null && ipRaw !== undefined ? ipRaw : null;
+  const uaRaw = req.headers['user-agent'];
+  const userAgent =
+    typeof uaRaw === 'string'
+      ? uaRaw
+      : Array.isArray(uaRaw)
+        ? (uaRaw[0] ?? null)
+        : null;
+  return { requestId, correlationId, ipAddress, userAgent };
 }
