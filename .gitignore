@@ -33,3 +33,11 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+
+# Legacy prototype uploads (user-supplied HTML/JS prototypes)
+# These files contain insecure demonstration credentials and non-production
+# prototype logic. They are kept locally for reference under /home/z/my-project/upload/
+# but must not be tracked by Git. See
+# download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md §2.11 for the
+# SHA-256 source manifest that identifies the exact files used as extraction input.
+/upload/
