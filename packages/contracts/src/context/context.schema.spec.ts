@@ -21,21 +21,48 @@ import {
  * - never include `passwordHash`, `token`, `tokenHash`, `csrfHash`,
  *   or any credential material;
  * - never include Organisation or Facility fields;
- * - never include role or permission fields;
+ *
+ * Per the eighth canonical batch specification, the contracts:
+ * - include a `roles` array on TenantContextOption and
+ *   ActiveTenantContext (a principal may hold multiple roles
+ *   simultaneously per PRODUCT_BIBLE.md Section 20.3);
+ * - never include a singular `role` field (rejected by strict mode);
+ * - never include permission information (the client must not
+ *   duplicate the role-permission matrix);
  * - use `.strict()` on every object so extra fields are rejected at
  *   the boundary.
  */
+
+const VALID_ROLES_EMPTY: never[] = [];
+const VALID_ROLES_SINGLE = [
+  { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+] as const;
 
 const VALID_MEMBERSHIP_ID = '11111111-1111-1111-1111-111111111111';
 const VALID_TENANT_ID = '22222222-2222-2222-2222-222222222222';
 
 describe('TenantContextOptionSchema', () => {
-  it('accepts a valid option with all four fields', () => {
+  it('accepts a valid option with all five fields (including roles array)', () => {
     const result = TenantContextOptionSchema.safeParse({
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a valid option with multiple roles', () => {
+    const result = TenantContextOptionSchema.safeParse({
+      membershipId: VALID_MEMBERSHIP_ID,
+      tenantId: VALID_TENANT_ID,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      roles: [
+        { code: 'R01_PHYSICIAN', displayName: 'Physician' },
+        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+      ],
     });
     expect(result.success).toBe(true);
   });
@@ -45,6 +72,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -54,6 +82,7 @@ describe('TenantContextOptionSchema', () => {
       membershipId: VALID_MEMBERSHIP_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -63,6 +92,7 @@ describe('TenantContextOptionSchema', () => {
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -72,6 +102,17 @@ describe('TenantContextOptionSchema', () => {
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
+      roles: VALID_ROLES_EMPTY,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing roles array', () => {
+    const result = TenantContextOptionSchema.safeParse({
+      membershipId: VALID_MEMBERSHIP_ID,
+      tenantId: VALID_TENANT_ID,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
     });
     expect(result.success).toBe(false);
   });
@@ -82,6 +123,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
       status: 'active',
     });
     expect(result.success).toBe(false);
@@ -93,6 +135,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
       organisationId: '33333333-3333-3333-3333-333333333333',
     });
     expect(result.success).toBe(false);
@@ -104,18 +147,34 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
       facilityId: '44444444-4444-4444-4444-444444444444',
     });
     expect(result.success).toBe(false);
   });
 
-  it('rejects a role field (strict mode)', () => {
+  it('rejects a singular role field (strict mode — the schema uses roles, not role)', () => {
+    // The schema uses a `roles` array, never a singular `role` field.
+    // A singular `role` field is rejected by strict mode. This is
+    // the structural enforcement of the multi-role assignment model.
     const result = TenantContextOptionSchema.safeParse({
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
       role: 'admin',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unknown role code in the roles array', () => {
+    const result = TenantContextOptionSchema.safeParse({
+      membershipId: VALID_MEMBERSHIP_ID,
+      tenantId: VALID_TENANT_ID,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      roles: [{ code: 'R99_UNKNOWN', displayName: 'Unknown' }],
     });
     expect(result.success).toBe(false);
   });
@@ -126,6 +185,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -136,6 +196,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: 'not-a-uuid',
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -146,6 +207,7 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'x'.repeat(81),
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
@@ -156,18 +218,31 @@ describe('TenantContextOptionSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'x'.repeat(201),
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(false);
   });
 });
 
 describe('ActiveTenantContextSchema', () => {
-  it('accepts a valid active context with all four fields', () => {
+  it('accepts a valid active context with all five fields (including roles array)', () => {
     const result = ActiveTenantContextSchema.safeParse({
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_SINGLE,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an active context with an empty roles array (fail-closed)', () => {
+    const result = ActiveTenantContextSchema.safeParse({
+      membershipId: VALID_MEMBERSHIP_ID,
+      tenantId: VALID_TENANT_ID,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
     });
     expect(result.success).toBe(true);
   });
@@ -177,6 +252,17 @@ describe('ActiveTenantContextSchema', () => {
       membershipId: VALID_MEMBERSHIP_ID,
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
+      roles: VALID_ROLES_EMPTY,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing roles array', () => {
+    const result = ActiveTenantContextSchema.safeParse({
+      membershipId: VALID_MEMBERSHIP_ID,
+      tenantId: VALID_TENANT_ID,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
     });
     expect(result.success).toBe(false);
   });
@@ -187,6 +273,7 @@ describe('ActiveTenantContextSchema', () => {
       tenantId: VALID_TENANT_ID,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: VALID_ROLES_EMPTY,
       expiresAt: '2026-01-01T12:00:00.000Z',
     });
     expect(result.success).toBe(false);
@@ -210,6 +297,7 @@ describe('ContextResponseSchema', () => {
           tenantId: VALID_TENANT_ID,
           tenantSlug: 'tenant-alpha.invalid',
           tenantDisplayName: 'Tenant Alpha',
+          roles: VALID_ROLES_EMPTY,
         },
       ],
       active: {
@@ -217,6 +305,7 @@ describe('ContextResponseSchema', () => {
         tenantId: VALID_TENANT_ID,
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
+        roles: VALID_ROLES_SINGLE,
       },
     });
     expect(result.success).toBe(true);
@@ -253,6 +342,7 @@ describe('ContextResponseSchema', () => {
           tenantId: VALID_TENANT_ID,
           tenantSlug: 'tenant-alpha.invalid',
           tenantDisplayName: 'Tenant Alpha',
+          roles: VALID_ROLES_EMPTY,
         },
       ],
       active: null,

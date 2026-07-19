@@ -25,6 +25,7 @@ import {
   type CsrfResponse,
   type LogoutResponse,
 } from '@ibn-hayan/contracts';
+import type { RoleLabelLocale } from '@ibn-hayan/domain';
 import { AuthService } from './auth.service.js';
 import {
   SESSION_COOKIE_NAME,
@@ -239,11 +240,19 @@ export class AuthController {
     // no selected context — `activeTenantContext` is `null`. The
     // user must explicitly select a Tenant through
     // PUT /api/v1/context/tenant after login.
+    //
+    // Per the eighth canonical batch specification, the session
+    // response carries `roles` arrays on each membership summary
+    // and on the active context. The locale is inferred from the
+    // `Accept-Language` header (Arabic is the default).
+    const acceptLanguage = readHeader(req, 'accept-language');
+    const locale = resolveLocale(acceptLanguage);
     return this.auth.buildSessionResponse({
       user: result.user,
       memberships: result.memberships,
       expiresAt: result.expiresAt,
       activeTenantMembershipId: null,
+      locale,
     });
   }
 
@@ -329,6 +338,7 @@ export class AuthController {
       memberships: result.memberships,
       expiresAt: result.expiresAt,
       activeTenantMembershipId: result.session.activeTenantMembershipId,
+      locale: resolveLocale(readHeader(req, 'accept-language')),
     });
   }
 
@@ -472,4 +482,21 @@ function readHeader(req: Request, name: string): string | undefined {
     return value[0];
   }
   return value;
+}
+
+/**
+ * Resolve the locale from the `Accept-Language` header. Returns
+ * 'ar' (the default) when the header is absent or unparseable.
+ * Per the platform's Arabic-first posture, Arabic is the default.
+ */
+function resolveLocale(acceptLanguage: string | undefined): RoleLabelLocale {
+  if (!acceptLanguage || acceptLanguage.length === 0) {
+    return 'ar';
+  }
+  const firstTag = acceptLanguage.split(',')[0]?.trim() ?? '';
+  const lang = firstTag.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (lang.startsWith('en')) {
+    return 'en';
+  }
+  return 'ar';
 }

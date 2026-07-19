@@ -8,17 +8,23 @@ import type {
   SessionRepository,
   TenantMembershipRepository,
   TenantRepository,
+  TenantRoleAssignmentRepository,
+  TenantRoleAssignment,
+  RoleLabelLocale,
 } from '@ibn-hayan/domain';
+import { getRoleDisplayName } from '@ibn-hayan/domain';
 import {
   SESSION_REPOSITORY,
   TENANT_MEMBERSHIP_REPOSITORY,
   TENANT_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from '../../infrastructure/database/index.js';
 import { AuthService } from '../auth/auth.service.js';
 import type {
   ContextResponse,
   TenantContextOption,
   ActiveTenantContext,
+  RoleSummary,
 } from '@ibn-hayan/contracts';
 import { contextSelectionForbidden } from './session-context.errors.js';
 
@@ -80,8 +86,46 @@ export class SessionContextService {
     @Inject(TENANT_MEMBERSHIP_REPOSITORY)
     private readonly memberships: TenantMembershipRepository,
     @Inject(TENANT_REPOSITORY) private readonly tenants: TenantRepository,
+    @Inject(TENANT_ROLE_ASSIGNMENT_REPOSITORY)
+    private readonly roleAssignments: TenantRoleAssignmentRepository,
     private readonly authService: AuthService,
   ) {}
+
+  /**
+   * Resolve the locale from the `Accept-Language` header. Returns
+   * 'ar' (the default) when the header is absent or unparseable.
+   * Per the platform's Arabic-first posture, Arabic is the default.
+   */
+  private resolveLocale(acceptLanguage: string | undefined): RoleLabelLocale {
+    if (!acceptLanguage || acceptLanguage.length === 0) {
+      return 'ar';
+    }
+    // Parse the Accept-Language header. The first language tag is
+    // the preferred language. We only distinguish between 'ar' and
+    // 'en'; any other language falls back to Arabic (the default).
+    const firstTag = acceptLanguage.split(',')[0]?.trim() ?? '';
+    const lang = firstTag.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (lang.startsWith('en')) {
+      return 'en';
+    }
+    return 'ar';
+  }
+
+  /**
+   * Load a membership's role assignments and convert them to
+   * localized role summaries.
+   */
+  private async loadRoleSummaries(
+    membershipId: TenantMembershipId,
+    locale: RoleLabelLocale,
+  ): Promise<RoleSummary[]> {
+    const assignments =
+      await this.roleAssignments.listForMembership(membershipId);
+    return assignments.map((a: TenantRoleAssignment) => ({
+      code: a.roleCode,
+      displayName: getRoleDisplayName(a.roleCode, locale),
+    }));
+  }
 
   /**
    * Load the context response for the session identified by the
@@ -107,11 +151,14 @@ export class SessionContextService {
    */
   async loadContext(
     cookieValue: string | undefined,
+    acceptLanguage: string | undefined = undefined,
   ): Promise<ContextResponse | null> {
     const authResult = await this.authService.getSessionFromCookie(cookieValue);
     if (authResult === null) {
       return null;
     }
+
+    const locale = this.resolveLocale(acceptLanguage);
 
     // Load the user's memberships and the related tenants.
     const userMemberships = await this.memberships.listForUser(
@@ -131,11 +178,13 @@ export class SessionContextService {
       if (!tenant || tenant.status !== 'active') {
         continue;
       }
+      const roles = await this.loadRoleSummaries(membership.id, locale);
       options.push({
         membershipId: membership.id,
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantDisplayName: tenant.displayName,
+        roles,
       });
     }
     options.sort((a, b) => {
@@ -185,11 +234,14 @@ export class SessionContextService {
   async selectContext(
     cookieValue: string | undefined,
     membershipId: TenantMembershipId,
+    acceptLanguage: string | undefined = undefined,
   ): Promise<ContextResponse | null> {
     const authResult = await this.authService.getSessionFromCookie(cookieValue);
     if (authResult === null) {
       return null;
     }
+
+    const locale = this.resolveLocale(acceptLanguage);
 
     // Defensive check: verify the membership exists, belongs to the
     // authenticated user, is active, and belongs to an active
@@ -238,11 +290,13 @@ export class SessionContextService {
       if (!t || t.status !== 'active') {
         continue;
       }
+      const roles = await this.loadRoleSummaries(m.id, locale);
       options.push({
         membershipId: m.id,
         tenantId: t.id,
         tenantSlug: t.slug,
         tenantDisplayName: t.displayName,
+        roles,
       });
     }
     options.sort((a, b) => {
@@ -253,11 +307,13 @@ export class SessionContextService {
       return a.membershipId.localeCompare(b.membershipId);
     });
 
+    const activeRoles = await this.loadRoleSummaries(membership.id, locale);
     const active: ActiveTenantContext = {
       membershipId: membership.id,
       tenantId: tenant.id,
       tenantSlug: tenant.slug,
       tenantDisplayName: tenant.displayName,
+      roles: activeRoles,
     };
 
     return { options, active };
@@ -330,11 +386,14 @@ export class SessionContextService {
       return null;
     }
 
+    // The selected option already carries the roles array (loaded
+    // in loadContext). We reuse it to avoid a second DB round-trip.
     return {
       membershipId: selected.membershipId,
       tenantId: selected.tenantId,
       tenantSlug: selected.tenantSlug,
       tenantDisplayName: selected.tenantDisplayName,
+      roles: selected.roles,
     };
   }
 

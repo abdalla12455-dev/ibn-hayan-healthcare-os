@@ -6,6 +6,7 @@ import { PrismaFacilityRepository } from './repositories/prisma-facility.reposit
 import { PrismaUserRepository } from './repositories/prisma-user.repository.js';
 import { PrismaTenantMembershipRepository } from './repositories/prisma-tenant-membership.repository.js';
 import { PrismaSessionRepository } from './repositories/prisma-session.repository.js';
+import { PrismaTenantRoleAssignmentRepository } from './repositories/prisma-tenant-role-assignment.repository.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
 
 /**
@@ -54,6 +55,9 @@ export const TENANT_MEMBERSHIP_REPOSITORY = Symbol(
   'TENANT_MEMBERSHIP_REPOSITORY',
 );
 export const SESSION_REPOSITORY = Symbol('SESSION_REPOSITORY');
+export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
+  'TENANT_ROLE_ASSIGNMENT_REPOSITORY',
+);
 
 @Module({
   providers: [
@@ -83,6 +87,10 @@ export const SESSION_REPOSITORY = Symbol('SESSION_REPOSITORY');
       provide: SESSION_REPOSITORY,
       useClass: PrismaSessionRepository,
     },
+    {
+      provide: TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+      useClass: PrismaTenantRoleAssignmentRepository,
+    },
   ],
   // PrismaService and the repository implementations are not exported
   // directly. Feature modules that need persistence inject the
@@ -100,6 +108,7 @@ export const SESSION_REPOSITORY = Symbol('SESSION_REPOSITORY');
     USER_REPOSITORY,
     TENANT_MEMBERSHIP_REPOSITORY,
     SESSION_REPOSITORY,
+    TENANT_ROLE_ASSIGNMENT_REPOSITORY,
     LocalCredentialService,
   ],
 })
@@ -124,4 +133,5 @@ export type {
   UserRepository,
   TenantMembershipRepository,
   SessionRepository,
+  TenantRoleAssignmentRepository,
 } from '@ibn-hayan/domain';

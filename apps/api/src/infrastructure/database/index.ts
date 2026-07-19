@@ -28,5 +28,6 @@ export {
   USER_REPOSITORY,
   TENANT_MEMBERSHIP_REPOSITORY,
   SESSION_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from './database.module.js';
 export { LocalCredentialService } from './repositories/local-credential.service.js';

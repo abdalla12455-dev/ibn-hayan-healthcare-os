@@ -80,7 +80,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE auth_sessions, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
+    'TRUNCATE TABLE auth_sessions, tenant_role_assignments, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
   );
 });
 

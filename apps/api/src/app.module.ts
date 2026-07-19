@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/index.js';
+import { AuthorizationModule } from './modules/authorization/index.js';
 import { SessionContextModule } from './modules/session-context/index.js';
 
 /**
@@ -20,12 +21,18 @@ import { SessionContextModule } from './modules/session-context/index.js';
  *   internally; the database connection is opened lazily on the
  *   first query, so the API can boot without a database as long as
  *   no auth request occurs.
+ * - {@link AuthorizationModule} for the authorization service and
+ *   guard. The authorization module imports `AuthModule` (for
+ *   `AuthService`) and `DatabaseModule` (for the
+ *   `TenantRoleAssignmentRepository`). The `AuthorizationGuard` is
+ *   applied to the context routes via `@UseGuards` on the
+ *   `SessionContextController`.
  * - {@link SessionContextModule} for the session-context routes
  *   under /api/v1/context. The session-context module reuses the
  *   auth module's `AuthService` and `CsrfService` via Nest DI; it
  *   does not duplicate authentication, CSRF, or Origin logic. The
  *   module imports `DatabaseModule` internally for the session,
- *   membership, and tenant repositories.
+ *   membership, tenant, and role-assignment repositories.
  *
  * No patient, billing, scheduling, inventory, or audit modules are
  * imported in this batch. Those arrive in subsequent batches.
@@ -42,6 +49,7 @@ import { SessionContextModule } from './modules/session-context/index.js';
     }),
     HealthModule,
     AuthModule,
+    AuthorizationModule,
     SessionContextModule,
   ],
 })

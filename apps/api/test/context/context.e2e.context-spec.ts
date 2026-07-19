@@ -12,12 +12,14 @@ import type {
   TenantRepository,
   UserRepository,
   TenantMembershipRepository,
+  TenantRoleAssignmentRepository,
   UserId,
 } from '@ibn-hayan/domain';
 import {
   USER_REPOSITORY,
   TENANT_REPOSITORY,
   TENANT_MEMBERSHIP_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from '../../src/infrastructure/database/database.module.js';
 import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
 import { execFileSync } from 'node:child_process';
@@ -58,6 +60,7 @@ let prisma: PrismaService;
 let users: UserRepository;
 let tenants: TenantRepository;
 let memberships: TenantMembershipRepository;
+let roleAssignments: TenantRoleAssignmentRepository;
 let credentials: LocalCredentialService;
 let passwordService: PasswordService;
 
@@ -71,6 +74,7 @@ async function bootstrapUserAndTenant(
   tenantDisplayName: string,
   tenantStatus: 'active' | 'suspended' = 'active',
   membershipStatus: 'active' | 'suspended' = 'active',
+  options: { readonly assignR13?: boolean; readonly assignR14?: boolean } = {},
 ): Promise<{
   userId: string;
   tenantId: string;
@@ -96,6 +100,24 @@ async function bootstrapUserAndTenant(
     userId: user.id,
     status: membershipStatus,
   });
+  // Per the eighth canonical batch specification, the context
+  // endpoints require authorization. By default, assign R13 System
+  // Administrator to the test membership so the existing tests
+  // (which expect 200 responses) continue to pass. Tests that
+  // specifically test authorization denial can pass
+  // `{ assignR13: false }` to create a roleless membership.
+  if (options.assignR13 !== false) {
+    await roleAssignments.create({
+      tenantMembershipId: membership.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+    });
+  }
+  if (options.assignR14 === true) {
+    await roleAssignments.create({
+      tenantMembershipId: membership.id,
+      roleCode: 'R14_INTEGRATION_ACCOUNT',
+    });
+  }
   return {
     userId: user.id,
     tenantId: tenant.id,
@@ -111,7 +133,7 @@ function truncateAll(): void {
       '-v',
       'ON_ERROR_STOP=1',
       '-c',
-      'TRUNCATE TABLE auth_sessions, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
+      'TRUNCATE TABLE auth_sessions, tenant_role_assignments, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
     ],
     { stdio: 'pipe', encoding: 'utf-8' },
   );
@@ -152,6 +174,9 @@ beforeAll(async () => {
   tenants = app.get<TenantRepository>(TENANT_REPOSITORY);
   memberships = app.get<TenantMembershipRepository>(
     TENANT_MEMBERSHIP_REPOSITORY,
+  );
+  roleAssignments = app.get<TenantRoleAssignmentRepository>(
+    TENANT_ROLE_ASSIGNMENT_REPOSITORY,
   );
   credentials = app.get(LocalCredentialService);
   passwordService = app.get(PasswordService);

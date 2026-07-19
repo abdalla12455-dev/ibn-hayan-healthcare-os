@@ -74,6 +74,9 @@ const validSession = {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         status: 'active' as const,
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
       {
         id: MEMBERSHIP_ID_B,
@@ -81,6 +84,10 @@ const validSession = {
         tenantSlug: 'tenant-beta.invalid',
         tenantDisplayName: 'Tenant Beta',
         status: 'active' as const,
+        roles: [
+          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
     ],
     activeTenantContext: null,
@@ -97,12 +104,19 @@ const contextWithNoActive = {
         tenantId: TENANT_ID_A,
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
       {
         membershipId: MEMBERSHIP_ID_B,
         tenantId: TENANT_ID_B,
         tenantSlug: 'tenant-beta.invalid',
         tenantDisplayName: 'Tenant Beta',
+        roles: [
+          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
     ],
     active: null,
@@ -118,12 +132,19 @@ const contextWithActiveA = {
         tenantId: TENANT_ID_A,
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
       {
         membershipId: MEMBERSHIP_ID_B,
         tenantId: TENANT_ID_B,
         tenantSlug: 'tenant-beta.invalid',
         tenantDisplayName: 'Tenant Beta',
+        roles: [
+          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
       },
     ],
     active: {
@@ -131,6 +152,9 @@ const contextWithActiveA = {
       tenantId: TENANT_ID_A,
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+      ],
     },
   },
 };
@@ -550,5 +574,128 @@ describe('DashboardPage', () => {
     const h2s = document.querySelectorAll('h2');
     const h2Texts = Array.from(h2s).map((h) => h.textContent ?? '');
     expect(h2Texts.some((t) => t.includes('بيئة العمل النشطة'))).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch 8 — RBAC role chips
+  // -------------------------------------------------------------------------
+
+  it('renders Arabic role labels for memberships (default locale)', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The memberships have role "مسؤول النظام" (R13 in Arabic).
+      // Multiple memberships carry this role, so use getAllByText.
+      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      expect(sysAdminChips.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('renders multiple role chips for a membership with multiple roles', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The second membership has both "طبيب" (R01) and "مسؤول النظام" (R13).
+      const physicianChips = screen.getAllByText('طبيب');
+      expect(physicianChips.length).toBeGreaterThanOrEqual(1);
+      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      expect(sysAdminChips.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it('does not display raw enum values such as R13_SYSTEM_ADMINISTRATOR', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveA);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+    });
+
+    const body = document.body.textContent ?? '';
+    // Raw enum codes must never appear in the user-facing surface.
+    expect(body).not.toContain('R13_SYSTEM_ADMINISTRATOR');
+    expect(body).not.toContain('R01_PHYSICIAN');
+    expect(body).not.toContain('R14_INTEGRATION_ACCOUNT');
+  });
+
+  it('displays R13 as "مسؤول النظام" in Arabic (default locale)', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveA);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The active workspace has R13 assigned, displayed in Arabic.
+      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      expect(sysAdminChips.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('renders role chips in the active workspace section', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveA);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      const workspaceSection = screen
+        .getByText('بيئة العمل النشطة')
+        .closest('section');
+      expect(workspaceSection?.textContent).toContain('مسؤول النظام');
+      // The roles label appears in the workspace section.
+      expect(workspaceSection?.textContent).toContain('الأدوار');
+    });
+  });
+
+  it('renders role chips for each available workspace option', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      const workspaceSection = screen
+        .getByText('بيئة العمل النشطة')
+        .closest('section');
+      // Both options' roles are rendered.
+      expect(workspaceSection?.textContent).toContain('طبيب');
+      expect(workspaceSection?.textContent).toContain('مسؤول النظام');
+    });
+  });
+
+  it('renders role chips in the account section for each membership', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      const accountHeading = screen.getByText('بيئات العمل المتاحة');
+      const accountSection = accountHeading.closest('section');
+      expect(accountSection?.textContent).toContain('طبيب');
+      expect(accountSection?.textContent).toContain('مسؤول النظام');
+    });
   });
 });

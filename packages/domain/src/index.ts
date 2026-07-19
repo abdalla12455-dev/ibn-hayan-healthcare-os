@@ -26,6 +26,14 @@
  *   hash of the opaque session token, never the raw token; the User
  *   model excludes password hashes (those live on the
  *   infrastructure-only LocalCredential row).
+ * - authorization: the canonical fourteen-role catalogue (R01
+ *   through R14), the action-level permission catalogue, the
+ *   role-permission matrix, the TenantRoleAssignment domain model,
+ *   and the TenantRoleAssignmentRepository port. Per PRODUCT_BIBLE.md
+ *   Section 20 and Section 21, roles are composable (a principal
+ *   may hold multiple roles simultaneously) and permissions are
+ *   assigned through roles only. The authorization layer is
+ *   default-deny.
  *
  * Additional bounded contexts (patients, audit, billing, scheduling,
  * inventory, configuration, etc.) arrive in subsequent batches alongside
@@ -38,3 +46,4 @@ export const DOMAIN_PACKAGE_NAME = '@ibn-hayan/domain' as const;
 
 export * from './tenancy/index.js';
 export * from './identity/index.js';
+export * from './authorization/index.js';

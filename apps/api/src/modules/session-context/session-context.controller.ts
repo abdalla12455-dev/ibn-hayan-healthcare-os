@@ -5,10 +5,10 @@ import {
   Delete,
   Body,
   Req,
+  UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
   ApiTags,
   ApiOperation,
@@ -25,7 +25,6 @@ import type {
 } from '@ibn-hayan/contracts';
 import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
 import type { TenantMembershipId } from '@ibn-hayan/domain';
-import { AuthService } from '../auth/auth.service.js';
 import {
   SESSION_COOKIE_NAME,
   CSRF_HEADER_NAME,
@@ -34,10 +33,14 @@ import { CsrfService } from '../auth/csrf.service.js';
 import { SessionContextService } from './session-context.service.js';
 import {
   sessionRequired,
-  originDisallowed,
   csrfInvalid,
   contextRequestInvalid,
 } from './session-context.errors.js';
+import {
+  AuthorizationGuard,
+  RequirePermission,
+  type AuthorizationRequestAugmentation,
+} from '../authorization/index.js';
 
 /**
  * Session-context controller.
@@ -80,12 +83,11 @@ import {
  */
 @ApiTags('context')
 @Controller('context')
+@UseGuards(AuthorizationGuard)
 export class SessionContextController {
   constructor(
     private readonly contextService: SessionContextService,
-    private readonly authService: AuthService,
     private readonly csrfService: CsrfService,
-    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -96,8 +98,15 @@ export class SessionContextController {
    *
    * Returns 401 for missing/invalid/expired/revoked sessions.
    * Does not require Origin or CSRF (read-only operation).
+   *
+   * Per the eighth canonical batch specification, this endpoint
+   * requires the `context:view` permission. The authorization
+   * decision is evaluated against the user's available active
+   * memberships (no active Tenant context required to already be
+   * selected).
    */
   @Get()
+  @RequirePermission('context:view', { mode: 'for-user' })
   @ApiSecurity('session')
   @ApiOperation({
     summary: 'Load the available Tenant context options and the active context',
@@ -155,8 +164,16 @@ export class SessionContextController {
     description: 'Session is missing, expired, or revoked.',
   })
   async getContext(@Req() req: Request): Promise<ContextResponse> {
+    // The AuthorizationGuard has already validated the session and
+    // performed the authorization check. The guard attaches the
+    // auth result to the request; we re-read the cookie only to
+    // delegate to the service for building the response.
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    const result = await this.contextService.loadContext(cookieValue);
+    const acceptLanguage = readHeader(req, 'accept-language');
+    const result = await this.contextService.loadContext(
+      cookieValue,
+      acceptLanguage,
+    );
     if (result === null) {
       throw sessionRequired();
     }
@@ -182,6 +199,7 @@ export class SessionContextController {
    * 403; the response does not reveal which condition failed.
    */
   @Put('tenant')
+  @RequirePermission('context:select', { mode: 'for-targeted-membership' })
   @HttpCode(HttpStatus.OK)
   @ApiSecurity('session')
   @ApiOperation({
@@ -228,29 +246,25 @@ export class SessionContextController {
     @Body() body: unknown,
     @Req() req: Request,
   ): Promise<ContextResponse> {
-    // Verify Origin FIRST, before any other processing. A missing or
-    // disallowed Origin returns a generic 403 that does not reveal
-    // whether the session is valid.
-    const origin = req.headers['origin'];
-    const webOrigin =
-      this.config.get<string>('WEB_ORIGIN') ?? 'http://localhost:3000';
-    if (!this.authService.isOriginAllowed(origin, webOrigin)) {
-      throw originDisallowed();
-    }
+    // The AuthorizationGuard has already verified Origin, validated
+    // the session, validated the body, performed the ownership
+    // check, and performed the authorization check. The controller
+    // now only needs to verify CSRF and delegate to the service.
 
-    // Validate the request body through the shared Zod contract.
+    // Re-validate the body defensively (the guard already validated
+    // it, but we re-validate to be safe against any middleware that
+    // might have mutated it).
     const parsed = SelectTenantContextRequestSchema.safeParse(body);
     if (!parsed.success) {
       throw contextRequestInvalid();
     }
     const request: SelectTenantContextRequest = parsed.data;
 
-    // Authenticate the session.
-    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    // We need the session ID for CSRF verification. Re-validate the
-    // session through the auth service to get the session record.
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
-    if (authResult === null) {
+    // Read the auth result attached by the guard.
+    const auth = (req as AuthorizationRequestAugmentation).authorization;
+    if (auth === undefined) {
+      // The guard should have attached the auth result; if not,
+      // treat as a session-required error.
       throw sessionRequired();
     }
 
@@ -259,16 +273,19 @@ export class SessionContextController {
     if (!csrfToken || csrfToken.length === 0) {
       throw csrfInvalid();
     }
-    const csrfOk = this.csrfService.verify(authResult.session.id, csrfToken);
+    const csrfOk = this.csrfService.verify(auth.session.id as never, csrfToken);
     if (!csrfOk) {
       throw csrfInvalid();
     }
 
     // Delegate to the service for the business rule (membership
     // validity) and the persistence (set active membership).
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const acceptLanguage = readHeader(req, 'accept-language');
     const result = await this.contextService.selectContext(
       cookieValue,
       request.membershipId as TenantMembershipId,
+      acceptLanguage,
     );
     if (result === null) {
       throw sessionRequired();
@@ -291,6 +308,7 @@ export class SessionContextController {
    * Returns 200 with `{ ok: true, active: null }` on success.
    */
   @Delete('tenant')
+  @RequirePermission('context:clear', { mode: 'for-active-membership' })
   @HttpCode(HttpStatus.OK)
   @ApiSecurity('session')
   @ApiOperation({
@@ -324,18 +342,14 @@ export class SessionContextController {
   async clearTenantContext(
     @Req() req: Request,
   ): Promise<ClearTenantContextResponse> {
-    // Verify Origin FIRST.
-    const origin = req.headers['origin'];
-    const webOrigin =
-      this.config.get<string>('WEB_ORIGIN') ?? 'http://localhost:3000';
-    if (!this.authService.isOriginAllowed(origin, webOrigin)) {
-      throw originDisallowed();
-    }
+    // The AuthorizationGuard has already verified Origin, validated
+    // the session, and performed the authorization check. The
+    // controller now only needs to verify CSRF and delegate to the
+    // service.
 
-    // Authenticate the session.
-    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
-    if (authResult === null) {
+    // Read the auth result attached by the guard.
+    const auth = (req as AuthorizationRequestAugmentation).authorization;
+    if (auth === undefined) {
       throw sessionRequired();
     }
 
@@ -344,13 +358,14 @@ export class SessionContextController {
     if (!csrfToken || csrfToken.length === 0) {
       throw csrfInvalid();
     }
-    const csrfOk = this.csrfService.verify(authResult.session.id, csrfToken);
+    const csrfOk = this.csrfService.verify(auth.session.id as never, csrfToken);
     if (!csrfOk) {
       throw csrfInvalid();
     }
 
     // Delegate to the service for the persistence (clear active
     // membership).
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
     const result = await this.contextService.clearContext(cookieValue);
     if (result === null) {
       throw sessionRequired();

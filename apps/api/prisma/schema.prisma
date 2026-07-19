@@ -62,6 +62,42 @@
 //   enforcement of the lifecycle: a selected membership cannot be
 //   silently destroyed.
 //
+// Per the eighth canonical batch specification (RBAC authorization
+// foundation):
+// - A new `TenantRoleAssignment` model persists the link between a
+//   `TenantMembership` and a canonical platform role code (R01
+//   through R14). A membership may carry zero or more role
+//   assignments; the assignments accumulate permissions per the
+//   role-permission matrix defined in `packages/domain/src/
+//   authorization/role-permissions.ts`.
+// - NO `role` column is added to `TenantMembership`. The simplified
+//   `owner`/`member`/`viewer` proposal in
+//   `CURRENT_IMPLEMENTATION_HANDOVER.md` is explicitly rejected; it
+//   conflicts with the ratified fourteen-role catalogue in
+//   PRODUCT_BIBLE.md Section 20.2 and ROLES_AND_PERMISSIONS.md
+//   Section 1.2.
+// - The `roleCode` column is `VarChar(40)` (the longest canonical
+//   code is `R05_ALLIED_HEALTH_PROFESSIONAL` at 29 characters; 40
+//   leaves headroom for future custom-role codes that may include
+//   tenant prefixes).
+// - The unique constraint on `(tenantMembershipId, roleCode)` is the
+//   persistence invariant that prevents duplicate role assignments.
+//   A duplicate insert raises a Prisma `PrismaClientKnownRequestError`
+//   with code `P2002`.
+// - `ON DELETE RESTRICT` on the membership foreign key means a
+//   membership with active role assignments cannot be deleted until
+//   the assignments are deleted first. This prevents silent
+//   privilege loss when a membership is repurposed.
+// - The migration does NOT insert any rows. Existing memberships
+//   remain without role assignments. This is the fail-closed
+//   posture: a membership with no assignments has no permissions.
+//   The development bootstrap command is updated to explicitly
+//   assign R13 System Administrator to the development membership.
+// - Customer-defined custom roles are not implemented in this batch.
+//   Hierarchical role scope (Organisation, Facility, Department,
+//   Care-Team) is deferred. The first slice is Tenant-scoped because
+//   the current application only has an active Tenant context.
+//
 // Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
 // schema language cannot express a PostgreSQL concept that the design
 // requires, the design is PostgreSQL-correct first and the Prisma
@@ -290,10 +326,14 @@ enum TenantMembershipStatus {
 /// constraint on `(tenantId, userId)`). A User's set of memberships
 /// determines the Tenants they may operate within.
 ///
-/// Per the fourth canonical batch specification, this model carries
-/// NO role or permission columns. The role/permission catalogue is
-/// deferred to a subsequent batch. Adding such columns in the future
-/// is a coordinated domain change, not a silent addition.
+/// Per the eighth canonical batch specification, this model carries
+/// NO `role` column. Roles are persisted through the separate
+/// `TenantRoleAssignment` model, which allows a membership to carry
+/// zero or more role assignments simultaneously (per
+/// PRODUCT_BIBLE.md Section 20.3 — roles are composable). The
+/// simplified `owner`/`member`/`viewer` proposal in
+/// `CURRENT_IMPLEMENTATION_HANDOVER.md` is explicitly rejected; it
+/// conflicts with the ratified fourteen-role catalogue.
 ///
 /// Per the fifth canonical batch specification, this model gains a
 /// composite unique constraint on `(id, userId)`. The composite
@@ -323,14 +363,78 @@ model TenantMembership {
   createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime               @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roleAssignments TenantRoleAssignment[]
 
   @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
   @@unique([id, userId], map: "tenant_memberships_id_user_id_key")
   @@index([tenantId], map: "tenant_memberships_tenant_id_idx")
   @@index([userId], map: "tenant_memberships_user_id_idx")
   @@map("tenant_memberships")
+}
+
+// ---------------------------------------------------------------------------
+// TenantRoleAssignment
+// ---------------------------------------------------------------------------
+
+/// A TenantRoleAssignment is the link between a TenantMembership and
+/// a canonical platform role code (R01 through R14). A membership
+/// may carry zero or more role assignments; the assignments
+/// accumulate permissions per the role-permission matrix defined in
+/// `packages/domain/src/authorization/role-permissions.ts`.
+///
+/// Per PRODUCT_BIBLE.md Section 20.3 and the eighth canonical batch
+/// specification, roles are composable: a principal may hold
+/// multiple roles simultaneously, with permissions accumulating per
+/// defined rules. This model is the structural expression of
+/// composability: instead of placing one role directly on
+/// `TenantMembership`, each assignment is its own row, and a
+/// membership may have many.
+///
+/// Per ROLES_AND_PERMISSIONS.md Section 1.6, roles are tenant-scoped.
+/// The tenant scoping is enforced structurally: every
+/// `TenantRoleAssignment` references a `TenantMembership`, which in
+/// turn references exactly one `Tenant`. A cross-tenant role
+/// assignment is therefore impossible at the data-model level.
+///
+/// The unique constraint on `(tenantMembershipId, roleCode)` is the
+/// persistence invariant that prevents duplicate role assignments.
+/// A duplicate insert raises a Prisma
+/// `PrismaClientKnownRequestError` with code `P2002`, which the API
+/// exception layer translates to a 409 Conflict.
+///
+/// The `roleCode` column is `VarChar(40)`. The longest canonical
+/// code is `R05_ALLIED_HEALTH_PROFESSIONAL` at 29 characters; 40
+/// leaves headroom for future custom-role codes that may include
+/// tenant prefixes. The persistence adapter validates that the code
+/// is in the canonical catalogue before insertion; an unknown code
+/// is rejected with a domain error.
+///
+/// `ON DELETE RESTRICT` on the membership foreign key means a
+/// membership with active role assignments cannot be deleted until
+/// the assignments are deleted first. This prevents silent privilege
+/// loss when a membership is repurposed.
+///
+/// The migration that creates this table does NOT insert any rows.
+/// Existing memberships remain without role assignments. This is the
+/// fail-closed posture: a membership with no assignments has no
+/// permissions. The development bootstrap command is updated to
+/// explicitly assign R13 System Administrator to the development
+/// membership.
+model TenantRoleAssignment {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantMembershipId String   @map("tenant_membership_id") @db.Uuid
+  roleCode           String   @map("role_code") @db.VarChar(40)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenantMembership TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([tenantMembershipId, roleCode], map: "tenant_role_assignments_membership_role_key")
+  @@index([tenantMembershipId], map: "tenant_role_assignments_tenant_membership_id_idx")
+  @@index([roleCode], map: "tenant_role_assignments_role_code_idx")
+  @@map("tenant_role_assignments")
 }
 
 // ---------------------------------------------------------------------------

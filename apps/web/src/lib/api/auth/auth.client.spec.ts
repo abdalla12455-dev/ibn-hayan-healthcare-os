@@ -32,6 +32,9 @@ const validSessionResponse = {
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       status: 'active',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+      ],
     },
   ],
   activeTenantContext: null,

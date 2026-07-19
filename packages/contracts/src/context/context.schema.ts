@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RoleSummarySchema } from '../authorization/authorization.schema.js';
 
 /**
  * Shared tenant-context contracts for the Ibn Hayan Healthcare
@@ -47,6 +48,14 @@ import { z } from 'zod';
  *   select by `tenantId` — only by `membershipId`.
  * - `tenantSlug`: short, URL-safe identifier for display.
  * - `tenantDisplayName`: human-readable name for display.
+ * - `roles`: the role summaries assigned to this membership. The
+ *   client may display them as chips. The array may be empty for
+ *   a membership with no role assignments (fail-closed posture).
+ *
+ * Per the eighth canonical batch specification, the option carries
+ * `roles` as an array (not a singular `role` field) because a
+ * principal may hold multiple roles simultaneously per
+ * PRODUCT_BIBLE.md Section 20.3.
  *
  * The schema excludes:
  * - membership `status` (the load-context flow returns only
@@ -57,7 +66,8 @@ import { z } from 'zod';
  * - any Prisma-generated field;
  * - any internal timestamp;
  * - any Organisation or Facility field;
- * - any role or permission field.
+ * - any permission information (the client must not duplicate the
+ *   role-permission matrix).
  */
 export const TenantContextOptionSchema = z
   .object({
@@ -65,6 +75,7 @@ export const TenantContextOptionSchema = z
     tenantId: z.string().uuid(),
     tenantSlug: z.string().max(80),
     tenantDisplayName: z.string().max(200),
+    roles: z.array(RoleSummarySchema),
   })
   .strict();
 
@@ -80,10 +91,14 @@ export type TenantContextOption = z.infer<typeof TenantContextOptionSchema>;
  * is selected.
  *
  * The shape is identical to {@link TenantContextOption}: the same
- * four fields. A separate type is declared (rather than re-using
- * `TenantContextOption`) so that consumers can distinguish "an
- * option the user may select" from "the option the user has
- * selected" at the type level.
+ * fields, including the `roles` array. A separate type is declared
+ * (rather than re-using `TenantContextOption`) so that consumers
+ * can distinguish "an option the user may select" from "the option
+ * the user has selected" at the type level.
+ *
+ * Per the eighth canonical batch specification, the active context
+ * carries `roles` as an array. The dashboard displays these roles
+ * as chips alongside the active workspace name.
  */
 export const ActiveTenantContextSchema = z
   .object({
@@ -91,6 +106,7 @@ export const ActiveTenantContextSchema = z
     tenantId: z.string().uuid(),
     tenantSlug: z.string().max(80),
     tenantDisplayName: z.string().max(200),
+    roles: z.array(RoleSummarySchema),
   })
   .strict();
 

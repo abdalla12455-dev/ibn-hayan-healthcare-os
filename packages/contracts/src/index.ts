@@ -26,3 +26,4 @@ export const CONTRACTS_PACKAGE_NAME = '@ibn-hayan/contracts' as const;
 export * from './health/index.js';
 export * from './auth/index.js';
 export * from './context/index.js';
+export * from './authorization/index.js';

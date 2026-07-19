@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ActiveTenantContextSchema } from '../context/context.schema.js';
+import { RoleSummarySchema } from '../authorization/authorization.schema.js';
 
 /**
  * Shared authentication contracts for the Ibn Hayan Healthcare
@@ -108,8 +109,12 @@ export type AuthenticatedUser = z.infer<typeof AuthenticatedUserSchema>;
  * by the client). Carries `tenantId`, `tenantSlug`, `tenantDisplayName`
  * for display, and `status` for the membership lifecycle.
  *
- * Per the fourth canonical batch specification, no role or permission
- * fields are included. The role/permission catalogue is deferred.
+ * Per the eighth canonical batch specification, the summary carries
+ * `roles` as an array of role-summary objects. A principal may hold
+ * multiple roles simultaneously per PRODUCT_BIBLE.md Section 20.3;
+ * the array (rather than a singular `role` field) is the structural
+ * expression of role composability. The array may be empty for a
+ * membership with no role assignments (fail-closed posture).
  */
 export const TenantMembershipSummarySchema = z
   .object({
@@ -118,6 +123,7 @@ export const TenantMembershipSummarySchema = z
     tenantSlug: z.string().max(80),
     tenantDisplayName: z.string().max(200),
     status: z.enum(['active', 'suspended']),
+    roles: z.array(RoleSummarySchema),
   })
   .strict();
 
@@ -273,6 +279,7 @@ export const AuthErrorResponseSchema = z
           'AUTH_ORIGIN_DISALLOWED',
           'CONTEXT_SELECTION_FORBIDDEN',
           'CONTEXT_REQUEST_INVALID',
+          'AUTHORIZATION_FORBIDDEN',
         ]),
         message: z.string(),
       })

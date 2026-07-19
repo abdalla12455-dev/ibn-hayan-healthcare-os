@@ -23,6 +23,7 @@ import type {
   ContextResponse,
   TenantContextOption,
   TenantMembershipSummary,
+  RoleSummary,
 } from '@ibn-hayan/contracts';
 import { useLanguage } from '@/components/i18n/language-context';
 import { BrandMark } from '@/components/marketing/brand-mark';
@@ -96,6 +97,8 @@ const DASHBOARD_COPY = {
     noMemberships: 'لا توجد عضويات نشطة.',
     statusActive: 'نشط',
     statusSuspended: 'موقوف',
+    rolesLabel: 'الأدوار',
+    noRoles: 'لا توجد أدوار مسندة.',
     logoutButton: 'تسجيل الخروج',
     loggingOut: 'جارٍ تسجيل الخروج…',
     errorContextGeneric: 'تعذّر تحديث بيئة العمل. حاول مرة أخرى.',
@@ -129,6 +132,8 @@ const DASHBOARD_COPY = {
     noMemberships: 'No active memberships.',
     statusActive: 'active',
     statusSuspended: 'suspended',
+    rolesLabel: 'Roles',
+    noRoles: 'No roles assigned.',
     logoutButton: 'Sign out',
     loggingOut: 'Signing out…',
     errorContextGeneric: 'Unable to update the workspace. Please try again.',
@@ -404,6 +409,8 @@ export default function DashboardPage() {
           clearingLabel={copy.clearing}
           error={contextError}
           errorText={copy.errorContextGeneric}
+          rolesLabel={copy.rolesLabel}
+          noRoles={copy.noRoles}
         />
 
         <AccountCard
@@ -420,6 +427,8 @@ export default function DashboardPage() {
           noMemberships={copy.noMemberships}
           statusActive={copy.statusActive}
           statusSuspended={copy.statusSuspended}
+          rolesLabel={copy.rolesLabel}
+          noRoles={copy.noRoles}
         />
 
         {error !== null && (
@@ -453,6 +462,69 @@ interface WorkspaceCardProps {
   readonly clearingLabel: string;
   readonly error: string | null;
   readonly errorText: string;
+  readonly rolesLabel: string;
+  readonly noRoles: string;
+}
+
+/**
+ * Render a list of role chips. Each chip displays the localized
+ * role display name. Raw enum codes (e.g. `R13_SYSTEM_ADMINISTRATOR`)
+ * are never shown to the user.
+ *
+ * Per the eighth canonical batch specification:
+ * - Multiple roles render cleanly as chips.
+ * - No raw enum names are shown.
+ * - The frontend does not decide whether an action is authorized;
+ *   the chips are a display-only affordance.
+ */
+function RoleChips({
+  roles,
+  noRoles,
+}: {
+  readonly roles: readonly RoleSummary[];
+  readonly noRoles: string;
+}): ReactElement {
+  if (roles.length === 0) {
+    return (
+      <span
+        className="ih-account-item__value"
+        style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}
+      >
+        {noRoles}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ih-role-chips"
+      style={{
+        display: 'inline-flex',
+        flexWrap: 'wrap',
+        gap: '0.25rem',
+        alignItems: 'center',
+      }}
+    >
+      {roles.map((role) => (
+        <span
+          key={role.code}
+          className="ih-role-chip"
+          style={{
+            display: 'inline-block',
+            padding: '0.125rem 0.5rem',
+            borderRadius: '9999px',
+            background: 'var(--accent-soft, rgba(99, 102, 241, 0.08))',
+            color: 'var(--accent, #4f46e5)',
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            lineHeight: 1.4,
+            border: '1px solid var(--accent-border, rgba(99, 102, 241, 0.2))',
+          }}
+        >
+          {role.displayName}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function WorkspaceCard({
@@ -478,6 +550,8 @@ function WorkspaceCard({
   clearingLabel,
   error,
   errorText,
+  rolesLabel,
+  noRoles,
 }: WorkspaceCardProps): ReactElement {
   return (
     <section
@@ -506,6 +580,15 @@ function WorkspaceCard({
               {active.tenantDisplayName}
             </p>
             <p className="ih-context-current__meta">{active.tenantSlug}</p>
+            <div style={{ marginTop: '0.5rem' }}>
+              <p
+                className="ih-context-current__label"
+                style={{ marginBottom: '0.25rem' }}
+              >
+                {rolesLabel}
+              </p>
+              <RoleChips roles={active.roles} noRoles={noRoles} />
+            </div>
           </div>
         )}
       </div>
@@ -547,6 +630,15 @@ function WorkspaceCard({
                       </span>
                       <span className="ih-option__slug">
                         {option.tenantSlug}
+                      </span>
+                      <span
+                        className="ih-option__roles"
+                        style={{
+                          display: 'block',
+                          marginTop: '0.25rem',
+                        }}
+                      >
+                        <RoleChips roles={option.roles} noRoles={noRoles} />
                       </span>
                     </span>
                   </label>
@@ -599,6 +691,8 @@ interface AccountCardProps {
   readonly noMemberships: string;
   readonly statusActive: string;
   readonly statusSuspended: string;
+  readonly rolesLabel: string;
+  readonly noRoles: string;
 }
 
 function AccountCard({
@@ -615,6 +709,8 @@ function AccountCard({
   noMemberships,
   statusActive,
   statusSuspended,
+  rolesLabel,
+  noRoles,
 }: AccountCardProps): ReactElement {
   return (
     <section className="ih-card" aria-labelledby="ih-account-title">
@@ -691,6 +787,26 @@ function AccountCard({
                   {membership.status === 'active'
                     ? statusActive
                     : statusSuspended}
+                </span>
+                <span
+                  className="ih-membership__roles"
+                  style={{
+                    display: 'block',
+                    marginTop: '0.25rem',
+                    width: '100%',
+                  }}
+                >
+                  <span
+                    className="ih-account-item__label"
+                    style={{
+                      display: 'block',
+                      fontSize: '0.75rem',
+                      marginBottom: '0.25rem',
+                    }}
+                  >
+                    {rolesLabel}
+                  </span>
+                  <RoleChips roles={membership.roles} noRoles={noRoles} />
                 </span>
               </li>
             ))}

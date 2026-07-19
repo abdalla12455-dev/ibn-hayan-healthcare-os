@@ -138,7 +138,48 @@ describe('AuthenticatedUserSchema', () => {
 });
 
 describe('TenantMembershipSummarySchema', () => {
-  it('accepts a canonical valid membership summary', () => {
+  it('accepts a canonical valid membership summary with empty roles', () => {
+    const result = TenantMembershipSummarySchema.safeParse({
+      id: '12345678-1234-1234-1234-123456789012',
+      tenantId: '12345678-1234-1234-1234-123456789013',
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      status: 'active',
+      roles: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a membership summary with one role', () => {
+    const result = TenantMembershipSummarySchema.safeParse({
+      id: '12345678-1234-1234-1234-123456789012',
+      tenantId: '12345678-1234-1234-1234-123456789013',
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      status: 'active',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a membership summary with multiple roles', () => {
+    const result = TenantMembershipSummarySchema.safeParse({
+      id: '12345678-1234-1234-1234-123456789012',
+      tenantId: '12345678-1234-1234-1234-123456789013',
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      status: 'active',
+      roles: [
+        { code: 'R01_PHYSICIAN', displayName: 'Physician' },
+        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a missing roles array', () => {
     const result = TenantMembershipSummarySchema.safeParse({
       id: '12345678-1234-1234-1234-123456789012',
       tenantId: '12345678-1234-1234-1234-123456789013',
@@ -146,7 +187,7 @@ describe('TenantMembershipSummarySchema', () => {
       tenantDisplayName: 'Tenant Alpha',
       status: 'active',
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it('rejects an invalid status', () => {
@@ -156,18 +197,32 @@ describe('TenantMembershipSummarySchema', () => {
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       status: 'active-extra',
+      roles: [],
     });
     expect(result.success).toBe(false);
   });
 
-  it('does not expose role or permission fields (strict)', () => {
+  it('does not expose a singular role field (strict — schema uses roles array)', () => {
     const result = TenantMembershipSummarySchema.safeParse({
       id: '12345678-1234-1234-1234-123456789012',
       tenantId: '12345678-1234-1234-1234-123456789013',
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       status: 'active',
+      roles: [],
       role: 'admin',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unknown role code in the roles array', () => {
+    const result = TenantMembershipSummarySchema.safeParse({
+      id: '12345678-1234-1234-1234-123456789012',
+      tenantId: '12345678-1234-1234-1234-123456789013',
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      status: 'active',
+      roles: [{ code: 'R99_UNKNOWN', displayName: 'Unknown' }],
     });
     expect(result.success).toBe(false);
   });
@@ -188,6 +243,9 @@ describe('SessionResponseSchema', () => {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         status: 'active',
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+        ],
       },
     ],
     activeTenantContext: null,
@@ -315,6 +373,16 @@ describe('AuthErrorResponseSchema', () => {
       error: {
         code: 'CONTEXT_SELECTION_FORBIDDEN',
         message: 'The selected tenant context is not available.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an authorization-forbidden error (added in batch 8)', () => {
+    const result = AuthErrorResponseSchema.safeParse({
+      error: {
+        code: 'AUTHORIZATION_FORBIDDEN',
+        message: 'The request is not authorized.',
       },
     });
     expect(result.success).toBe(true);

@@ -11,12 +11,17 @@ import type {
   TenantMembershipRepository,
   SessionRepository,
   TenantRepository,
+  TenantRoleAssignmentRepository,
+  TenantRoleAssignment,
+  RoleLabelLocale,
 } from '@ibn-hayan/domain';
+import { getRoleDisplayName } from '@ibn-hayan/domain';
 import {
   USER_REPOSITORY,
   TENANT_MEMBERSHIP_REPOSITORY,
   SESSION_REPOSITORY,
   TENANT_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
 } from '../../infrastructure/database/index.js';
 import { PasswordService } from './password.service.js';
 import {
@@ -39,6 +44,7 @@ import type {
   AuthenticatedUser,
   TenantMembershipSummary,
   ActiveTenantContext,
+  RoleSummary,
 } from '@ibn-hayan/contracts';
 
 /**
@@ -90,6 +96,8 @@ export class AuthService {
     private readonly memberships: TenantMembershipRepository,
     @Inject(SESSION_REPOSITORY) private readonly sessions: SessionRepository,
     @Inject(TENANT_REPOSITORY) private readonly tenants: TenantRepository,
+    @Inject(TENANT_ROLE_ASSIGNMENT_REPOSITORY)
+    private readonly roleAssignments: TenantRoleAssignmentRepository,
     private readonly passwordService: PasswordService,
     private readonly sessionTokens: SessionTokenService,
     private readonly csrfService: CsrfService,
@@ -412,8 +420,10 @@ export class AuthService {
     readonly memberships: TenantMembership[];
     readonly expiresAt: Date;
     readonly activeTenantMembershipId?: TenantMembershipId | null;
+    readonly locale?: RoleLabelLocale;
   }): Promise<SessionResponse> {
-    // Enrich memberships with tenant slug + display name.
+    const locale: RoleLabelLocale = input.locale ?? 'ar';
+    // Enrich memberships with tenant slug + display name + roles.
     const summaries: TenantMembershipSummary[] = [];
     const tenantsById = new Map<
       TenantId,
@@ -428,12 +438,25 @@ export class AuthService {
           status: tenant.status,
         });
       }
+      // Load the membership's role assignments. Per the eighth
+      // canonical batch specification, the summary carries `roles`
+      // as an array of role-summary objects. A membership with no
+      // role assignments receives an empty array (fail-closed
+      // posture).
+      const assignments = await this.roleAssignments.listForMembership(
+        membership.id,
+      );
+      const roleSummaries: RoleSummary[] = assignments.map((a) => ({
+        code: a.roleCode,
+        displayName: getRoleDisplayName(a.roleCode, locale),
+      }));
       summaries.push({
         id: membership.id,
         tenantId: membership.tenantId,
         tenantSlug: tenant?.slug ?? '',
         tenantDisplayName: tenant?.displayName ?? '',
         status: membership.status,
+        roles: roleSummaries,
       });
     }
 
@@ -456,11 +479,22 @@ export class AuthService {
       ) {
         const tenant = tenantsById.get(selectedMembership.tenantId);
         if (tenant !== undefined && tenant.status === 'active') {
+          // Load the active membership's role assignments for the
+          // active context response.
+          const activeAssignments =
+            await this.roleAssignments.listForMembership(selectedMembership.id);
+          const activeRoleSummaries: RoleSummary[] = activeAssignments.map(
+            (a: TenantRoleAssignment) => ({
+              code: a.roleCode,
+              displayName: getRoleDisplayName(a.roleCode, locale),
+            }),
+          );
           activeTenantContext = {
             membershipId: selectedMembership.id,
             tenantId: selectedMembership.tenantId,
             tenantSlug: tenant.slug,
             tenantDisplayName: tenant.displayName,
+            roles: activeRoleSummaries,
           };
         }
       }

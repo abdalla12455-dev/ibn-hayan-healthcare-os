@@ -26,6 +26,9 @@ const validContextResponse = {
       tenantId: '22222222-2222-2222-2222-222222222222',
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+      ],
     },
   ],
   active: null,
@@ -184,6 +187,9 @@ describe('context.client', () => {
               tenantId: '22222222-2222-2222-2222-222222222222',
               tenantSlug: 'tenant-alpha.invalid',
               tenantDisplayName: 'Tenant Alpha',
+              roles: [
+                { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+              ],
             },
           ],
           active: {
@@ -191,6 +197,9 @@ describe('context.client', () => {
             tenantId: '22222222-2222-2222-2222-222222222222',
             tenantSlug: 'tenant-alpha.invalid',
             tenantDisplayName: 'Tenant Alpha',
+            roles: [
+              { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+            ],
           },
         }),
       } as unknown as Response);

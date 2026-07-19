@@ -30,6 +30,18 @@ import { Logger } from '@nestjs/common';
  * - Does NOT run automatically during install, build, migration, or
  *   startup.
  *
+ * Per the eighth canonical batch specification:
+ * - Explicitly assigns R13 System Administrator to the development
+ *   TenantMembership. The RBAC migration that introduced
+ *   `tenant_role_assignments` did NOT insert any rows; existing
+ *   memberships remain without permissions after migration
+ *   (fail-closed posture). The bootstrap is responsible for
+ *   explicitly assigning roles.
+ * - Never relies on an implicit database default role.
+ * - Never creates production credentials.
+ * - Prints no password, token, session secret, or sensitive
+ *   environment value.
+ *
  * Usage:
  *   ALLOW_DEV_AUTH_BOOTSTRAP=true \
  *   DEV_AUTH_EMAIL=... \
@@ -246,6 +258,7 @@ async function main(): Promise<void> {
     const existingMembership = await prisma.tenantMembership.findUnique({
       where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
     });
+    let membershipId: string;
     if (existingMembership === null) {
       const membership = await prisma.tenantMembership.create({
         data: {
@@ -253,12 +266,57 @@ async function main(): Promise<void> {
           userId: user.id,
         },
       });
+      membershipId = membership.id;
       logger.log(
         `Created tenant membership: id=${membership.id} tenantId=${membership.tenantId} userId=${membership.userId}`,
       );
     } else {
+      membershipId = existingMembership.id;
       logger.log(
         `Tenant membership already exists: id=${existingMembership.id}`,
+      );
+    }
+
+    // 5. Explicitly assign R13 System Administrator to the
+    //    development membership. Per the eighth canonical batch
+    //    specification, the migration that introduced
+    //    `tenant_role_assignments` did NOT insert any rows; existing
+    //    memberships remain without permissions after migration
+    //    (fail-closed posture). The bootstrap is responsible for
+    //    explicitly assigning roles to the development membership.
+    //
+    //    R13 System Administrator is the canonical platform role
+    //    for tenant configuration, integration management, and
+    //    operational administration (per PRODUCT_BIBLE.md Section
+    //    20.2). It grants the three current context permissions
+    //    (context:view, context:select, context:clear) per the
+    //    role-permission matrix.
+    //
+    //    The assignment is idempotent: if the assignment already
+    //    exists, the bootstrap does not duplicate it. The unique
+    //    constraint on (tenant_membership_id, role_code) is the
+    //    structural enforcement.
+    const existingAssignment = await prisma.tenantRoleAssignment.findUnique({
+      where: {
+        tenantMembershipId_roleCode: {
+          tenantMembershipId: membershipId,
+          roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+        },
+      },
+    });
+    if (existingAssignment === null) {
+      await prisma.tenantRoleAssignment.create({
+        data: {
+          tenantMembershipId: membershipId,
+          roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+        },
+      });
+      logger.log(
+        `Assigned role R13_SYSTEM_ADMINISTRATOR to membership ${membershipId}.`,
+      );
+    } else {
+      logger.log(
+        `Role R13_SYSTEM_ADMINISTRATOR already assigned to membership ${membershipId}.`,
       );
     }
 
@@ -266,6 +324,7 @@ async function main(): Promise<void> {
     logger.log('Bootstrap complete.');
     logger.log(`  Tenant: ${tenant.slug} (${tenant.id})`);
     logger.log(`  User:   ${user.email} (${user.id})`);
+    logger.log(`  Role:   R13_SYSTEM_ADMINISTRATOR`);
     logger.log('  (Password is NOT printed.)');
   } finally {
     await prisma.$disconnect();

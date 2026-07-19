@@ -89,7 +89,7 @@ function truncateAll(): void {
       '-v',
       'ON_ERROR_STOP=1',
       '-c',
-      'TRUNCATE TABLE auth_sessions, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
+      'TRUNCATE TABLE auth_sessions, tenant_role_assignments, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
     ],
     { stdio: 'pipe', encoding: 'utf-8' },
   );
