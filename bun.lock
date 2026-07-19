@@ -14,6 +14,7 @@
       "dependencies": {
         "@ibn-hayan/contracts": "workspace:*",
         "@ibn-hayan/domain": "workspace:*",
+        "@ibn-hayan/observability": "workspace:*",
         "@nestjs/common": "^11.0.1",
         "@nestjs/config": "^4.0.0",
         "@nestjs/core": "^11.0.1",
@@ -111,6 +112,10 @@
     "packages/observability": {
       "name": "@ibn-hayan/observability",
       "version": "0.0.0",
+      "devDependencies": {
+        "@types/node": "^24.0.0",
+        "vitest": "^3.0.0",
+      },
     },
     "packages/testing": {
       "name": "@ibn-hayan/testing",
