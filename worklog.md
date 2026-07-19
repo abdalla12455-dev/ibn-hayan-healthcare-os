@@ -756,3 +756,62 @@ Stage Summary:
 - Database/auth/context e2e tests: SKIPPED (PostgreSQL 17 not available in this environment — pre-existing limitation)
 - No secrets exposed; no unrelated files modified; no legacy prototypes touched
 - Next required batch: Batch 9 — Audit Primitive Foundation
+
+---
+Task ID: BATCH_08_VERIFICATION
+Agent: Main Agent (Chief Software Architect role)
+Task: Perform final verification and corrective pass for Batch 8 at the database and integration levels. Resolve any Batch 8 defects discovered, and produce a final acceptance report.
+
+Work Log:
+- Recorded git continuity: branch=main, HEAD=6bd95eb4d3fdb6a74acf9f3ac4b3b0c6ef4dd96e, clean working tree. Commit history fd7c720..6bd95eb: 58b7e95 (UUID subject, adds root CURRENT_IMPLEMENTATION_HANDOVER.md), f910761 (UUID subject, adds download/CURRENT_IMPLEMENTATION_HANDOVER.md), 6bd95eb (Batch 8 RBAC foundation, 47 files, +4422/-63). f910761 contains only the handover document copy — legitimate project work, non-code, with an unconventional UUID commit subject.
+- Inspected the original Batch 8 RBAC migration (20260719110000_rbac_authorization_foundation/migration.sql). Verified: UUID primary key, FK to tenant_memberships with ON DELETE RESTRICT and ON UPDATE RESTRICT, unique constraint on (tenant_membership_id, role_code), indexes on tenant_membership_id and role_code, no automatic privileged assignments (no INSERT statements), safe application to databases with existing memberships (no ALTER of existing tables), fail-closed (no implicit role grants). 
+- Critical defect identified: the original migration does NOT add a database-level CHECK constraint on role_code. PostgreSQL itself does NOT reject unknown role codes; only the application-level TypeScript and Zod validation does. Per the eighth canonical batch's final verification requirements, application-level validation alone is insufficient for direct database integrity.
+- Acquired PostgreSQL 17.10 server binaries without using sudo, without changing system packages, without modifying project dependencies, and without replacing PostgreSQL with another database runtime. Method: `apt-get download postgresql-17 postgresql-client-17 postgresql-common` (no privileges required) followed by `dpkg-deb -x` extraction into `/home/z/.local/opt/postgresql-17/`. Verified `initdb`, `pg_ctl`, `psql` all report PostgreSQL 17.10. No Docker, no Podman, no PGlite, no pg-mem, no SQLite. The repository's existing disposable-cluster test bootstrap (`apps/api/test/database/_pg-bootstrap.ts`) was used unchanged; only `PG_BINDIR` was supplied via the environment.
+- Ran the baseline test suite to capture the state of Batch 8 before corrections: test:database 75/75 passed; test:auth 35/35 passed; test:context 20/26 passed with 6 failures.
+- Identified six context-test failures, all caused by two architectural defects in the AuthorizationGuard:
+  (a) The guard performed the authorization decision BEFORE the CSRF check. When the targeted membership was not in the user's active memberships (e.g. a fake UUID in the CSRF-missing tests, a cross-user membership, or a suspended membership), the guard threw `authorizationForbidden()` (AUTHORIZATION_FORBIDDEN) and the controller's CSRF check was never reached. Tests 8, 9, 11, 12, 15 expected AUTH_CSRF_INVALID or CONTEXT_SELECTION_FORBIDDEN.
+  (b) The guard used `authorizationForbidden()` for the targeted-membership-not-found case, but the contract requires `CONTEXT_SELECTION_FORBIDDEN` so that not-found, cross-user, suspended-membership, and suspended-Tenant all return the same generic response.
+- Test 17 (selection isolated per session) failed because the test created two memberships directly without assigning R13 to either. With Batch 8's authorization requirement, the PUT /context/tenant request was rejected with AUTHORIZATION_FORBIDDEN before the session-isolation behaviour under test could be exercised.
+- Created corrective migration `20260719120000_rbac_role_code_check_constraint/migration.sql`. The migration adds a PostgreSQL CHECK constraint named `tenant_role_assignments_role_code_check` that limits `role_code` to exactly the fourteen canonical codes (R01_PHYSICIAN through R14_INTEGRATION_ACCOUNT). The migration is reviewed raw SQL, fail-closed (an ALTER that fails on existing invalid rows), and does not edit the original applied migration.
+- Updated `apps/api/prisma/schema.prisma` to document the CHECK constraint in the TenantRoleAssignment model comment (Prisma 7.8 does not support a `@check` annotation; the constraint is therefore declared in raw SQL only, and Prisma does not detect drift because it does not introspect CHECK constraints into the schema language).
+- Refactored `AuthorizationGuard` (`apps/api/src/modules/authorization/authorization.guard.ts`) to:
+  1. Inject `CsrfService` (already exported by `AuthModule`, which `AuthorizationModule` already imports).
+  2. Verify `X-CSRF-Token` for PUT/DELETE methods AFTER session validation (the token is session-bound) but BEFORE the authorization decision. A missing/invalid CSRF now returns AUTH_CSRF_INVALID rather than being short-circuited by an authorization failure.
+  3. Throw `contextSelectionForbidden()` (CONTEXT_SELECTION_FORBIDDEN) instead of `authorizationForbidden()` when the targeted membership is not in the user's active memberships list. This is the structural enforcement of the "rejected generically" rule: the same response is returned regardless of whether the membership does not exist, exists for another user, is suspended, or belongs to a suspended Tenant.
+  4. Throw `contextSelectionForbidden()` for a malformed body in for-targeted-membership mode (consistent with the other targeted-membership failures).
+- Promoted `contextSelectionForbidden` and `csrfInvalid` helpers from `session-context.errors.ts` to `authorization.errors.ts` so the guard can use them without creating a backwards module dependency (authorization -> session-context). The session-context module re-exports them from the authorization module for backward compatibility.
+- Updated `SessionContextController` (`apps/api/src/modules/session-context/session-context.controller.ts`) to remove the now-redundant CSRF check (the guard enforces it). The controller's selectTenantContext handler now throws `contextSelectionForbidden()` if the service returns null AND the targeted membership is no longer in the auth result's membership list (defence-in-depth against race conditions). Removed the `CsrfService` dependency from the controller's constructor.
+- Updated `session-context.errors.ts` to re-export `contextSelectionForbidden` and `csrfInvalid` from the authorization module.
+- Updated `authorization/index.ts` to export the new error helpers.
+- Fixed test 17 in `apps/api/test/context/context.e2e.context-spec.ts` by assigning R13_SYSTEM_ADMINISTRATOR to both membershipA and membershipB. Without these assignments, the AuthorizationGuard would reject the PUT with a generic 403, and the session-isolation behaviour under test would never be reached.
+- Added six new database tests to `apps/api/test/database/rbac.db-spec.ts` under a new describe block "RBAC role-code CHECK constraint (corrective migration 20260719120000)":
+  1. The role_code CHECK constraint exists in the database (queries pg_constraint).
+  2. Rejects an unknown role code at the database level via raw SQL INSERT (R99_UNKNOWN).
+  3. Rejects an unknown role code at the database level via raw SQL UPDATE.
+  4. Accepts all fourteen canonical role codes at the database level.
+  5. Rejects lowercase and case-variant role codes (CHECK is case-sensitive).
+  6. Rejects an empty role code.
+- Re-ran all targeted tests after corrections: test:database 81/81 passed (was 75, +6 new); test:auth 35/35 passed; test:context 26/26 passed (was 20/26).
+- Ran the full regression validation suite:
+  * `pnpm run build:shared:clean` — PASSED.
+  * `pnpm typecheck` — PASSED (7 workspace projects, no errors).
+  * `pnpm lint` — PASSED after auto-fix of 6 prettier/no-unnecessary-type-assertion issues in the modified guard, index, and controller files.
+  * `pnpm test` — PASSED. Totals: contracts 116/116, api unit 5/5, web 119/119.
+  * `pnpm --filter @ibn-hayan/api db:validate` — PASSED.
+  * `pnpm --filter @ibn-hayan/api test:database` — PASSED (81/81).
+  * `pnpm --filter @ibn-hayan/api test:auth` — PASSED (35/35).
+  * `pnpm --filter @ibn-hayan/api test:context` — PASSED (26/26).
+  * `pnpm --filter @ibn-hayan/web test` — PASSED (119/119).
+  * `pnpm build` — PASSED (apps/api nest build, apps/web next build, all packages).
+  * `git diff --check` — PASSED (no whitespace errors).
+
+Stage Summary:
+- Pre-verification HEAD: 6bd95eb4d3fdb6a74acf9f3ac4b3b0c6ef4dd96e
+- Branch: main
+- Corrective migration: 20260719120000_rbac_role_code_check_constraint (reviewed raw SQL, adds PostgreSQL CHECK constraint on tenant_role_assignments.role_code limiting it to the 14 canonical codes; fail-closed; does not edit the original applied migration)
+- Corrective code changes: AuthorizationGuard now checks CSRF before the authorization decision and throws CONTEXT_SELECTION_FORBIDDEN for targeted-membership-not-found; SessionContextController no longer duplicates CSRF verification; session-context.errors re-exports the promoted helpers from authorization.errors.
+- Corrective test changes: rbac.db-spec.ts +6 tests verifying the CHECK constraint; context.e2e.context-spec.ts test 17 fixed to assign R13 to both memberships.
+- Test totals after corrections: 81 database + 35 auth + 26 context + 116 contracts + 5 api unit + 119 web = 382 tests passed, 0 failed.
+- PostgreSQL 17.10 binaries made available at /home/z/.local/opt/postgresql-17/usr/lib/postgresql/17/bin/ via apt-get download + dpkg-deb -x (no sudo, no system package changes, no project dependency changes, no embedded database libraries).
+- No Batch 9 work started. No new product capability implemented. All corrections are confined to Batch 8 defects.
+- Batch 8 status: ACCEPTED.

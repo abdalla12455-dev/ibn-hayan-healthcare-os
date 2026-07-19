@@ -312,3 +312,187 @@ describe('RBAC migration behaviour', () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe('RBAC role-code CHECK constraint (corrective migration 20260719120000)', () => {
+  // These tests verify the database-level CHECK constraint added
+  // by the corrective migration
+  // `20260719120000_rbac_role_code_check_constraint`. The
+  // constraint limits `tenant_role_assignments.role_code` to
+  // exactly the fourteen canonical platform role codes. An
+  // INSERT or UPDATE that bypasses the application layer (e.g.
+  // an operator running a one-off SQL script, a future batch
+  // job, a restore from a logical backup, or a Prisma client
+  // bug) and persists an unknown role code is rejected at the
+  // database level with SQLSTATE 23514 (check_violation).
+  //
+  // Per the eighth canonical batch's final verification
+  // requirements, application-level TypeScript and Zod
+  // validation alone are NOT sufficient for direct database
+  // integrity. The CHECK constraint is the structural
+  // enforcement of the role-code catalogue.
+
+  it('the role_code CHECK constraint exists in the database', async () => {
+    const result = await prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT FROM pg_constraint
+        WHERE conname = 'tenant_role_assignments_role_code_check'
+          AND contype = 'c'
+      ) as exists;
+    `;
+    const exists = (result as readonly { exists: boolean }[])[0]?.exists;
+    expect(exists).toBe(true);
+  });
+
+  it('rejects an unknown role code at the database level (INSERT)', async () => {
+    // Set up a real membership to attach the role to.
+    const tenant = await tenants.create({
+      slug: 'tenant-check-insert',
+      displayName: 'Check Insert Tenant',
+    });
+    const user = await users.create({
+      email: 'check-insert@example.invalid',
+      displayName: 'Check Insert User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+
+    // Attempt a raw SQL INSERT with an unknown role code. The
+    // CHECK constraint must reject this with SQLSTATE 23514
+    // (check_violation). We use $executeRaw so Prisma surfaces
+    // the underlying PostgreSQL error.
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO tenant_role_assignments (id, tenant_membership_id, role_code, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${membership.id}::uuid, 'R99_UNKNOWN', now(), now())
+      `,
+    ).rejects.toThrow(/check_violation|violates check constraint/);
+  });
+
+  it('rejects an unknown role code at the database level (UPDATE)', async () => {
+    const tenant = await tenants.create({
+      slug: 'tenant-check-update',
+      displayName: 'Check Update Tenant',
+    });
+    const user = await users.create({
+      email: 'check-update@example.invalid',
+      displayName: 'Check Update User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+    // Insert a valid assignment first.
+    const assignment = await roleAssignments.create({
+      tenantMembershipId: membership.id,
+      roleCode: 'R01_PHYSICIAN',
+    });
+
+    // Attempt a raw SQL UPDATE that sets an unknown role code.
+    await expect(
+      prisma.$executeRaw`
+        UPDATE tenant_role_assignments
+        SET role_code = 'BANNED_ROLE'
+        WHERE id = ${assignment.id}::uuid
+      `,
+    ).rejects.toThrow(/check_violation|violates check constraint/);
+  });
+
+  it('accepts all fourteen canonical role codes at the database level', async () => {
+    // Verify each of the fourteen canonical codes is accepted by
+    // the CHECK constraint. We use a single membership and insert
+    // fourteen rows, one per canonical code, then verify the
+    // count.
+    const tenant = await tenants.create({
+      slug: 'tenant-canonical',
+      displayName: 'Canonical Tenant',
+    });
+    const user = await users.create({
+      email: 'canonical@example.invalid',
+      displayName: 'Canonical User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+
+    const canonicalCodes = [
+      'R01_PHYSICIAN',
+      'R02_NURSE',
+      'R03_PHARMACIST',
+      'R04_TECHNICIAN',
+      'R05_ALLIED_HEALTH_PROFESSIONAL',
+      'R06_RECEPTIONIST',
+      'R07_SCHEDULER',
+      'R08_BILLER',
+      'R09_ADMINISTRATOR',
+      'R10_COMPLIANCE_OFFICER',
+      'R11_HR_MANAGER',
+      'R12_EXECUTIVE',
+      'R13_SYSTEM_ADMINISTRATOR',
+      'R14_INTEGRATION_ACCOUNT',
+    ];
+
+    for (const code of canonicalCodes) {
+      await prisma.$executeRaw`
+        INSERT INTO tenant_role_assignments (id, tenant_membership_id, role_code, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${membership.id}::uuid, ${code}, now(), now())
+      `;
+    }
+
+    const count = await prisma.tenantRoleAssignment.count({
+      where: { tenantMembershipId: membership.id },
+    });
+    expect(count).toBe(14);
+  });
+
+  it('rejects lowercase and case-variant role codes (CHECK is case-sensitive)', async () => {
+    // The CHECK constraint uses exact string literals. A
+    // lowercase or mixed-case variant of a canonical code must
+    // be rejected, because the application layer normalises to
+    // uppercase before insertion; the database must not accept
+    // anything else.
+    const tenant = await tenants.create({
+      slug: 'tenant-case',
+      displayName: 'Case Tenant',
+    });
+    const user = await users.create({
+      email: 'case@example.invalid',
+      displayName: 'Case User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO tenant_role_assignments (id, tenant_membership_id, role_code, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${membership.id}::uuid, 'r01_physician', now(), now())
+      `,
+    ).rejects.toThrow(/check_violation|violates check constraint/);
+  });
+
+  it('rejects an empty role code at the database level', async () => {
+    const tenant = await tenants.create({
+      slug: 'tenant-empty-code',
+      displayName: 'Empty Code Tenant',
+    });
+    const user = await users.create({
+      email: 'empty-code@example.invalid',
+      displayName: 'Empty Code User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO tenant_role_assignments (id, tenant_membership_id, role_code, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${membership.id}::uuid, '', now(), now())
+      `,
+    ).rejects.toThrow(/check_violation|violates check constraint/);
+  });
+});

@@ -24,7 +24,25 @@ import { UnauthorizedException, ForbiddenException } from '@nestjs/common';
  * The error envelope shape is governed by the `AuthErrorResponseSchema`
  * in `@ibn-hayan/contracts`. The error code is a stable machine-
  * readable string; the message is a generic human-readable string.
+ *
+ * The `contextSelectionForbidden` and `csrfInvalid` helpers were
+ * originally defined here. They have been promoted to the
+ * authorization module (`authorization.errors.ts`) so that the
+ * `AuthorizationGuard` can use them without creating a backwards
+ * module dependency (authorization -> session-context). This file
+ * re-exports them from the authorization module so that existing
+ * imports from `session-context.errors` continue to work.
  */
+
+// Re-export the helpers that were promoted to the authorization
+// module. The session-context controller imports
+// `contextSelectionForbidden` directly from the authorization
+// module; this re-export preserves backward compatibility for any
+// other consumers.
+export {
+  contextSelectionForbidden,
+  csrfInvalid,
+} from '../authorization/authorization.errors.js';
 
 /**
  * Return a 401 for a missing, expired, or revoked session at any
@@ -56,46 +74,6 @@ export function originDisallowed(): ForbiddenException {
     error: {
       code: 'AUTH_ORIGIN_DISALLOWED',
       message: 'Request origin is not allowed.',
-    },
-  });
-}
-
-/**
- * Return a 403 for a missing or invalid CSRF token at any context
- * mutation endpoint. Re-uses the auth module's `csrfInvalid` error
- * so the response shape is identical across auth and context
- * endpoints.
- */
-export function csrfInvalid(): ForbiddenException {
-  return new ForbiddenException({
-    error: {
-      code: 'AUTH_CSRF_INVALID',
-      message: 'CSRF token is missing or invalid.',
-    },
-  });
-}
-
-/**
- * Return a generic 403 for a forbidden context selection.
- *
- * Per the fifth canonical batch specification, this error is returned
- * for ALL of the following cases:
- * - the supplied membershipId does not exist;
- * - the supplied membershipId belongs to a different user;
- * - the membership's status is `suspended`;
- * - the membership's Tenant's status is `suspended`.
- *
- * The error code is `CONTEXT_SELECTION_FORBIDDEN` so the web client
- * can distinguish it from a CSRF or Origin failure if needed, but
- * the message is generic and does not reveal which of the four
- * conditions caused the failure. The web client displays the same
- * generic error message regardless.
- */
-export function contextSelectionForbidden(): ForbiddenException {
-  return new ForbiddenException({
-    error: {
-      code: 'CONTEXT_SELECTION_FORBIDDEN',
-      message: 'The selected tenant context is not available.',
     },
   });
 }

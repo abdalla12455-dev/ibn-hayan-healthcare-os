@@ -710,6 +710,21 @@ describe('17. Selection is isolated per session', () => {
       tenantId: tenantB.id,
       userId: user.id,
     });
+    // Per the eighth canonical batch specification, the context
+    // endpoints require authorization. Both memberships must carry
+    // the R13 System Administrator role so the PUT /context/tenant
+    // request succeeds for each session. Without these assignments,
+    // the AuthorizationGuard would reject the PUT with a generic
+    // 403, and the session-isolation behaviour under test would
+    // never be reached.
+    await roleAssignments.create({
+      tenantMembershipId: membershipA.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+    });
+    await roleAssignments.create({
+      tenantMembershipId: membershipB.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+    });
 
     // Log in twice (two sessions).
     const cookieA = await loginAndReturnCookie('op17@example.invalid');

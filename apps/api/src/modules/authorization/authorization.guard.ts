@@ -8,13 +8,19 @@ import type {
   PermissionCode,
 } from '@ibn-hayan/domain';
 import { AuthService } from '../auth/auth.service.js';
+import { CsrfService } from '../auth/csrf.service.js';
+import { CSRF_HEADER_NAME } from '../auth/auth.constants.js';
 import {
   AUTHORIZATION_PERMISSION_METADATA,
   AUTHORIZATION_CONTEXT_MODE_METADATA,
   type AuthorizationContextMode,
 } from './require-permission.decorator.js';
 import { AuthorizationService } from './authorization.service.js';
-import { authorizationForbidden } from './authorization.errors.js';
+import {
+  authorizationForbidden,
+  contextSelectionForbidden,
+  csrfInvalid,
+} from './authorization.errors.js';
 import { sessionRequired, originDisallowed } from '../auth/auth.errors.js';
 import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
 
@@ -37,18 +43,38 @@ import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
  * 3. Validates the session via `AuthService.getSessionFromCookie`.
  *    A missing/invalid/expired/revoked session returns 401.
  *
- * 4. Performs the authorization check via `AuthorizationService`,
+ * 4. For state-changing methods (PUT, DELETE), verifies the
+ *    `X-CSRF-Token` header against the session's stored CSRF
+ *    hash. This is the structural enforcement of ADR-013 §1.1:
+ *    CSRF protection is mandatory for state-changing browser
+ *    requests. The CSRF check runs AFTER session validation
+ *    (because the CSRF token is session-bound) but BEFORE the
+ *    authorization decision. This ordering is required so that
+ *    a missing/invalid CSRF returns `AUTH_CSRF_INVALID` rather
+ *    than the generic `AUTHORIZATION_FORBIDDEN` — the CSRF
+ *    failure is a transport-layer concern that must be reported
+ *    independently of the authorization decision.
+ *
+ * 5. Performs the authorization check via `AuthorizationService`,
  *    using the context-resolution mode to determine which
  *    membership the decision is evaluated against:
  *    - `for-user`: the user's available active memberships (no
  *      active context required). Used by `GET /api/v1/context`.
  *    - `for-targeted-membership`: the membership identified by
  *      the request body's `membershipId`. Used by
- *      `PUT /api/v1/context/tenant`.
+ *      `PUT /api/v1/context/tenant`. If the targeted membership
+ *      is not in the user's active memberships, the guard throws
+ *      `contextSelectionForbidden()` (NOT the generic
+ *      `authorizationForbidden()`). This is the structural
+ *      enforcement of the "rejected generically" rule: the same
+ *      `CONTEXT_SELECTION_FORBIDDEN` response is returned
+ *      regardless of whether the membership does not exist,
+ *      exists for another user, is suspended, or belongs to a
+ *      suspended Tenant.
  *    - `for-active-membership`: the session's currently active
  *      membership. Used by `DELETE /api/v1/context/tenant`.
  *
- * 5. Attaches the auth result (session, user, memberships, role
+ * 6. Attaches the auth result (session, user, memberships, role
  *    assignments) to the request so the controller can use it
  *    without re-validating the session.
  *
@@ -64,9 +90,11 @@ import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
  * `authorizationForbidden()` (a 403 with the code
  * `AUTHORIZATION_FORBIDDEN`).
  *
- * CSRF and body validation remain in the controller. The guard
- * handles authentication and authorization; the controller handles
- * transport-layer concerns (CSRF, body) and business logic.
+ * CSRF and body validation remain transport-layer / boundary
+ * concerns. The guard performs the CSRF check (because it is
+ * session-bound and must run before the authorization decision);
+ * the controller re-validates the body defensively and delegates
+ * to the service.
  */
 @Injectable()
 export class AuthorizationGuard implements CanActivate {
@@ -74,6 +102,7 @@ export class AuthorizationGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly authService: AuthService,
     private readonly authorizationService: AuthorizationService,
+    private readonly csrfService: CsrfService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -115,6 +144,27 @@ export class AuthorizationGuard implements CanActivate {
       throw sessionRequired();
     }
 
+    // For state-changing methods, verify the CSRF token AFTER
+    // session validation (the token is session-bound) but BEFORE
+    // the authorization decision. This ordering is mandatory:
+    // a missing/invalid CSRF must return `AUTH_CSRF_INVALID`
+    // rather than being short-circuited by an authorization
+    // failure (which would return the generic
+    // `AUTHORIZATION_FORBIDDEN`). The CSRF check is a
+    // transport-layer concern; the authorization decision is a
+    // business-logic concern. The transport-layer concern must
+    // be reported first.
+    if (method === 'PUT' || method === 'DELETE') {
+      const csrfToken = readHeader(request, CSRF_HEADER_NAME);
+      if (!csrfToken || csrfToken.length === 0) {
+        throw csrfInvalid();
+      }
+      const csrfOk = this.csrfService.verify(authResult.session.id, csrfToken);
+      if (!csrfOk) {
+        throw csrfInvalid();
+      }
+    }
+
     // Perform the authorization check based on the context-
     // resolution mode.
     let roleAssignments;
@@ -137,23 +187,29 @@ export class AuthorizationGuard implements CanActivate {
       const body = (request as { body?: unknown }).body;
       const parsed = SelectTenantContextRequestSchema.safeParse(body);
       if (!parsed.success) {
-        // A malformed body is rejected with a generic 403. The
-        // guard does not reveal whether the session is valid
-        // (the session has already been validated at this point)
-        // or whether the membership exists.
-        throw authorizationForbidden();
+        // A malformed body is rejected with `contextSelectionForbidden`
+        // rather than the generic `authorizationForbidden`. This is
+        // consistent with the other targeted-membership failures
+        // (not found, cross-user, suspended) and does not reveal
+        // whether the body would have targeted a real membership.
+        throw contextSelectionForbidden();
       }
       const targetMembershipId = parsed.data.membershipId as TenantMembershipId;
 
       // Verify the targeted membership belongs to the
-      // authenticated user. This is the ownership check; a
-      // mismatch is denied generically (does not reveal whether
-      // the membership exists for another user).
+      // authenticated user AND is in their active memberships
+      // list (which already filters out suspended memberships
+      // and memberships under suspended Tenants). A mismatch is
+      // denied generically via `contextSelectionForbidden()`:
+      // the same response is returned whether the membership
+      // does not exist, exists for another user, is suspended,
+      // or belongs to a suspended Tenant. This is the
+      // "rejected generically" rule.
       const targetMembership = authResult.memberships.find(
         (m: TenantMembership) => m.id === targetMembershipId,
       );
       if (targetMembership === undefined) {
-        throw authorizationForbidden();
+        throw contextSelectionForbidden();
       }
 
       roleAssignments =
@@ -258,6 +314,24 @@ function readCookie(req: Request, name: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Read a header value from the request. Returns `undefined` if the
+ * header is not present.
+ */
+function readHeader(req: Request, name: string): string | undefined {
+  const value = req.headers[name];
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+
 // Re-export the error helpers so consumers can catch authorization
 // failures without importing from multiple modules.
-export { authorizationForbidden, sessionRequired, originDisallowed };
+export {
+  authorizationForbidden,
+  contextSelectionForbidden,
+  csrfInvalid,
+  sessionRequired,
+  originDisallowed,
+};

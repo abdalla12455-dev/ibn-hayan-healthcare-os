@@ -25,21 +25,17 @@ import type {
 } from '@ibn-hayan/contracts';
 import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
 import type { TenantMembershipId } from '@ibn-hayan/domain';
-import {
-  SESSION_COOKIE_NAME,
-  CSRF_HEADER_NAME,
-} from '../auth/auth.constants.js';
-import { CsrfService } from '../auth/csrf.service.js';
+import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import { SessionContextService } from './session-context.service.js';
 import {
   sessionRequired,
-  csrfInvalid,
   contextRequestInvalid,
 } from './session-context.errors.js';
 import {
   AuthorizationGuard,
   RequirePermission,
   type AuthorizationRequestAugmentation,
+  contextSelectionForbidden,
 } from '../authorization/index.js';
 
 /**
@@ -85,10 +81,7 @@ import {
 @Controller('context')
 @UseGuards(AuthorizationGuard)
 export class SessionContextController {
-  constructor(
-    private readonly contextService: SessionContextService,
-    private readonly csrfService: CsrfService,
-  ) {}
+  constructor(private readonly contextService: SessionContextService) {}
 
   /**
    * GET /api/v1/context
@@ -247,9 +240,12 @@ export class SessionContextController {
     @Req() req: Request,
   ): Promise<ContextResponse> {
     // The AuthorizationGuard has already verified Origin, validated
-    // the session, validated the body, performed the ownership
-    // check, and performed the authorization check. The controller
-    // now only needs to verify CSRF and delegate to the service.
+    // the session, verified the CSRF token, validated the body,
+    // performed the ownership check (returning
+    // `CONTEXT_SELECTION_FORBIDDEN` for any of: not-found,
+    // cross-user, suspended membership, suspended Tenant), and
+    // performed the authorization check. The controller now only
+    // needs to delegate to the service.
 
     // Re-validate the body defensively (the guard already validated
     // it, but we re-validate to be safe against any middleware that
@@ -268,18 +264,14 @@ export class SessionContextController {
       throw sessionRequired();
     }
 
-    // Verify the CSRF token.
-    const csrfToken = readHeader(req, CSRF_HEADER_NAME);
-    if (!csrfToken || csrfToken.length === 0) {
-      throw csrfInvalid();
-    }
-    const csrfOk = this.csrfService.verify(auth.session.id as never, csrfToken);
-    if (!csrfOk) {
-      throw csrfInvalid();
-    }
-
     // Delegate to the service for the business rule (membership
-    // validity) and the persistence (set active membership).
+    // validity) and the persistence (set active membership). The
+    // service may return null if the session was revoked between
+    // the guard's check and the service call; in that case, we
+    // throw `sessionRequired()` for a generic 401. A membership
+    // that became invalid between the guard's check and the
+    // service call is rejected with `contextSelectionForbidden()`
+    // by the service (defence-in-depth).
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
     const acceptLanguage = readHeader(req, 'accept-language');
     const result = await this.contextService.selectContext(
@@ -288,6 +280,19 @@ export class SessionContextController {
       acceptLanguage,
     );
     if (result === null) {
+      // The service returns null when the session is no longer
+      // valid OR when the targeted membership is no longer
+      // selectable. We re-check the auth result's membership
+      // list to disambiguate. If the membership is not in the
+      // list, the membership became invalid; throw
+      // `contextSelectionForbidden()`. Otherwise, the session
+      // became invalid; throw `sessionRequired()`.
+      const stillInList = auth.memberships.some(
+        (m) => m.id === request.membershipId,
+      );
+      if (!stillInList) {
+        throw contextSelectionForbidden();
+      }
       throw sessionRequired();
     }
     return result;
@@ -343,24 +348,14 @@ export class SessionContextController {
     @Req() req: Request,
   ): Promise<ClearTenantContextResponse> {
     // The AuthorizationGuard has already verified Origin, validated
-    // the session, and performed the authorization check. The
-    // controller now only needs to verify CSRF and delegate to the
-    // service.
+    // the session, verified the CSRF token, and performed the
+    // authorization check (against the active membership). The
+    // controller now only needs to delegate to the service.
 
     // Read the auth result attached by the guard.
     const auth = (req as AuthorizationRequestAugmentation).authorization;
     if (auth === undefined) {
       throw sessionRequired();
-    }
-
-    // Verify the CSRF token.
-    const csrfToken = readHeader(req, CSRF_HEADER_NAME);
-    if (!csrfToken || csrfToken.length === 0) {
-      throw csrfInvalid();
-    }
-    const csrfOk = this.csrfService.verify(auth.session.id as never, csrfToken);
-    if (!csrfOk) {
-      throw csrfInvalid();
     }
 
     // Delegate to the service for the persistence (clear active

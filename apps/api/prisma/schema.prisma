@@ -411,6 +411,23 @@ model TenantMembership {
 /// is in the canonical catalogue before insertion; an unknown code
 /// is rejected with a domain error.
 ///
+/// Database-level CHECK constraint: the corrective migration
+/// `20260719120000_rbac_role_code_check_constraint` adds a
+/// PostgreSQL CHECK constraint named
+/// `tenant_role_assignments_role_code_check` that limits
+/// `role_code` to exactly the fourteen canonical platform role
+/// codes (R01_PHYSICIAN through R14_INTEGRATION_ACCOUNT). This
+/// enforces the role-code catalogue STRUCTURALLY at the database
+/// level, so that a SQL INSERT/UPDATE bypassing the application
+/// layer cannot persist an unknown role code. Prisma 7.8 does not
+/// support a `@check` schema annotation; the constraint is
+/// therefore declared in raw SQL in the migration, not in this
+/// schema file. The schema and the database are kept in sync by
+/// the migration history; `prisma migrate deploy` applies the
+/// constraint, and `prisma validate` does not detect drift
+/// because Prisma does not introspect CHECK constraints into the
+/// schema language.
+///
 /// `ON DELETE RESTRICT` on the membership foreign key means a
 /// membership with active role assignments cannot be deleted until
 /// the assignments are deleted first. This prevents silent privilege

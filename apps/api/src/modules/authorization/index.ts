@@ -17,4 +17,8 @@ export {
   AUTHORIZATION_CONTEXT_MODE_METADATA,
   type AuthorizationContextMode,
 } from './require-permission.decorator.js';
-export { authorizationForbidden } from './authorization.errors.js';
+export {
+  authorizationForbidden,
+  contextSelectionForbidden,
+  csrfInvalid,
+} from './authorization.errors.js';
