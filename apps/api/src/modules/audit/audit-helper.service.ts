@@ -106,4 +106,34 @@ export class AuditHelperService {
   ): Promise<{ ok: true } | { ok: false; reason: string; detail: string }> {
     return this.emit(input);
   }
+
+  /**
+   * Emit an audit event and THROW if the emission fails.
+   *
+   * Per the ninth canonical batch specification, when an audit
+   * event is emitted inside a state-mutation transaction, the
+   * mutation MUST roll back if the audit emission fails. This
+   * helper is used by the auth and session-context services to
+   * enforce the atomicity requirement: if the outbox insertion
+   * fails, the helper throws, which causes the surrounding
+   * `$transaction` callback to throw, which causes Prisma to
+   * roll back the entire transaction (including the state
+   * mutation).
+   *
+   * The thrown error is a generic `Error` (not an HttpException)
+   * so that the NestJS exception filter returns a 500 Internal
+   * Server Error. The client does NOT see the audit failure
+   * detail; the operator sees the error in the server log.
+   */
+  async emitOrFail(
+    input: AuditEventBuildInput,
+    options?: { readonly transaction?: unknown },
+  ): Promise<void> {
+    const result = await this.emit(input, options);
+    if (!result.ok) {
+      throw new Error(
+        `Audit emission failed (atomicity enforcement): ${result.reason} — ${result.detail}`,
+      );
+    }
+  }
 }

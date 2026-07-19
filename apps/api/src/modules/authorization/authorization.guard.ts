@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type {
@@ -158,7 +163,22 @@ export class AuthorizationGuard implements CanActivate {
 
     // Validate the session.
     const cookieValue = readCookie(request, 'ibn_hayan_session');
-    const authResult = await this.authService.getSessionFromCookie(cookieValue);
+    // Per the ninth canonical batch specification, pass the audit
+    // context to `getSessionFromCookie` so that session-validation
+    // failures (expired, invalid, revoked) emit the correct audit
+    // event. Without the audit context, the auth service cannot
+    // emit the event because it does not have the request ID, IP,
+    // or user-agent.
+    const auditContext = {
+      requestId: readRequestId(request),
+      correlationId: readCorrelationId(request),
+      ipAddress: readIpAddress(request),
+      userAgent: readUserAgent(request),
+    };
+    const authResult = await this.authService.getSessionFromCookie(
+      cookieValue,
+      auditContext,
+    );
     if (authResult === null) {
       throw sessionRequired();
     }
@@ -306,9 +326,14 @@ export class AuthorizationGuard implements CanActivate {
       }
     } catch (err) {
       // The authorization service throws `authorizationForbidden()`
+      // (a `ForbiddenException`, which extends `HttpException`)
       // when the permission is not granted. We emit the denied
-      // audit event and re-throw.
-      if (err instanceof Error && err.constructor.name === 'HttpException') {
+      // audit event and re-throw. The check uses `instanceof
+      // HttpException` (not `constructor.name === 'HttpException'`)
+      // because `ForbiddenException` is a subclass: its
+      // `constructor.name` is `'ForbiddenException'`, not
+      // `'HttpException'`.
+      if (err instanceof HttpException) {
         await this.emitAuthorizationDenied(
           authResult.user.id,
           authResult.session.id,

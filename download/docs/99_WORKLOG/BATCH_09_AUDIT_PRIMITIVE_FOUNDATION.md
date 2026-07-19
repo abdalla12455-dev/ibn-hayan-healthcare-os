@@ -167,7 +167,7 @@ The `AuditOutboxEvent` table lives in the transactional store. Its schema is sum
 Required properties:
 
 - Outbox insertion occurs in the same transactional database transaction as the consequential state mutation.
-- A state mutation cannot commit without its outbox record. This is enforced by writing both in the same Prisma `$transaction`.
+- A state mutation cannot commit without its outbox record. This is enforced by writing both in the same Prisma `$transaction` and by the `AuditHelperService.emitOrFail` helper which throws on emission failure, causing the transaction to roll back.
 - Delivery is idempotent. The audit store's unique constraint on `event_id` is the structural enforcement.
 - Duplicate delivery does not create duplicate audit records. The dispatcher treats an existing `event_id` as an idempotent success.
 - Failed delivery leaves the outbox event pending. The `delivered_at` column remains null.
@@ -406,15 +406,56 @@ No previously applied migration is modified.
 - Delivered rows are not reprocessed.
 - Concurrent dispatchers are safe.
 
-### Integration tests (`apps/api/test/audit/audit.integration.spec.ts`)
+### Concurrency tests (`apps/api/test/audit/audit-concurrency.audit-concurrency-spec.ts`)
+
+- Two dispatchers claim disjoint event sets.
+- Ten concurrent dispatchers process a shared pending set without duplicate final audit events.
+- A dispatcher crashes after claiming but before delivery.
+- The abandoned lease expires and another dispatcher reclaims it.
+- A stale dispatcher cannot mark an event delivered after its lease was reassigned.
+- Duplicate delivery attempts create only one immutable audit event.
+- Every pending event is eventually either delivered or remains retryable with an explicit failure state.
+- Chain sequence remains continuous and does not fork under concurrent delivery.
+- A delivered event is never reclaimed.
+- One dispatcher cannot mark an event delivered when another dispatcher owns its active lease.
+- Failed delivery releases the event through retry or lease expiry.
+
+### Atomicity rollback tests (`apps/api/test/audit/audit-atomicity.audit-atomicity-spec.ts`)
+
+- Login session creation rolls back when outbox insertion fails.
+- Session rotation rolls back when outbox insertion fails.
+- Logout revocation rolls back when outbox insertion fails.
+- Tenant-context selection rolls back when outbox insertion fails.
+- Tenant-context clearing rolls back when outbox insertion fails.
+
+### Configuration tests (`apps/api/test/audit/audit-configuration.spec.ts`)
+
+- Production fails closed when `AUDIT_INTEGRITY_HMAC_KEY` is absent.
+- Production fails closed when `AUDIT_IDENTIFIER_HMAC_KEY` is absent.
+- Production fails closed when the integrity key is shorter than 256 bits.
+- Production fails closed when the identifier key is shorter than 256 bits.
+- Production fails closed when both HMAC keys are identical.
+- Production fails closed when placeholder values are used.
+- Production fails closed when the key version is missing or invalid.
+- Development and tests allow placeholder values.
+- `validateAuditKey` and `validateAuditKeyPair` unit tests for all rejection paths.
+
+### Verification tests (`apps/api/test/audit/audit-verify.audit-verify-spec.ts`)
+
+- Successful verification emits `audit.integrity.verified` (via the CLI script, not the verifier itself).
+- Failed verification emits `audit.integrity.verification_failed` (via the CLI script).
+- Verification does not recursively audit itself forever.
+- The verifier exits non-zero on failure.
+- No integrity key is exposed in verification results.
+- CLI-level tests for success and deliberate corruption.
+
+### Integration tests (`apps/api/test/audit/audit-integration.audit-integration-spec.ts`)
 
 - Successful login creates the correct audit event.
 - Failed login creates an event without raw email.
 - Invalid Origin creates a denied security event.
-- Invalid CSRF creates a denied security event.
 - Allowed authorization decision is audited.
-- Denied authorization decision is audited.
-- R14 context denial is audited.
+- Denied authorization decision is audited (R14 context denial).
 - Context view is audited.
 - Context selection is audited.
 - Context clearing is audited.
@@ -422,6 +463,15 @@ No previously applied migration is modified.
 - Request IDs match between response and audit event.
 - Existing generic error responses remain unchanged.
 - No secrets appear anywhere in persisted audit data.
+- Simulated audit-store outage: pending event survives and is delivered exactly once after recovery.
+- Throttled login emits `authentication.login.throttled` without raw email or account-existence leak.
+- Expired session emits `authentication.session.expired` exactly once.
+- Invalid request IDs are replaced, not trusted.
+- Oversized request IDs are replaced, not trusted.
+- Correlation ID defaults to request ID when absent.
+- Oversized correlation IDs are normalised to the request ID.
+- Every API response contains the X-Request-Id header.
+- Integrity verification passes after normal operation.
 
 ## 24. Risks
 

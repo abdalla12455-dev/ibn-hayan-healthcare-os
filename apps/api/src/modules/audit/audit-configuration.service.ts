@@ -45,6 +45,11 @@ export class AuditConfigurationService {
 
     const versionRaw = process.env['AUDIT_INTEGRITY_KEY_VERSION'] ?? '1';
     const parsedVersion = Number.parseInt(versionRaw, 10);
+    // Per the ninth canonical batch specification, the integrity
+    // key version must be a positive integer. In production, an
+    // invalid version causes the service to throw (fail-closed).
+    // In non-production, the version falls back to 1 with a
+    // warning so that tests can run without setting the version.
     this.integrityKeyVersion = Number.isSafeInteger(parsedVersion)
       ? parsedVersion
       : 1;
@@ -71,6 +76,17 @@ export class AuditConfigurationService {
         `Audit configuration is invalid (allowed in non-production): ${result.reason} — ${result.detail}. ` +
           'The audit store will not accept events until the configuration is fixed.',
       );
+    }
+
+    // Validate the key version in production. A non-positive or
+    // non-numeric version is a configuration error that must fail
+    // closed in production.
+    if (!this.allowPlaceholders) {
+      if (!Number.isSafeInteger(parsedVersion) || parsedVersion <= 0) {
+        throw new Error(
+          `Audit configuration is invalid in production: invalid_key_version — AUDIT_INTEGRITY_KEY_VERSION must be a positive integer (got ${JSON.stringify(versionRaw)}).`,
+        );
+      }
     }
   }
 

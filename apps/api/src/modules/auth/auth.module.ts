@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
 import { AuditModule } from '../audit/index.js';
@@ -9,6 +9,7 @@ import { AuthController } from './auth.controller.js';
 import { PasswordService } from './password.service.js';
 import { SessionTokenService } from './session-token.service.js';
 import { CsrfService } from './csrf.service.js';
+import { AuditedThrottlerGuard } from './audited-throttler.guard.js';
 
 /**
  * Authentication module.
@@ -26,9 +27,13 @@ import { CsrfService } from './csrf.service.js';
  * The login endpoint overrides this via `@Throttle` to the
  * approved 10-attempts-per-60s threshold.
  *
- * The `ThrottlerGuard` is registered as an APP_GUARD so that the
- * `@Throttle` decorator on the login endpoint takes effect. The
- * guard is applied globally:
+ * The `AuditedThrottlerGuard` (extending `ThrottlerGuard`) is
+ * registered as an APP_GUARD so that the `@Throttle` decorator on
+ * the login endpoint takes effect. Per the ninth canonical batch
+ * specification, the custom guard emits an
+ * `authentication.login.throttled` audit event for throttled
+ * login attempts BEFORE the standard `ThrottlerException` is
+ * thrown. The guard is applied globally:
  * - Health is exempt via `@SkipThrottle()` on `HealthController`.
  * - Login is limited to 10/60s via `@Throttle`.
  * - Other auth endpoints (session, csrf, logout) use the permissive
@@ -62,7 +67,7 @@ import { CsrfService } from './csrf.service.js';
     CsrfService,
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: AuditedThrottlerGuard,
     },
   ],
   exports: [AuthService, PasswordService, SessionTokenService, CsrfService],

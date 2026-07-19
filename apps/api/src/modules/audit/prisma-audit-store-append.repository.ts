@@ -99,17 +99,50 @@ export class PrismaAuditStoreAppendRepository implements AuditStoreAppendPort {
         // concurrent appends into the same chain wait for this
         // transaction to commit.
         //
-        // We use a raw query because Prisma 7's query builder
-        // does not support SELECT ... FOR UPDATE.
+        // We use TWO separate raw queries:
+        //   1. `INSERT ... ON CONFLICT DO NOTHING` to create the
+        //      chain-head row if it does not exist. This is a no-op
+        //      if the row already exists (or if another transaction
+        //      has just created it and not yet committed).
+        //   2. `SELECT ... FOR UPDATE` to lock the chain-head row.
+        //      This waits for any concurrent transaction that holds
+        //      an exclusive lock on the row (e.g. another append in
+        //      the same chain that is still in flight).
+        //
+        // We use raw queries because Prisma 7's query builder does
+        // not support INSERT ... ON CONFLICT DO NOTHING or
+        // SELECT ... FOR UPDATE.
+        //
+        // This two-statement approach avoids the P2002 unique-
+        // violation race that would occur if we used a plain INSERT
+        // and two concurrent transactions tried to initialise the
+        // same chain. With ON CONFLICT DO NOTHING, the second
+        // transaction's INSERT becomes a no-op, and the subsequent
+        // SELECT ... FOR UPDATE waits for the first transaction to
+        // commit (or returns immediately if the row already existed
+        // before this transaction began).
+        await tx.$executeRaw`
+          INSERT INTO "audit_chain_heads" (
+            "chain_scope", "last_sequence", "last_integrity_hash",
+            "last_event_id", "last_event_recorded_at",
+            "updated_at", "created_at"
+          )
+          VALUES (
+            ${chainScope}, 0, NULL, NULL, NULL,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          )
+          ON CONFLICT ("chain_scope") DO NOTHING
+        `;
+
         const chainHeadRows = await tx.$queryRaw<
           Array<{
             last_sequence: bigint;
             last_integrity_hash: string | null;
           }>
         >`
-          SELECT last_sequence, last_integrity_hash
-          FROM audit_chain_heads
-          WHERE chain_scope = ${chainScope}
+          SELECT "last_sequence", "last_integrity_hash"
+          FROM "audit_chain_heads"
+          WHERE "chain_scope" = ${chainScope}
           FOR UPDATE
         `;
 
@@ -117,51 +150,23 @@ export class PrismaAuditStoreAppendRepository implements AuditStoreAppendPort {
         let nextSequence: bigint;
 
         if (chainHeadRows.length === 0) {
-          // The chain does not exist yet. Initialise it. We
-          // INSERT the chain-head row; the FOR UPDATE lock is
-          // not needed here because the row does not exist yet,
-          // but we need to handle the race where two concurrent
-          // transactions try to initialise the same chain.
-          //
-          // The primary key on chain_scope is the structural
-          // enforcement: if two transactions race, one will
-          // commit the INSERT and the other will get a unique
-          // violation. The losing transaction will retry; on
-          // retry, the chain-head row will exist and the FOR
-          // UPDATE will succeed.
-          //
-          // For simplicity, we do NOT retry here. The dispatcher
-          // will retry the whole append on transient failure.
-          previousIntegrityHash = null;
-          nextSequence = BigInt(1);
-          try {
-            await tx.auditChainHead.create({
-              data: {
-                chainScope,
-                lastSequence: nextSequence,
-                lastIntegrityHash: null,
-                lastEventId: null,
-                lastEventRecordedAt: null,
-              },
-            });
-          } catch (err) {
-            // If this is a unique violation (P2002), the chain
-            // was concurrently initialised. Treat as a transient
-            // failure so the dispatcher retries.
-            if (
-              err instanceof Prisma.PrismaClientKnownRequestError &&
-              err.code === 'P2002'
-            ) {
-              throw new AppendTransientFailure(
-                'chain_concurrent_initialisation',
-              );
-            }
-            throw err;
-          }
+          // The chain head could not be read even after the
+          // INSERT ... ON CONFLICT DO NOTHING. This should never
+          // happen (the INSERT creates the row if it does not
+          // exist, and the SELECT reads it under FOR UPDATE).
+          // Treat as a transient failure so the dispatcher
+          // retries.
+          throw new AppendTransientFailure(
+            'chain_head_unreadable_after_initialisation',
+          );
         } else {
           const row = chainHeadRows[0]!;
           previousIntegrityHash = row.last_integrity_hash;
-          nextSequence = BigInt(row.last_sequence.toString()) + BigInt(1);
+          // If the chain was just initialised (last_sequence = 0),
+          // the next sequence is 1. Otherwise, the next sequence
+          // is last_sequence + 1.
+          const lastSeq = BigInt(row.last_sequence.toString());
+          nextSequence = lastSeq + BigInt(1);
         }
 
         // 3. Compute the payload hash.

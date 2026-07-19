@@ -4,7 +4,12 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import type { Server } from 'node:http';
-import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
+import { Client as PgClient } from 'pg';
+import { randomUUID } from 'node:crypto';
+import {
+  setupDatabaseTests,
+  isOwnedCluster,
+} from '../database/_pg-bootstrap.js';
 import { AppModule } from '../../src/app.module.js';
 import { AuditPrismaService } from '../../src/modules/audit/audit-prisma.service.js';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
@@ -13,6 +18,7 @@ import { AuditIntegrityVerifierService } from '../../src/modules/audit/audit-int
 import argon2 from 'argon2';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../generated/prisma/client.js';
+import { buildAuditEventDraft } from '@ibn-hayan/observability';
 
 /**
  * Audit integration tests.
@@ -32,8 +38,15 @@ import { PrismaClient } from '../../generated/prisma/client.js';
  * 12. Request IDs match between response and audit event.
  * 13. Existing generic error responses remain unchanged.
  * 14. No secrets appear anywhere in persisted audit data.
- * 15. All pending outbox events can be delivered after a simulated
- *     outage.
+ * 15. Simulated audit-store outage: pending events survive and
+ *     are delivered exactly once after recovery.
+ * 16. Throttled login emits `authentication.login.throttled`
+ *     without raw email or account-existence leak.
+ * 17. Expired session emits `authentication.session.expired`
+ *     exactly once.
+ * 18. Invalid request IDs are replaced, not trusted.
+ * 19. Oversized correlation IDs are normalised.
+ * 20. Integrity verification passes after normal operation.
  */
 setupDatabaseTests();
 
@@ -200,6 +213,7 @@ async function dispatchAll(): Promise<{
   idempotent: number;
   transientFailures: number;
   permanentFailures: number;
+  lostLeases: number;
 }> {
   let lastSummary = {
     claimed: 0,
@@ -207,6 +221,7 @@ async function dispatchAll(): Promise<{
     idempotent: 0,
     transientFailures: 0,
     permanentFailures: 0,
+    lostLeases: 0,
   };
   // Run dispatch cycles until no more events are claimed.
   for (let i = 0; i < 10; i++) {
@@ -251,6 +266,89 @@ async function login(): Promise<{
   const membershipId: string = memberships[0]!.id;
 
   return { cookie, csrfToken, membershipId };
+}
+
+/**
+ * Connect to the maintenance database (`postgres`) on the test
+ * cluster. Used by the simulated-outage test to flip
+ * `ALLOW_CONNECTIONS` on the audit database.
+ *
+ * The maintenance URL is derived from `DATABASE_URL` by replacing
+ * the database name with `postgres`. The connection uses the same
+ * credentials and host as `DATABASE_URL`.
+ */
+function getMaintenanceClient(): PgClient {
+  const databaseUrl = process.env['DATABASE_URL'];
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not set');
+  }
+  // Replace the database name (the last path segment) with `postgres`.
+  const maintenanceUrl = databaseUrl.replace(/\/[^/]+$/, '/postgres');
+  const client = new PgClient({ connectionString: maintenanceUrl });
+  return client;
+}
+
+/**
+ * The name of the audit database, derived from `AUDIT_DATABASE_URL`.
+ */
+function getAuditDatabaseName(): string {
+  const auditUrl = process.env['AUDIT_DATABASE_URL'];
+  if (!auditUrl) {
+    throw new Error('AUDIT_DATABASE_URL is not set');
+  }
+  const match = auditUrl.match(/\/([^/]+)$/);
+  if (!match || !match[1]) {
+    throw new Error(`Could not parse audit database name from ${auditUrl}`);
+  }
+  return match[1];
+}
+
+/**
+ * Simulate the audit database becoming unavailable by:
+ * 1. Disconnecting the AuditPrismaService (dropping the pool).
+ * 2. Running `ALTER DATABASE <audit> WITH ALLOW_CONNECTIONS false` on
+ *    the maintenance database.
+ *
+ * After this call, any new connection to the audit database will
+ * fail with a "database is not accepting connections" error. The
+ * dispatcher's `auditStore.append` call will throw, and the outbox
+ * row will remain pending.
+ *
+ * Returns a `restore` function that re-enables connections. The
+ * caller MUST call `restore()` before the test completes.
+ */
+async function makeAuditDatabaseUnavailable(): Promise<{
+  restore: () => Promise<void>;
+}> {
+  const auditDbName = getAuditDatabaseName();
+  // Disconnect the AuditPrismaService so its pool does not hold
+  // open connections that bypass the ALLOW_CONNECTIONS flag.
+  await auditPrisma.$disconnect();
+  const mgmtClient = getMaintenanceClient();
+  await mgmtClient.connect();
+  try {
+    await mgmtClient.query(
+      `ALTER DATABASE "${auditDbName}" WITH ALLOW_CONNECTIONS false;`,
+    );
+  } finally {
+    await mgmtClient.end();
+  }
+  return {
+    restore: async () => {
+      const restoreClient = getMaintenanceClient();
+      await restoreClient.connect();
+      try {
+        await restoreClient.query(
+          `ALTER DATABASE "${auditDbName}" WITH ALLOW_CONNECTIONS true;`,
+        );
+      } finally {
+        await restoreClient.end();
+      }
+      // Reconnect the AuditPrismaService by issuing a trivial
+      // query. Prisma's `$transaction` lazy-opens the pool on
+      // the next query.
+    },
+  };
 }
 
 describe('Audit integration', () => {
@@ -330,6 +428,73 @@ describe('Audit integration', () => {
       where: { action: 'authorization.decision.allowed' },
     });
     expect(events.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('denied authorization decision is audited (R14 context denial)', async () => {
+    // Create a user with a membership but NO role assignments, so
+    // context:view is denied.
+    const deniedEmail = `denied-user-${randomUUID()}@example.invalid`;
+    const deniedUser = await seedPrisma.user.create({
+      data: {
+        email: deniedEmail,
+        normalisedEmail: deniedEmail.toLowerCase(),
+        displayName: 'Denied User',
+      },
+    });
+    const tenant = await seedPrisma.tenant.findUnique({
+      where: { slug: TEST_TENANT_SLUG },
+    });
+    if (!tenant) throw new Error('Test tenant not seeded');
+    const membership = await seedPrisma.tenantMembership.create({
+      data: { tenantId: tenant.id, userId: deniedUser.id },
+    });
+    const deniedPassword = 'denied-password-12345';
+    const pwHash = await argon2.hash(deniedPassword, {
+      type: argon2.argon2id,
+    });
+    await seedPrisma.localCredential.create({
+      data: {
+        userId: deniedUser.id,
+        passwordHash: pwHash,
+        passwordChangedAt: new Date(),
+      },
+    });
+
+    try {
+      const loginRes = await request(server)
+        .post('/api/v1/auth/login')
+        .set('Origin', WEB_ORIGIN)
+        .send({ email: deniedEmail, password: deniedPassword });
+      expect(loginRes.status).toBe(200);
+      const cookie = loginRes.headers['set-cookie']?.[0]?.split(';')[0];
+      if (!cookie) throw new Error('No cookie set for denied user');
+
+      // The user has a membership but no roles. context:view requires
+      // a role that grants it. The guard should deny.
+      const ctxRes = await request(server)
+        .get('/api/v1/context')
+        .set('Cookie', cookie);
+      expect(ctxRes.status).toBe(403);
+
+      await dispatchAll();
+
+      const deniedEvents = await auditPrisma.auditEvent.findMany({
+        where: { action: 'authorization.decision.denied' },
+      });
+      expect(deniedEvents.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      // Clean up the denied user to avoid affecting other tests.
+      await seedPrisma.localCredential.deleteMany({
+        where: { userId: deniedUser.id },
+      });
+      await seedPrisma.tenantMembership.deleteMany({
+        where: { id: membership.id },
+      });
+      await seedPrisma.authSession.deleteMany({
+        where: { userId: deniedUser.id },
+      });
+      await seedPrisma.user.deleteMany({ where: { id: deniedUser.id } });
+    }
   });
 
   it('context view is audited', async () => {
@@ -462,22 +627,53 @@ describe('Audit integration', () => {
     expect(allJson).not.toContain(TEST_PASSWORD);
     // The password hash must not appear anywhere.
     expect(allJson).not.toContain('$argon2id');
-    // The raw email should not appear in failed-login events
-    // (but it MAY appear in successful-login events as actorId
-    // is a UUID, not an email — so we check that the email is
-    // not present at all in this successful-login case too,
-    // because actorId is a UUID).
-    // Actually, the successful-login event stores the user's UUID,
-    // not the email. So the email should not appear.
+    // The raw email should not appear in successful-login events
+    // (actorId is a UUID, not an email).
     expect(allJson).not.toContain(TEST_EMAIL);
   });
 
-  it('all pending outbox events can be delivered after a simulated outage', async () => {
-    // Emit an event by logging in.
-    await request(server)
+  // ---------------------------------------------------------------------
+  // Restored simulated-outage test (was previously simplified).
+  // ---------------------------------------------------------------------
+  //
+  // What was previously simplified: the original outage test was
+  // reduced to "run dispatch cycles with short leases and wait for
+  // the lease to expire" — it did NOT actually make the audit
+  // database unavailable. As a result, it could not verify the
+  // central outage guarantee: that an outbox row remains pending
+  // (and is NOT marked delivered) when the audit store is down,
+  // and that exactly one final audit event exists after recovery.
+  //
+  // The restored test uses `ALTER DATABASE ... WITH
+  // ALLOW_CONNECTIONS false` to genuinely make the audit database
+  // unavailable, then verifies the full outage contract:
+  // 1. The outbox event remains pending while the audit store is
+  //    unavailable.
+  // 2. The dispatcher does not mark the event delivered.
+  // 3. After recovery, the dispatcher delivers exactly one final
+  //    audit event.
+  // 4. The outbox event is marked delivered only after successful
+  //    persistence.
+  // 5. No mutation or audit event is lost.
+  it('simulated audit-store outage: pending event survives and is delivered exactly once after recovery', async () => {
+    // Skip if running against an externally-supplied cluster that
+    // may not allow `ALTER DATABASE`. The test-owned disposable
+    // cluster always allows it (the connecting user is the
+    // superuser).
+    if (!isOwnedCluster()) {
+      console.warn(
+        'Skipping simulated-outage test: not running on an owned cluster.',
+      );
+      return;
+    }
+
+    // 1. Create a consequential transactional mutation (login)
+    //    and its outbox event.
+    const loginRes = await request(server)
       .post('/api/v1/auth/login')
       .set('Origin', WEB_ORIGIN)
       .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+    expect(loginRes.status).toBe(200);
 
     // Verify the outbox has a pending event.
     const pendingBefore = await prisma.auditOutboxEvent.count({
@@ -485,25 +681,347 @@ describe('Audit integration', () => {
     });
     expect(pendingBefore).toBeGreaterThanOrEqual(1);
 
-    // Dispatch — simulating the audit store coming back online.
-    // Use a short lease duration so that if the first dispatch cycle
-    // claims the event but fails to deliver it, the second cycle can
-    // re-claim it after the lease expires.
-    for (let i = 0; i < 5; i++) {
-      await dispatcher.dispatchOnce({
+    // 2. Make the dedicated audit database unavailable.
+    const outage = await makeAuditDatabaseUnavailable();
+    try {
+      // 3. Run the dispatcher. The audit-store append should fail;
+      //    the outbox event should remain pending.
+      const summary = await dispatcher.dispatchOnce({
         batchSize: 100,
-        leaseDurationMs: 500, // 500ms lease for fast test cycling
+        leaseDurationMs: 5_000,
       });
-      // Wait for the lease to expire before the next cycle.
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      // The dispatcher should have claimed and failed to deliver
+      // (transient failures). It must NOT have marked the event
+      // delivered.
+      expect(summary.delivered).toBe(0);
+      expect(summary.idempotent).toBe(0);
+      // It should have at least one transient failure (the audit
+      // store is unavailable). It may also have lostLeases if the
+      // claim timed out, but that is acceptable.
+      expect(
+        summary.transientFailures + summary.lostLeases,
+      ).toBeGreaterThanOrEqual(summary.claimed > 0 ? summary.claimed : 1);
+
+      // 4. Verify the outbox event remains pending and is NOT
+      //    marked delivered.
+      const pendingDuring = await prisma.auditOutboxEvent.count({
+        where: { deliveredAt: null },
+      });
+      expect(pendingDuring).toBeGreaterThanOrEqual(1);
+      const deliveredDuring = await prisma.auditOutboxEvent.count({
+        where: { deliveredAt: { not: null } },
+      });
+      expect(deliveredDuring).toBe(0);
+
+      // Verify NO audit event was persisted while the audit store
+      // was unavailable. (The audit store should be unreachable,
+      // so any append would have failed.)
+      // We cannot query the audit store here because we just made
+      // it unavailable. We verify this after recovery by checking
+      // that the count is exactly one (not more).
+    } finally {
+      // 5. Restore the audit database.
+      await outage.restore();
     }
 
-    // Verify the audit store has the events. The outbox may still
-    // have pending events if the lease mechanism is preventing
-    // re-claiming, but the audit store should have the delivered
-    // events.
-    const auditEvents = await auditPrisma.auditEvent.count();
-    expect(auditEvents).toBeGreaterThanOrEqual(1);
+    // 6. Run the dispatcher again. The pending event should now
+    //    be delivered. The failed dispatch during the outage set
+    //    `availableAt` to a future time (backoff); reset it to NOW
+    //    so the event is immediately claimable. This is a test-only
+    //    convenience; in production, the dispatcher would wait for
+    //    the backoff to expire.
+    await prisma.auditOutboxEvent.updateMany({
+      where: { deliveredAt: null },
+      data: { availableAt: new Date(), leaseOwner: null, leaseExpiresAt: null },
+    });
+    await dispatchAll();
+
+    // 7. Verify exactly one final audit event exists for the login.
+    const loginEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.succeeded' },
+    });
+    expect(loginEvents).toHaveLength(1);
+    expect(loginEvents[0]!.outcome).toBe('success');
+
+    // 8. Verify the outbox event is marked delivered only after
+    //    successful persistence.
+    const pendingAfter = await prisma.auditOutboxEvent.count({
+      where: { deliveredAt: null },
+    });
+    expect(pendingAfter).toBe(0);
+    const deliveredAfter = await prisma.auditOutboxEvent.count({
+      where: { deliveredAt: { not: null } },
+    });
+    expect(deliveredAfter).toBeGreaterThanOrEqual(1);
+
+    // 9. Verify no mutation or audit event is lost: the user's
+    //    session was created (login succeeded), and the audit
+    //    event was persisted exactly once.
+    const allAuditEvents = await auditPrisma.auditEvent.count();
+    expect(allAuditEvents).toBeGreaterThanOrEqual(1);
+    // The login event must appear exactly once (no duplicates from
+    // the failed-then-successful dispatch).
+    expect(loginEvents).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------
+  // Throttled-login auditing.
+  // ---------------------------------------------------------------------
+  it('throttled login emits authentication.login.throttled without raw email or account-existence leak', async () => {
+    // The login endpoint is throttled at 10 attempts per 60s per IP.
+    // We make 11 login attempts with a non-existent email. The 11th
+    // should be throttled (HTTP 429) and should emit a
+    // `authentication.login.throttled` audit event.
+    //
+    // The test verifies:
+    // - The 429 response is the generic throttling response (does
+    //   not reveal whether the account exists).
+    // - The audit event does NOT contain the raw email.
+    // - The audit event does NOT contain the password or request
+    //   body.
+    // - The audit event's subject_identifier_hash is set (HMAC of
+    //   the normalised email).
+    // - No `authentication.login.failed` event is double-emitted
+    //   for the throttled attempt (the throttled event replaces,
+    //   not supplements, the failed event).
+    const throttledEmail = 'throttle-test@example.invalid';
+    const throttledPassword = 'wrong-password-12345';
+
+    // Make 10 failed login attempts to fill the throttle counter.
+    // These should each emit `authentication.login.failed`.
+    for (let i = 0; i < 10; i++) {
+      await request(server)
+        .post('/api/v1/auth/login')
+        .set('Origin', WEB_ORIGIN)
+        .send({ email: throttledEmail, password: throttledPassword });
+    }
+
+    // The 11th attempt should be throttled.
+    const throttledRes = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .send({ email: throttledEmail, password: throttledPassword });
+    expect(throttledRes.status).toBe(429);
+
+    // Dispatch the outbox.
+    await dispatchAll();
+
+    // Verify the throttled audit event exists.
+    const throttledEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.throttled' },
+    });
+    expect(throttledEvents.length).toBeGreaterThanOrEqual(1);
+
+    // Verify the raw email is NOT anywhere in the audit store.
+    const allEvents = await auditPrisma.auditEvent.findMany();
+    const allJson = JSON.stringify(allEvents, (_k, v: unknown) =>
+      typeof v === 'bigint' ? v.toString() : v,
+    );
+    expect(allJson).not.toContain(throttledEmail);
+    expect(allJson).not.toContain('throttle-test');
+    // The password must not appear anywhere.
+    expect(allJson).not.toContain(throttledPassword);
+
+    // The throttled event must have a subject_identifier_hash.
+    const throttledEvent = throttledEvents[0]!;
+    expect(throttledEvent.subjectIdentifierHash).not.toBeNull();
+    expect(throttledEvent.subjectIdentifierHash).toMatch(/^[0-9a-f]{64}$/);
+
+    // Verify that the 10 failed-login attempts each emitted an
+    // `authentication.login.failed` event, but the 11th (throttled)
+    // attempt did NOT also emit a `failed` event. (The throttled
+    // event replaces the failed event for the throttled attempt.)
+    const failedEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.failed' },
+    });
+    expect(failedEvents).toHaveLength(10);
+  });
+
+  // ---------------------------------------------------------------------
+  // Expired-session auditing.
+  // ---------------------------------------------------------------------
+  it('expired session emits authentication.session.expired exactly once', async () => {
+    // 1. Create a session by logging in.
+    const { cookie } = await login();
+
+    // 2. Make the session expired by updating its `expires_at` to
+    //    the past.
+    const sessions = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessions.length).toBe(1);
+    const sessionId = sessions[0]!.id;
+    await seedPrisma.authSession.update({
+      where: { id: sessionId },
+      data: { expiresAt: new Date(Date.now() - 60_000) }, // expired 1 min ago
+    });
+
+    // 3. Call a protected endpoint with the expired session.
+    // 4. Receive the existing generic 401.
+    const res = await request(server)
+      .get('/api/v1/context')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(401);
+
+    // 5. Verify exactly one `authentication.session.expired` audit
+    //    event is produced.
+    await dispatchAll();
+    const expiredEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.session.expired' },
+    });
+    expect(expiredEvents).toHaveLength(1);
+
+    // 6. Verify `authentication.session.invalid` is NOT produced
+    //    for the same event (the taxonomy distinguishes expired
+    //    from invalid).
+    const invalidEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.session.invalid' },
+    });
+    expect(invalidEvents).toHaveLength(0);
+  });
+
+  // ---------------------------------------------------------------------
+  // Request-ID and correlation-ID verification.
+  // ---------------------------------------------------------------------
+  it('invalid request IDs are replaced, not trusted', async () => {
+    // An invalid request ID (contains invalid characters) should be
+    // replaced with a generated UUID. The response header should
+    // NOT contain the invalid value.
+    const invalidRequestId = 'this is not a valid request id!!!';
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .set('X-Request-Id', invalidRequestId)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    expect(res.status).toBe(200);
+    const responseRequestId = res.headers['x-request-id'];
+    expect(responseRequestId).not.toBe(invalidRequestId);
+    // The replaced value should be a UUID (36 chars with hyphens).
+    expect(typeof responseRequestId).toBe('string');
+    expect((responseRequestId as string).length).toBe(36);
+
+    // Dispatch and verify the audit event has the REPLACED request
+    // ID, not the invalid client-supplied one.
+    await dispatchAll();
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.succeeded' },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.requestId).toBe(responseRequestId);
+    expect(events[0]!.requestId).not.toBe(invalidRequestId);
+  });
+
+  it('oversized request IDs are replaced, not trusted', async () => {
+    // A request ID longer than 64 characters should be replaced.
+    const oversizedRequestId = 'a'.repeat(100);
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .set('X-Request-Id', oversizedRequestId)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    expect(res.status).toBe(200);
+    const responseRequestId = res.headers['x-request-id'];
+    expect(responseRequestId).not.toBe(oversizedRequestId);
+    expect(typeof responseRequestId).toBe('string');
+    expect((responseRequestId as string).length).toBeLessThanOrEqual(64);
+
+    await dispatchAll();
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.succeeded' },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.requestId).toBe(responseRequestId);
+  });
+
+  it('correlation ID defaults to request ID when absent', async () => {
+    const clientRequestId = 'req-id-correlation-test-1234';
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .set('X-Request-Id', clientRequestId)
+      // No X-Correlation-Id header.
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    expect(res.status).toBe(200);
+
+    await dispatchAll();
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.succeeded' },
+    });
+    expect(events).toHaveLength(1);
+    // The correlation ID should default to the request ID.
+    expect(events[0]!.correlationId).toBe(clientRequestId);
+  });
+
+  it('oversized correlation IDs are normalised to the request ID', async () => {
+    // An oversized correlation ID (longer than 64 chars) should be
+    // replaced. Per the request-ID middleware, an invalid
+    // correlation ID is replaced by the (validated) request ID.
+    const clientRequestId = 'valid-req-id-1234567890';
+    const oversizedCorrelationId = 'c'.repeat(100);
+    const res = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .set('X-Request-Id', clientRequestId)
+      .set('X-Correlation-Id', oversizedCorrelationId)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+
+    expect(res.status).toBe(200);
+
+    await dispatchAll();
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.login.succeeded' },
+    });
+    expect(events).toHaveLength(1);
+    // The oversized correlation ID should NOT be persisted.
+    expect(events[0]!.correlationId).not.toBe(oversizedCorrelationId);
+    // It should fall back to the validated request ID.
+    expect(events[0]!.correlationId).toBe(clientRequestId);
+  });
+
+  it('every API response contains the X-Request-Id header', async () => {
+    // The login response, the session response, the CSRF response,
+    // and the 401 response should all include the header.
+    const endpoints: Array<{
+      name: string;
+      run: () => Promise<request.Response>;
+    }> = [
+      {
+        name: 'login',
+        run: () =>
+          request(server)
+            .post('/api/v1/auth/login')
+            .set('Origin', WEB_ORIGIN)
+            .send({ email: TEST_EMAIL, password: TEST_PASSWORD }),
+      },
+      {
+        name: 'session',
+        run: () => request(server).get('/api/v1/auth/session'),
+      },
+      {
+        name: 'csrf',
+        run: () => request(server).get('/api/v1/auth/csrf'),
+      },
+      {
+        name: 'health',
+        run: () => request(server).get('/api/v1/health'),
+      },
+    ];
+    for (const ep of endpoints) {
+      const res = await ep.run();
+      expect(
+        res.headers['x-request-id'],
+        `${ep.name} response missing X-Request-Id header`,
+      ).toBeDefined();
+      expect(typeof res.headers['x-request-id']).toBe('string');
+      const rid = res.headers['x-request-id'] as string;
+      // The request ID must match the safe format.
+      expect(rid).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    }
   });
 
   it('integrity verification passes after normal operation', async () => {
@@ -522,5 +1040,153 @@ describe('Audit integration', () => {
     // Verify all chains.
     const result = await verifier.verify({ kind: 'all' });
     expect(result.ok).toBe(true);
+  });
+
+  it('session rotation emits authentication.session.rotated', async () => {
+    // Log in.
+    const loginRes = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+    expect(loginRes.status).toBe(200);
+    const cookie = loginRes.headers['set-cookie']?.[0]?.split(';')[0];
+    if (!cookie) throw new Error('No cookie set');
+
+    // Force rotation by updating rotatedAt to be older than the
+    // rotation interval (30 minutes).
+    const sessions = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessions.length).toBe(1);
+    await seedPrisma.authSession.update({
+      where: { id: sessions[0]!.id },
+      data: { rotatedAt: new Date(Date.now() - 31 * 60 * 1000) },
+    });
+
+    // Call GET /api/v1/auth/session to trigger rotation.
+    const sessionRes = await request(server)
+      .get('/api/v1/auth/session')
+      .set('Cookie', cookie);
+    expect(sessionRes.status).toBe(200);
+
+    await dispatchAll();
+
+    // Verify the rotation audit event exists.
+    const rotatedEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'authentication.session.rotated' },
+    });
+    expect(rotatedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(rotatedEvents[0]!.outcome).toBe('success');
+  });
+
+  it('invalid CSRF on logout emits security.csrf.denied', async () => {
+    // Log in.
+    const loginRes = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+    expect(loginRes.status).toBe(200);
+    const cookie = loginRes.headers['set-cookie']?.[0]?.split(';')[0];
+    if (!cookie) throw new Error('No cookie set');
+
+    // Attempt logout with an invalid CSRF token.
+    const logoutRes = await request(server)
+      .post('/api/v1/auth/logout')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', 'invalid-csrf-token')
+      .set('Origin', WEB_ORIGIN);
+    expect(logoutRes.status).toBe(403);
+
+    await dispatchAll();
+
+    // Verify the CSRF denied audit event exists.
+    const csrfDeniedEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'security.csrf.denied' },
+    });
+    expect(csrfDeniedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(csrfDeniedEvents[0]!.outcome).toBe('denied');
+  });
+
+  it('audit.delivery.failed is emitted when delivery permanently fails', async () => {
+    // This test verifies that the dispatcher emits an
+    // `audit.delivery.failed` event when delivery permanently fails.
+    // We trigger this by inserting an outbox event whose canonical
+    // draft has invalid metadata (a forbidden key), which causes the
+    // audit-store append to return `permanent_failure`. We set the
+    // attempt count to MAX_ATTEMPTS - 1 so the next failure triggers
+    // the permanent-failure path.
+    //
+    // We use the real outbox and audit store. The outbox event is
+    // inserted directly via the seedPrisma client. The canonical
+    // draft is built with a forbidden metadata key, which the
+    // audit-store append validates and rejects.
+    const eventId = randomUUID();
+    // Build a draft with a forbidden metadata key. The builder
+    // rejects forbidden keys, so we build a valid draft and then
+    // corrupt the metadata in the JSONB before insertion.
+    const buildResult = buildAuditEventDraft({
+      action: 'authentication.login.succeeded',
+      actorType: 'USER',
+      actorId: randomUUID(),
+      source: 'api',
+      outcome: 'success',
+      scope: 'test',
+      requestId: randomUUID(),
+      eventId,
+      metadata: { test: true },
+    });
+    if (!buildResult.ok) {
+      throw new Error(`buildAuditEventDraft failed: ${buildResult.reason}`);
+    }
+    // Corrupt the metadata by adding a forbidden key.
+    const corruptedDraft = {
+      ...buildResult.draft,
+      metadata: {
+        ...(buildResult.draft.metadata as Record<string, unknown>),
+        password: 'secret',
+      },
+    };
+
+    // Insert the outbox event with attemptCount = 19 (one below
+    // MAX_ATTEMPTS = 20). The dispatcher's permanent-failure path
+    // is triggered when `event.attemptCount + 1 >= MAX_ATTEMPTS`,
+    // i.e. when attemptCount >= 19 and the result is
+    // permanent_failure.
+    await seedPrisma.auditOutboxEvent.create({
+      data: {
+        id: randomUUID(),
+        eventId,
+        eventVersion: corruptedDraft.eventVersion,
+        canonicalEventDraft: corruptedDraft as never,
+        attemptCount: 19,
+      },
+    });
+
+    // Run the dispatcher. The append should return
+    // permanent_failure (forbidden metadata), and the dispatcher
+    // should emit `audit.delivery.failed`.
+    await dispatcher.dispatchOnce({ batchSize: 100, leaseDurationMs: 5_000 });
+
+    // Verify the audit.delivery.failed event exists in the audit
+    // store. It's emitted directly to the audit store (not through
+    // the outbox).
+    const deliveryFailedEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'audit.delivery.failed' },
+    });
+    expect(deliveryFailedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(deliveryFailedEvents[0]!.outcome).toBe('failure');
+    expect(deliveryFailedEvents[0]!.source).toBe('dispatcher');
+
+    // The metadata should include the failed event's ID and the
+    // failure code, but NOT raw exception messages or secrets.
+    const metadata = deliveryFailedEvents[0]!.metadata as Record<
+      string,
+      unknown
+    >;
+    expect(metadata['failedEventId']).toBe(eventId);
+    expect(metadata['failureCode']).toBeTruthy();
+    expect(JSON.stringify(metadata)).not.toContain('secret');
   });
 });

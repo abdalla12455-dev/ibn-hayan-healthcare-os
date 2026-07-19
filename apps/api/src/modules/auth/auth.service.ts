@@ -268,8 +268,13 @@ export class AuthService {
       // Emit the successful-login audit event in the same
       // transaction. The audit helper passes the transaction to
       // the outbox port, which inserts the outbox row using the
-      // transaction client.
-      await this.auditHelper.emit(
+      // transaction client. Per the ninth canonical batch
+      // specification, if the outbox insertion fails, the entire
+      // transaction (including the session creation) MUST roll
+      // back. The `emitOrFail` helper throws on failure, which
+      // causes the `$transaction` callback to throw, which causes
+      // Prisma to roll back.
+      await this.auditHelper.emitOrFail(
         {
           action: 'authentication.login.succeeded',
           outcome: 'success',
@@ -384,9 +389,15 @@ export class AuthService {
     const session = await this.sessions.findActiveByTokenHash(tokenHash, now);
     if (session === null) {
       // The session is invalid (not found, revoked, or expired).
-      // Emit an audit event if we have a context.
+      // Emit an audit event if we have a context. Per the ninth
+      // canonical batch specification, distinguish expired from
+      // invalid: an expired session emits
+      // `authentication.session.expired`; an invalid (not found or
+      // revoked) session emits `authentication.session.invalid`.
+      // The two events are mutually exclusive for a single
+      // validation failure.
       if (auditContext !== undefined) {
-        await this.emitSessionInvalid(tokenHash, auditContext);
+        await this.emitSessionRejection(tokenHash, auditContext);
       }
       return null;
     }
@@ -404,6 +415,9 @@ export class AuthService {
       (m) => m.status === 'active',
     );
     if (activeMemberships.length === 0) {
+      // No active memberships: the session is still valid, but the
+      // user has no tenancy. Return null without emitting an
+      // audit event (this is not a session-invalid condition).
       return null;
     }
 
@@ -436,7 +450,7 @@ export class AuthService {
               lastSeenAt: now,
             },
           });
-          await this.auditHelper.emit(
+          await this.auditHelper.emitOrFail(
             {
               action: 'authentication.session.rotated',
               outcome: 'success',
@@ -488,6 +502,79 @@ export class AuthService {
       expiresAt: session.expiresAt,
       rotatedRawToken,
     };
+  }
+
+  /**
+   * Emit a session-rejection audit event, distinguishing expired
+   * sessions from invalid sessions.
+   *
+   * Per the ninth canonical batch specification, an expired session
+   * emits `authentication.session.expired`; an invalid session (not
+   * found, revoked, or otherwise unrecognised) emits
+   * `authentication.session.invalid`. The two events are mutually
+   * exclusive for a single validation failure: the taxonomy does
+   * NOT require both.
+   *
+   * The token hash is NOT persisted; only a boolean indicator that
+   * the session was rejected is recorded. The raw cookie value is
+   * NEVER persisted. The lookup is performed by querying the
+   * `auth_sessions` table directly via the Prisma client; the
+   * session repository's `findActiveByTokenHash` method returns
+   * `null` for both expired and invalid sessions, so a separate
+   * raw lookup is needed to distinguish the two cases.
+   */
+  private async emitSessionRejection(
+    tokenHash: string,
+    auditContext: AuditRequestContext,
+  ): Promise<void> {
+    // Query the session row directly to determine the rejection
+    // reason. We do NOT use the session repository because its
+    // `findActiveByTokenHash` method returns `null` for all
+    // rejection cases (not found, revoked, expired). The raw
+    // query lets us inspect `expiresAt` and `revokedAt`.
+    let isExpired = false;
+    try {
+      const row = await this.prisma.authSession.findUnique({
+        where: { tokenHash },
+        select: { expiresAt: true, revokedAt: true },
+      });
+      if (row !== null && row.revokedAt === null) {
+        // The session exists and is not revoked, but
+        // `findActiveByTokenHash` returned null. The only
+        // remaining reason is expiry.
+        isExpired = row.expiresAt.getTime() <= Date.now();
+      }
+      // If the row is null (not found) or revoked, `isExpired`
+      // remains false; we emit `session.invalid`.
+    } catch {
+      // If the lookup itself fails (e.g. database unavailable),
+      // default to `session.invalid`. We must not block the
+      // session-validation flow on an audit-lookup failure.
+      isExpired = false;
+    }
+
+    if (isExpired) {
+      const result = await this.auditHelper.emitDirect({
+        action: 'authentication.session.expired',
+        outcome: 'failure',
+        reasonCode: 'session_expired',
+        source: 'api',
+        actorType: 'ANONYMOUS',
+        requestId: auditContext.requestId,
+        correlationId: auditContext.correlationId,
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+        scope: 'session',
+        metadata: { endpoint: 'session_validation' },
+      });
+      if (!result.ok) {
+        this.logger.error(
+          `Failed to emit session-expired audit event: ${result.reason} — ${result.detail}`,
+        );
+      }
+    } else {
+      await this.emitSessionInvalid(tokenHash, auditContext);
+    }
   }
 
   /**
@@ -651,7 +738,7 @@ export class AuthService {
           where: { id: session.id, revokedAt: null },
           data: { revokedAt: now },
         });
-        await this.auditHelper.emit(
+        await this.auditHelper.emitOrFail(
           {
             action: 'authentication.logout.succeeded',
             outcome: 'success',

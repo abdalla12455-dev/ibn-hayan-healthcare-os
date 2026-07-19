@@ -312,7 +312,7 @@ export class SessionContextService {
             where: { id: authResult.session.id },
             data: { activeTenantMembershipId: membershipId },
           });
-          await this.auditHelper.emit(
+          await this.auditHelper.emitOrFail(
             {
               action: 'tenant_context.selected',
               outcome: 'success',
@@ -436,7 +436,7 @@ export class SessionContextService {
           where: { id: authResult.session.id },
           data: { activeTenantMembershipId: null },
         });
-        await this.auditHelper.emit(
+        await this.auditHelper.emitOrFail(
           {
             action: 'tenant_context.cleared',
             outcome: 'success',

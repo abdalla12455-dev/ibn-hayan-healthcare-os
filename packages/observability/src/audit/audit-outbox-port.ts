@@ -119,19 +119,45 @@ export interface AuditOutboxPort {
   /**
    * Mark an outbox row as delivered. Called by the dispatcher after
    * successful audit-store append (or idempotent success).
+   *
+   * Per the ninth canonical batch specification, the dispatcher MUST
+   * supply its own `leaseOwner`. The implementation atomically
+   * verifies that the row's current `lease_owner` matches the
+   * supplied `leaseOwner` and that the lease has not expired. If the
+   * lease does not match (because another dispatcher stole it after
+   * expiry, or because the row was never claimed by this dispatcher),
+   * the implementation rejects the call: a dispatcher must not mark
+   * an event delivered after its lease was reassigned.
+   *
+   * Returns `true` if the row was marked delivered, `false` if the
+   * lease did not match (the dispatcher must treat this as a
+   * lost-lease condition and skip the row).
    */
-  markDelivered(id: string): Promise<void>;
+  markDelivered(id: string, leaseOwner: string): Promise<boolean>;
 
   /**
    * Record a dispatch failure on an outbox row. Increments
    * `attempt_count`, sets `last_failure_code` and `last_failure_at`,
    * and sets `available_at` to a backoff-computed timestamp.
+   *
+   * Per the ninth canonical batch specification, the dispatcher MUST
+   * supply its own `leaseOwner`. The implementation atomically
+   * verifies that the row's current `lease_owner` matches the
+   * supplied `leaseOwner` and that the lease has not expired. If the
+   * lease does not match, the implementation rejects the call: a
+   * dispatcher must not record a failure on a row whose lease was
+   * reassigned to another dispatcher.
+   *
+   * Returns `true` if the failure was recorded, `false` if the lease
+   * did not match (the dispatcher must treat this as a lost-lease
+   * condition and skip the row).
    */
   recordFailure(
     id: string,
     failureCode: string,
     backoffMs: number,
-  ): Promise<void>;
+    leaseOwner: string,
+  ): Promise<boolean>;
 
   /**
    * Release leases that have expired. Called by the dispatcher
