@@ -1,0 +1,411 @@
+// Prisma schema for the Ibn Hayan Healthcare Operating System API.
+//
+// This is the canonical persistence schema ratified by ADR-006 (Database
+// Strategy) and ADR-012 §1.4 (Prisma safeguards). It is PostgreSQL-first:
+// every type, constraint, and index is chosen to be expressible in
+// PostgreSQL-native SQL, and the generated migration SQL is reviewed
+// before being applied to any database.
+//
+// Per the third canonical batch specification (tenancy foundation):
+// - The tenancy foundation (Tenant, Organisation, Facility) is persisted
+//   with restricted deletes and no cascading. Tenant deletion is
+//   restricted while organisations exist; organisation deletion is
+//   restricted while facilities exist.
+// - No row-level security policies exist yet. RLS and database-role
+//   separation arrive in a dedicated reviewed batch before any
+//   tenant-owned data is exposed through a public API endpoint.
+// - No soft-delete columns (`deletedAt`). Soft-delete is a future
+//   batch concern, governed by a separate ADR.
+// - No PostgreSQL extensions are enabled. The schema uses only
+//   built-in PostgreSQL features.
+//
+// Per the fourth canonical batch specification (identity & sessions):
+// - User, LocalCredential, TenantMembership, and AuthSession tables are
+//   persisted. The User model carries no password hash; the password
+//   hash lives on the infrastructure-only LocalCredential row and is
+//   never exposed through the domain `User` type (per ADR-013 §1.1
+//   point 12 and §1.3 — session records do not include credential
+//   material).
+// - AuthSession persists only the SHA-256 hash of the opaque session
+//   token, never the raw token. The raw token lives only in the
+//   HttpOnly cookie and in process memory between generation and
+//   cookie-setting (per ADR-013 §1.1 and §1.3).
+// - No role or permission columns exist on TenantMembership. The
+//   role/permission catalogue is deferred to a subsequent batch.
+// - No cascading deletes. All foreign keys use ON DELETE RESTRICT.
+// - No seed credentials. The development bootstrap command requires
+//   explicit environment variables and creates the dev user idempotently.
+//
+// Per the fifth canonical batch specification (session tenant context):
+// - AuthSession gains a nullable `active_tenant_membership_id` column
+//   referencing `tenant_memberships.id`. The column is nullable: a
+//   `null` value means "no active Tenant context"; the session
+//   remains valid.
+// - TenantMembership gains a composite unique constraint on `(id, userId)`
+//   to support a composite foreign key from `auth_sessions`. The
+//   composite foreign key
+//   `auth_sessions(active_tenant_membership_id, user_id)` →
+//   `tenant_memberships(id, user_id)` is added by a reviewed raw SQL
+//   migration because Prisma 7 cannot express composite foreign keys
+//   in the schema language. The composite FK enforces at the database
+//   level that a session cannot reference another user's membership.
+// - No active Organisation or Facility context columns exist on
+//   AuthSession. The fifth batch introduces active Tenant context
+//   only.
+// - No role or permission context columns exist on AuthSession.
+// - No raw Tenant slug, display name, or any denormalised Tenant
+//   field is persisted on AuthSession. The session references the
+//   Tenant transitively through the selected TenantMembership.
+// - ON DELETE RESTRICT on both the single-column and composite
+//   foreign keys: deleting a TenantMembership that is referenced by
+//   an active session is rejected. This is the structural
+//   enforcement of the lifecycle: a selected membership cannot be
+//   silently destroyed.
+//
+// Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
+// schema language cannot express a PostgreSQL concept that the design
+// requires, the design is PostgreSQL-correct first and the Prisma
+// schema is annotated or supplemented with raw SQL second. The
+// composite organisation foreign key —
+//   facilities(tenantId, organisationId) REFERENCES organisations(tenantId, id)
+// — is one such concept: Prisma 7 cannot express a composite foreign
+// key in the schema language. The schema below declares the columns
+// and the single-column indexes; the composite foreign key, the
+// composite unique constraint on `organisations(tenantId, id)`, and
+// the restricted-delete behaviour are added by the reviewed raw SQL
+// migration that accompanies the Prisma-generated migration.
+//
+// The same approach is used for the fifth-batch composite foreign key
+//   auth_sessions(active_tenant_membership_id, user_id) REFERENCES tenant_memberships(id, user_id)
+// declared in the `session_tenant_context` migration.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Tenant
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+/// A Tenant is the top-level isolation boundary. Every Organisation,
+/// Facility, user, patient, and clinical record belongs to exactly one
+/// Tenant.
+model Tenant {
+  id          String       @id @default(uuid()) @db.Uuid
+  slug        String       @unique @db.VarChar(80)
+  displayName String       @map("display_name") @db.VarChar(200)
+  status      TenantStatus @default(active)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  organisations Organisation[]
+  memberships  TenantMembership[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
+// Organisation
+// ---------------------------------------------------------------------------
+
+enum OrganisationStatus {
+  active
+  inactive
+}
+
+/// An Organisation is the second level of the tenancy hierarchy. Every
+/// Organisation belongs to exactly one Tenant; the foreign key below
+/// enforces that ownership. The unique constraint on `(tenantId, code)`
+/// enforces that an Organisation's code is unique within a Tenant but
+/// may be reused across Tenants.
+///
+/// The composite unique constraint on `(tenantId, id)` is required to
+/// support the composite foreign key from `facilities`. Prisma cannot
+/// express a composite foreign key in the schema language; the
+/// composite unique constraint here is supplemented by a reviewed raw
+/// SQL migration that adds the composite foreign key on `facilities`.
+model Organisation {
+  id          String             @id @default(uuid()) @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  code        String             @db.VarChar(50)
+  displayName String             @map("display_name") @db.VarChar(200)
+  status      OrganisationStatus @default(active)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facilities Facility[]
+
+  @@unique([tenantId, code], map: "organisations_tenant_id_code_key")
+  @@unique([tenantId, id], map: "organisations_tenant_id_id_key")
+  @@index([tenantId], map: "organisations_tenant_id_idx")
+  @@map("organisations")
+}
+
+// ---------------------------------------------------------------------------
+// Facility
+// ---------------------------------------------------------------------------
+
+enum FacilityStatus {
+  active
+  inactive
+}
+
+/// A Facility is the third level of the tenancy hierarchy. Every
+/// Facility belongs to exactly one Organisation, which in turn belongs
+/// to exactly one Tenant.
+///
+/// The `tenantId` column is persisted on the facility row so that
+/// tenant-scoped queries do not need to join through `organisations`.
+/// The composite foreign key
+///   facilities(tenantId, organisationId) REFERENCES organisations(tenantId, id)
+/// is added by a reviewed raw SQL migration because Prisma 7 cannot
+/// express a composite foreign key in the schema language. The
+/// composite foreign key enforces that a Facility cannot be attached
+/// to an Organisation in a different Tenant: the database rejects the
+/// insert.
+///
+/// The single-column `organisationId` relation below is declared for
+/// Prisma's query-builder convenience; the real referential integrity
+/// is enforced by the composite foreign key. The single-column
+/// relation is configured with `onDelete: Restrict` so that an
+/// organisation deletion that would orphan facilities is rejected
+/// even if the composite foreign key were ever dropped.
+model Facility {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  organisationId String         @map("organisation_id") @db.Uuid
+  code           String         @db.VarChar(50)
+  displayName    String         @map("display_name") @db.VarChar(200)
+  status         FacilityStatus @default(active)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
+  @@index([tenantId], map: "facilities_tenant_id_idx")
+  @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
+  @@map("facilities")
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  active
+  disabled
+}
+
+/// A User is an authenticated identity that can sign in to the Ibn
+/// Hayan Healthcare Operating System. Every session, membership, and
+/// audit event belongs to exactly one User. A User is platform-scoped
+/// (not tenant-scoped); a User's tenant access is expressed through
+/// `TenantMembership` rows.
+///
+/// Per ADR-013 §1.1, authentication is separated from authorisation.
+/// This model represents the authenticated identity only; the
+/// authorisation verification chain (ADR-013 §1.4) consults the
+/// membership set at every protected API operation.
+///
+/// This model carries NO password hash. The Argon2id password hash
+/// lives on the infrastructure-only `LocalCredential` row, which is
+/// keyed by `userId` (one credential per user). The domain `User`
+/// type in `packages/domain/src/identity/user.ts` mirrors this shape
+/// minus the credential relation; the persistence adapter maps
+/// between the two. The password hash is never exposed through the
+/// domain `User` type or through any API response.
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @db.VarChar(320)
+  normalisedEmail String     @unique @map("normalised_email") @db.VarChar(320)
+  displayName     String     @map("display_name") @db.VarChar(200)
+  status          UserStatus @default(active)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  localCredential LocalCredential?
+  memberships     TenantMembership[]
+  sessions        AuthSession[]
+
+  @@index([status], map: "users_status_idx")
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// LocalCredential
+// ---------------------------------------------------------------------------
+
+/// A LocalCredential stores the Argon2id password hash for a User.
+/// There is exactly one credential per user (enforced by using
+/// `userId` as the primary key). The credential row is never exposed
+/// through the domain `User` type or through any API response; it is
+/// consumed only by the infrastructure-only `LocalCredentialService`
+/// in `apps/api/src/infrastructure/database/`, which is in turn
+/// consumed by the `PasswordService` and `AuthService`.
+///
+/// `ON DELETE RESTRICT` means a User with a credential cannot be
+/// deleted until the credential is deleted first. This is a
+/// defence-in-depth measure: it prevents an accidental `delete user`
+/// from silently orphaning the credential row.
+///
+/// The `passwordHash` field stores the PHC-string-formatted Argon2id
+/// hash (e.g. `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`). The
+/// hash includes the salt, the parameters, and the version, so
+/// parameter changes are forward-compatible.
+model LocalCredential {
+  userId            String   @id @map("user_id") @db.Uuid
+  passwordHash      String   @map("password_hash")
+  passwordChangedAt DateTime @map("password_changed_at") @db.Timestamptz
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("local_credentials")
+}
+
+// ---------------------------------------------------------------------------
+// TenantMembership
+// ---------------------------------------------------------------------------
+
+enum TenantMembershipStatus {
+  active
+  suspended
+}
+
+/// A TenantMembership is the link between a User and a Tenant. A User
+/// may hold at most one membership per Tenant (enforced by the unique
+/// constraint on `(tenantId, userId)`). A User's set of memberships
+/// determines the Tenants they may operate within.
+///
+/// Per the fourth canonical batch specification, this model carries
+/// NO role or permission columns. The role/permission catalogue is
+/// deferred to a subsequent batch. Adding such columns in the future
+/// is a coordinated domain change, not a silent addition.
+///
+/// Per the fifth canonical batch specification, this model gains a
+/// composite unique constraint on `(id, userId)`. The composite
+/// uniqueness exists specifically to support a database-enforced
+/// same-user context constraint: the composite foreign key
+/// `auth_sessions(active_tenant_membership_id, user_id)` →
+/// `tenant_memberships(id, user_id)` rejects any attempt to set a
+/// session's active context to a membership owned by a different
+/// user. Prisma 7 cannot express a composite foreign key in the
+/// schema language; the composite FK is added by a reviewed raw SQL
+/// migration in `session_tenant_context`. The composite unique
+/// constraint here is required for the composite FK to be valid in
+/// PostgreSQL.
+///
+/// `ON DELETE RESTRICT` on both foreign keys means:
+/// - A Tenant with active memberships cannot be deleted (the
+///   memberships must be deleted first).
+/// - A User with active memberships cannot be deleted (the
+///   memberships must be deleted first).
+/// This is the structural enforcement of the lifecycle: a tenant or
+/// user with active relationships cannot be silently destroyed.
+model TenantMembership {
+  id        String                 @id @default(uuid()) @db.Uuid
+  tenantId  String                 @map("tenant_id") @db.Uuid
+  userId    String                 @map("user_id") @db.Uuid
+  status    TenantMembershipStatus @default(active)
+  createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
+  @@unique([id, userId], map: "tenant_memberships_id_user_id_key")
+  @@index([tenantId], map: "tenant_memberships_tenant_id_idx")
+  @@index([userId], map: "tenant_memberships_user_id_idx")
+  @@map("tenant_memberships")
+}
+
+// ---------------------------------------------------------------------------
+// AuthSession
+// ---------------------------------------------------------------------------
+
+/// An AuthSession is a server-side record representing an authenticated
+/// browser session. Per ADR-013 §1.1 and §1.3, sessions are
+/// server-managed and opaque: the browser holds only an opaque,
+/// high-entropy session identifier in an HttpOnly cookie; the server
+/// holds this record in the transactional store.
+///
+/// The `tokenHash` field stores the SHA-256 hash of the opaque session
+/// token. The raw token is NEVER persisted. It lives only in the
+/// HttpOnly cookie and in process memory between generation and
+/// cookie-setting. The `tokenHash` is a fixed-length 64-character
+/// lowercase hexadecimal string (256 bits / 4 bits per hex character).
+///
+/// `expiresAt` is the absolute expiry timestamp. A session is
+/// considered expired once `now >= expiresAt`.
+///
+/// `lastSeenAt` is updated on every session-validation touch
+/// (subject to the idle-touch interval).
+///
+/// `rotatedAt` is the timestamp of the most recent token rotation,
+/// or null if the session has never been rotated.
+///
+/// `revokedAt` is the timestamp of explicit revocation, or null if
+/// the session is not revoked. Once set, the session is no longer
+/// active regardless of `expiresAt`.
+///
+/// `activeTenantMembershipId` is the TenantMembership this session has
+/// selected as its active Tenant context, or null when no context is
+/// selected. Per the fifth canonical batch specification:
+/// - The active context is session-specific: different sessions for
+///   the same user have independent context.
+/// - Selection is by TenantMembership ID, never by an arbitrary
+///   Tenant ID. The session cannot be forced into a Tenant for
+///   which the user has no membership.
+/// - The single-column foreign key `active_tenant_membership_id` →
+///   `tenant_memberships.id` enforces that the referenced row exists.
+/// - The composite foreign key
+///   `auth_sessions(active_tenant_membership_id, user_id)` →
+///   `tenant_memberships(id, user_id)` (added by the
+///   `session_tenant_context` raw SQL supplement) enforces that
+///   the referenced membership belongs to this session's user. A
+///   cross-user selection is rejected at the database level.
+/// - Both foreign keys use ON DELETE RESTRICT: deleting a membership
+///   that is referenced by an active session is rejected.
+/// - No active Organisation or Facility context columns exist on
+///   AuthSession. The fifth batch introduces active Tenant context
+///   only.
+/// - No raw Tenant slug, display name, or any denormalised Tenant
+///   field is persisted on AuthSession. The session references the
+///   Tenant transitively through the selected TenantMembership.
+/// - No role or permission context columns exist on AuthSession.
+///
+/// `ON DELETE RESTRICT` on the user foreign key means a User with
+/// sessions cannot be deleted until the sessions are revoked or
+/// deleted first.
+model AuthSession {
+  id                       String   @id @default(uuid()) @db.Uuid
+  userId                   String   @map("user_id") @db.Uuid
+  tokenHash                String   @unique @map("token_hash") @db.Char(64)
+  activeTenantMembershipId String?  @map("active_tenant_membership_id") @db.Uuid
+  expiresAt                DateTime @map("expires_at") @db.Timestamptz
+  lastSeenAt               DateTime @map("last_seen_at") @db.Timestamptz
+  rotatedAt                DateTime? @map("rotated_at") @db.Timestamptz
+  revokedAt                DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([userId], map: "auth_sessions_user_id_idx")
+  @@index([expiresAt], map: "auth_sessions_expires_at_idx")
+  @@index([activeTenantMembershipId], map: "auth_sessions_active_tenant_membership_id_idx")
+  @@map("auth_sessions")
+}
