@@ -260,7 +260,7 @@ Arabic labels are often longer than their English equivalents. The design system
 
 ### 3.7 Bilingual role and status names
 
-Role names and status names are bilingual and aligned with the canonical role catalogue (R01–R14) and the status catalogues (subscription status, encounter status, appointment status, etc.). The Arabic and English forms are:
+Role names and status names are bilingual and aligned with the canonical role catalogue (R01–R14) and the status catalogues (subscription status, encounter status, appointment status, etc.). The Arabic and English forms below are a partial selection of the roles most likely to appear in the Enterprise Application Shell; the full catalogue is authoritative in `02_PRODUCT/USER_ROLES.md`. **R13 (System Administrator) is the canonical human role for interactive platform administration.** **R14 (Integration Account) is a non-human system principal (`02_PRODUCT/USER_ROLES.md` §6.2 and §8.1) and does not appear in interactive UI surfaces; it is not a target user for any screen in this brief.**
 
 | Code | Arabic | English |
 |---|---|---|
@@ -268,7 +268,8 @@ Role names and status names are bilingual and aligned with the canonical role ca
 | R02 | ممرض | Nurse |
 | R06 | موظف الاستقبال | Receptionist |
 | R09 | مدير المنشأة | Administrator |
-| R14 | مدير النظام | System Administrator |
+| R13 | مدير النظام | System Administrator (platform-administration human role) |
+| R14 | حساب التكامل | Integration Account (non-human; no interactive UI) |
 | subscription.active | نشط | Active |
 | subscription.grace | فترة السماح | Grace Period |
 | subscription.suspended | متوقف | Suspended |

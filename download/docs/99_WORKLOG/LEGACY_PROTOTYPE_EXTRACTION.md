@@ -43,7 +43,7 @@ The prototypes also surface specialty-specific product ideas that the canonical 
 
 ### 1.3 Technical limitations
 
-The prototypes are technically unsafe for production and cannot be ported. They are entirely client-side: every state mutation (clinic create, plan change, doctor add, patient status change, salary payment, ticket resolution) writes to `localStorage` and is therefore mutable, single-browser, unauthenticated in any meaningful sense, and incapable of supporting multi-tenant isolation, audit, or regulatory compliance. Authentication is a hardcoded credential table in `login.js` with six demo accounts (`superadmin/admin123`, `manager_kzo/kzo123`, `doctor_pedia/pedia123`, `doctor_internal/internal123`, `doctor_dental/dental123`, `doctor_lab/lab123`); on a successful match the login script writes the clinic type into `localStorage` and redirects to the matching HTML file. There is no server, no session, no CSRF protection, no RBAC, no PHI redaction, no audit integrity, and no tenancy enforcement beyond a string written into browser storage.
+The prototypes are technically unsafe for production and cannot be ported. They are entirely client-side: every state mutation (clinic create, plan change, doctor add, patient status change, salary payment, ticket resolution) writes to `localStorage` and is therefore mutable, single-browser, unauthenticated in any meaningful sense, and incapable of supporting multi-tenant isolation, audit, or regulatory compliance. Authentication is a hardcoded credential table in `login.js` with six demo accounts of the form `<username>/<password>` (usernames and passwords are not reproduced in this document; the SHA-256 source manifest in §2.11 identifies the exact source file for reviewers who need to inspect them); on a successful match the login script writes the clinic type into `localStorage` and redirects to the matching HTML file. There is no server, no session, no CSRF protection, no RBAC, no PHI redaction, no audit integrity, and no tenancy enforcement beyond a string written into browser storage.
 
 The render pipeline is unsafe. `app.js` and `clinic-laser.js` build table rows and modal bodies by concatenating untrusted strings into `innerHTML`. Inline `onclick` handlers invoke global functions by name. External dependencies are loaded from public CDNs at runtime (`cdn.tailwindcss.com`, `fonts.googleapis.com`, `fonts.gstatic.com`, `material-symbols-outlined`), which is incompatible with the offline-first, locally-verifiable deployment posture ratified in ADR-003 and with the privacy posture expected of a healthcare platform. The Super Admin "audit log" is a plain JavaScript array pushed into `localStorage` and rendered into a side panel; it is mutable, has no integrity chain, no per-tenant scoping, and no separation from the transactional store, and therefore must never be treated as the platform audit system. The prototypes also leak personally identifiable information into URLs (WhatsApp `wa.me` deep links embed the clinic manager's name and phone number, and the WhatsApp message body discloses the subscription-renewal context).
 
@@ -227,6 +227,35 @@ This section reports every prototype file by purpose, screens, functions, data e
 
 ---
 
+### 2.11 Legacy Source Manifest
+
+This subsection records the exact byte-level identity of every legacy prototype file inspected during this extraction. It exists so that any future reviewer can determine with cryptographic precision which version of each prototype file was used as input to this document.
+
+**Provenance and tracking posture.** The prototypes are user-supplied artefacts authored before the canonical architecture was ratified. They are **not** part of the production source tree. They live under `/home/z/my-project/upload/` and that directory is intended to remain **untracked** by git. They contain insecure demonstration credentials (see §1.3 and §8 row 1) and **must not be committed to the canonical repository without prior sanitisation**; committing them as-is would leak demonstration credentials into git history. The canonical documentation commit `0f355970255a27476fc87f95ffb533121b58aefe` therefore does **not** include any prototype file. If a later commit accidentally tracked `upload/`, that tracking must be undone (the files remain on disk as untracked review material).
+
+**Canonicality of the documents.** The three generated documents (`LEGACY_PROTOTYPE_EXTRACTION.md`, `ENTERPRISE_DESIGN_BRIEF.md`, `GOOGLE_STITCH_MASTER_BRIEF.md`) and this worklog entry are the canonical extraction artefacts. The prototype files are evidence of user intent only; where the documents and the prototype files disagree, the documents are authoritative because they have been reconciled against the ratified canonical spine (`PRODUCT_BIBLE.md`, `SYSTEM_ARCHITECTURE.md`, `USER_ROLES.md`, `MODULES.md`, `CLINIC_TYPES.md`, the ADRs, and the security documents).
+
+**SHA-256 coverage.** Every prototype file is recorded below with its SHA-256 digest. A reviewer who needs to verify that this extraction was performed against a specific version of a prototype file can recompute the SHA-256 of the file under review and compare it to the digest recorded here. Any mismatch indicates that a different version of the prototype was used and the extraction may need to be re-run.
+
+**Redaction.** Per the security posture of the canonical project, hardcoded credentials are not reproduced in this document. The usernames are listed in §2.4 only as account identifiers (not passwords). The SHA-256 digest of `login.js` allows a reviewer to identify the exact source file that contains the credential table; the reviewer can then inspect that file directly under controlled conditions if needed.
+
+| # | Original file name | Source path | Byte size | Line count | SHA-256 digest | Inspection status | Modified during extraction | Committed at `0f355970` |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `index.html` | `/home/z/my-project/upload/index.html` | 22470 | 280 | `ac337d780852f9998c7a2772e8272b3341c2f045bd59acb107342fd368530118` | Inspected in full (read-only) | No | No (untracked) |
+| 2 | `app.js` | `/home/z/my-project/upload/app.js` | 23363 | 464 | `d11a987a4a545989daaf9cd01f71714b3184cf37ae8c5c6f1387cd6cbe414715` | Inspected in full (read-only) | No | No (untracked) |
+| 3 | `login.html` | `/home/z/my-project/upload/login.html` | 3906 | 42 | `7f575e56ffdd7bcefdd7a019ba8a753fcdb4bb2cee90355c67ab891c188eb311` | Inspected in full (read-only) | No | No (untracked) |
+| 4 | `login.js` | `/home/z/my-project/upload/login.js` | 1400 | 30 | `050417a0abea5dab04cda670a628a93644e666ea40c3f6257030ae464f623f76` | Inspected in full (read-only); contains hardcoded credential table (redacted from this document) | No | No (untracked) |
+| 5 | `clinic-admin-laser.html` | `/home/z/my-project/upload/clinic-admin-laser.html` | 29718 | 200 | `f8306952c34ec5907bc43000d007bd759a85a489136d4aa307f1331b824af23c` | Inspected in full (read-only) | No | No (untracked) |
+| 6 | `clinic-laser.js` | `/home/z/my-project/upload/clinic-laser.js` | 71817 | 888 | `433c8d41c939107ee6e65642bb29d0f5d9e9cfd26b4ab7ee85b28e0ae32df29e` | Inspected in full (read-only) | No | No (untracked) |
+| 7 | `clinic-dental.html` | `/home/z/my-project/upload/clinic-dental.html` | 9631 | 101 | `2b7dcb658dae945233562c4ac6031a431ab768c9c2a785439f92fc69f7705701` | Inspected in full (read-only) | No | No (untracked) |
+| 8 | `clinic-pediatrics.html` | `/home/z/my-project/upload/clinic-pediatrics.html` | 8713 | 99 | `ce2a16795b0ed587ba0f8731648df256791c8b933907c1fdd7e95c4b0506f1a2` | Inspected in full (read-only) | No | No (untracked) |
+| 9 | `clinic-internal.html` | `/home/z/my-project/upload/clinic-internal.html` | 8863 | 99 | `f1c25798627bfa24f1ea49ee83d90bd8958be5d8b7e25b14c81ac45c8297cfb7` | Inspected in full (read-only) | No | No (untracked) |
+| 10 | `clinic-lab.html` | `/home/z/my-project/upload/clinic-lab.html` | 8970 | 108 | `9f18b69dd8424ae2efa3e44eb177e364720a5992e08fb952588774b2f4c50e60` | Inspected in full (read-only) | No | No (untracked) |
+
+**Totals.** 10 files, 183,851 bytes, 2,311 lines combined. All 10 files were inspected in full. Zero files were modified. Zero files were committed at `0f355970`. The SHA-256 values above are the only authoritative identifier of the source files used; the file contents themselves are not part of the canonical repository.
+
+---
+
 ## 3. Functional Extraction
 
 This section extracts every meaningful function from the legacy prototypes and groups it under its canonical module. The canonical module taxonomy used here is the 19-module catalogue ratified in `02_PRODUCT/MODULES.md` (M01–M19), extended with three platform-surface categories (Platform Administration, Tenant and Organisation Management, Subscription Management, Support and Ticketing) that sit above the M-catalogue because they are product-surface concerns rather than bounded contexts. Each function row reports the legacy source file, the legacy screen or function name, the canonical module, the target user roles (mapped to R01–R14 from `02_PRODUCT/USER_ROLES.md`), the business value, the implementation status in the current project, the architectural prerequisites, the security concerns, and the recommended future batch. Implementation status reflects what was verified in code at HEAD `b16869d` and is conservative: a function is marked "Not implemented" unless a corresponding API module, frontend route, or Prisma model was actually found.
@@ -235,38 +264,38 @@ This section extracts every meaningful function from the legacy prototypes and g
 
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
-| `index.html` + `app.js` | Top KPI strip (revenue, forecast, bookings, new patients, staff) | Platform Administration (surface over M18 Reporting) | R14 System Administrator, R12 Executive | Single-glance platform health for Super Admin | Not implemented (no `/admin` route, no platform-KPI API) | Platform aggregation queries over tenants; tenant-aware authorization; PHI-redacted aggregation | Aggregation must not leak per-tenant PHI; cross-tenant read requires R13/R14 | Future batch (post-shell) |
-| `index.html` + `app.js` | Tenant directory with category tabs and search | Platform Administration (surface over M14 Identity & Access + M15 Configuration) | R14 | Find, filter, and act on any tenant from one screen | Not implemented | Tenant model in transactional DB; tenant-category enumeration; search index | Must enforce R14 scope; must not expose other Super Admins' actions | Enterprise Shell batch (immediate next) |
-| `index.html` + `app.js` | Top-clinics leaderboard by bookings | Platform Administration | R14, R12 | Identify high-volume and low-volume tenants for account management | Not implemented | Booking aggregation per tenant | Same as above | Future batch |
-| `index.html` + `app.js` | Audit log side panel | M16 Audit (platform chain) | R14, R10 Compliance Officer | Platform activity visibility for Super Admin | Audit primitive implemented (Batch 9); no UI surface yet | Public audit query surface is deferred per ADR-014 | Mutable audit array in prototype must be rejected; canonical audit is append-only with HMAC chain | Future batch (audit query UI) |
+| `index.html` + `app.js` | Top KPI strip (revenue, forecast, bookings, new patients, staff) | Platform Administration (surface over M18 Reporting) | R13 System Administrator, R12 Executive | Single-glance platform health for Super Admin | Not implemented (no `/admin` route, no platform-KPI API) | Platform aggregation queries over tenants; tenant-aware authorization; PHI-redacted aggregation | Aggregation must not leak per-tenant PHI; cross-tenant read requires R13 (human platform administrator); R14 (Integration Account) is non-human and has no interactive read permission | Future batch (post-shell) |
+| `index.html` + `app.js` | Tenant directory with category tabs and search | Platform Administration (surface over M14 Identity & Access + M15 Configuration) | R13 | Find, filter, and act on any tenant from one screen | Not implemented | Tenant model in transactional DB; tenant-category enumeration; search index | Must enforce R13 scope; must not expose other Super Admins' actions; R14 is non-human and has no interactive UI | Enterprise Shell batch (immediate next) |
+| `index.html` + `app.js` | Top-clinics leaderboard by bookings | Platform Administration | R13, R12 | Identify high-volume and low-volume tenants for account management | Not implemented | Booking aggregation per tenant | Same as above | Future batch |
+| `index.html` + `app.js` | Audit log side panel | M16 Audit (platform chain) | R13, R10 Compliance Officer | Platform activity visibility for Super Admin | Audit primitive implemented (Batch 9); no UI surface yet | Public audit query surface is deferred per ADR-014 | Mutable audit array in prototype must be rejected; canonical audit is append-only with HMAC chain | Future batch (audit query UI) |
 
 ### 3.2 Tenant and Organisation Management
 
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
-| `index.html` + `app.js` | `saveNewClinic` — add tenant | M14 Identity & Access (tenant lifecycle) | R14 | Create new tenant with name, category, system type, manager, phone, plan, status | Not implemented (no tenant CRUD API) | Tenant model; Organisation and Facility hierarchy per `01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` | Must enforce Super Admin scope; must audit tenant.create; manager phone is PII | Post-shell batch |
-| `index.html` + `app.js` | `savePlanChanges` — change plan and system type | M15 Configuration + Subscription Management | R14 | Modify tenant subscription plan and clinic-type configuration | Not implemented | Subscription model; clinic-type overlay configuration | Must audit subscription.update; clinic-type change must not corrupt existing tenant data | Post-shell batch |
-| `index.html` + `app.js` | `extendClinicTime` — once-per-year 7-day extension | Subscription Management | R14 | Grace extension for tenants in payment difficulty | Not implemented | Subscription extension policy with annual guard | Must audit subscription.extend; must enforce once-per-year invariant server-side | Post-shell batch |
-| `index.html` + `app.js` | `deleteClinic` — delete tenant | M14 Identity & Access | R14 | Remove tenant from platform | Not implemented (and should likely be a soft-delete in canonical) | Soft-delete pattern; cascade rules; data retention policy per `09_SECURITY/COMPLIANCE/DATA_RETENTION.md` | Must audit tenant.delete; must not actually destroy PHI; soft-delete only | Future batch |
-| `app.js` | `loginToClinic` — impersonate clinic workspace | M14 Identity & Access (impersonation) | R14 | Super Admin can open any tenant's workspace for support | Not implemented | Impersonation session with separate audit trail; original-actor preservation | High-risk action; must audit impersonation.start and impersonation.end; must require MFA | Future batch |
+| `index.html` + `app.js` | `saveNewClinic` — add tenant | M14 Identity & Access (tenant lifecycle) | R13 | Create new tenant with name, category, system type, manager, phone, plan, status | Not implemented (no tenant CRUD API) | Tenant model; Organisation and Facility hierarchy per `01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` | Must enforce Super Admin (R13) scope; must audit tenant.create; manager phone is PII | Post-shell batch |
+| `index.html` + `app.js` | `savePlanChanges` — change plan and system type | M15 Configuration + Subscription Management | R13 | Modify tenant subscription plan and clinic-type configuration | Not implemented | Subscription model; clinic-type overlay configuration | Must audit subscription.update; clinic-type change must not corrupt existing tenant data | Post-shell batch |
+| `index.html` + `app.js` | `extendClinicTime` — once-per-year 7-day extension | Subscription Management | R13 | Grace extension for tenants in payment difficulty | Not implemented | Subscription extension policy with annual guard | Must audit subscription.extend; must enforce once-per-year invariant server-side | Post-shell batch |
+| `index.html` + `app.js` | `deleteClinic` — delete tenant | M14 Identity & Access | R13 | Remove tenant from platform | Not implemented (and should likely be a soft-delete in canonical) | Soft-delete pattern; cascade rules; data retention policy per `09_SECURITY/COMPLIANCE/DATA_RETENTION.md` | Must audit tenant.delete; must not actually destroy PHI; soft-delete only | Future batch |
+| `app.js` | `loginToClinic` — impersonate clinic workspace | M14 Identity & Access (impersonation) | R13 | Super Admin can open any tenant's workspace for support | Not implemented | Impersonation session with separate audit trail; original-actor preservation | High-risk action; must audit impersonation.start and impersonation.end; must require MFA (future, not yet implemented — see §7.1 and §8 row 23) | Future batch |
 
 ### 3.3 Subscription Management
 
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
-| `index.html` + `app.js` | Plan enum (monthly, quarterly, semi-annual, annual) | Subscription Management | R14, R12 | Standardised subscription tiers | Not implemented | Subscription plan catalogue; price-per-plan configuration | Pricing may be tenant-specific; must not hardcode prices | Post-shell batch |
-| `index.html` + `app.js` | Plan-to-days mapping (30/90/180/365) | Subscription Management | R14 | Compute expiry from plan | Not implemented | Same as above | None beyond audit | Post-shell batch |
-| `index.html` + `app.js` | Plan-to-revenue mapping (120k/350k/650k/1.2M IQD) | Subscription Management + M10 Accounting | R14, R12, R08 | Revenue forecast per tenant | Not implemented | Pricing catalogue; multi-currency support | Price list is commercially sensitive; restrict visibility | Future batch |
-| `index.html` + `app.js` | Proof-of-payment screenshot upload | Subscription Management | R14 | Out-of-band payment evidence (WhatsApp screenshot) | Not implemented | Secure file upload; virus scan; access-controlled storage | File upload is high-risk; must scan and quarantine | Future batch |
-| `app.js` | Status enum (نشط/فترة السماح/متوقف → active/grace/suspended) | Subscription Management | R14 | Tenant subscription state | Not implemented | Subscription status state machine (active → grace → suspended → terminated) | State transitions must be audited and policy-enforced | Post-shell batch |
+| `index.html` + `app.js` | Plan enum (monthly, quarterly, semi-annual, annual) | Subscription Management | R13, R12 | Standardised subscription tiers | Not implemented | Subscription plan catalogue; price-per-plan configuration | Pricing may be tenant-specific; must not hardcode prices | Post-shell batch |
+| `index.html` + `app.js` | Plan-to-days mapping (30/90/180/365) | Subscription Management | R13 | Compute expiry from plan | Not implemented | Same as above | None beyond audit | Post-shell batch |
+| `index.html` + `app.js` | Plan-to-revenue mapping (120k/350k/650k/1.2M IQD) | Subscription Management + M10 Accounting | R13, R12, R08 | Revenue forecast per tenant | Not implemented | Pricing catalogue; multi-currency support | Price list is commercially sensitive; restrict visibility | Future batch |
+| `index.html` + `app.js` | Proof-of-payment screenshot upload | Subscription Management | R13 | Out-of-band payment evidence (WhatsApp screenshot) | Not implemented | Secure file upload; virus scan; access-controlled storage | File upload is high-risk; must scan and quarantine | Future batch |
+| `app.js` | Status enum (نشط/فترة السماح/متوقف → active/grace/suspended) | Subscription Management | R13 | Tenant subscription state | Not implemented | Subscription status state machine (active → grace → suspended → terminated) | State transitions must be audited and policy-enforced | Post-shell batch |
 
 ### 3.4 Support and Ticketing
 
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
-| `index.html` + `app.js` | Support ticket queue | Support and Ticketing (new surface, not in M-catalogue) | R14, R13 | Triage tenant support requests | Not implemented | Ticket model; priority enum; tenant FK; assignee model | Tickets may contain PHI; must enforce tenant scoping on read | Future batch |
-| `index.html` + `app.js` | `resolveTicket` — mark resolved | Support and Ticketing | R14 | Close handled tickets | Not implemented | Ticket status state machine | Must audit ticket.resolve | Future batch |
-| `index.html` + `app.js` | WhatsApp deep-link reminder to clinic manager | Support and Ticketing + M08 Notifications | R14 | Out-of-band contact channel | Not implemented (and the prototype pattern is rejected — see Security) | Notification channel abstraction; template-based messaging | PII in URL is rejected; canonical must use server-side message dispatch with template variables | Future batch |
+| `index.html` + `app.js` | Support ticket queue | Support and Ticketing (new surface, not in M-catalogue) | R13 | Triage tenant support requests | Not implemented | Ticket model; priority enum; tenant FK; assignee model | Tickets may contain PHI; must enforce tenant scoping on read | Future batch |
+| `index.html` + `app.js` | `resolveTicket` — mark resolved | Support and Ticketing | R13 | Close handled tickets | Not implemented | Ticket status state machine | Must audit ticket.resolve | Future batch |
+| `index.html` + `app.js` | WhatsApp deep-link reminder to clinic manager | Support and Ticketing + M08 Notifications | R13 | Out-of-band contact channel | Not implemented (and the prototype pattern is rejected — see Security) | Notification channel abstraction; template-based messaging | PII in URL is rejected; canonical must use server-side message dispatch with template variables | Future batch |
 
 ### 3.5 Clinic Administration
 
@@ -348,7 +377,7 @@ This section extracts every meaningful function from the legacy prototypes and g
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
 | `clinic-laser.js` | `renderNotifications`, `toggleNotifications`, `markNotificationRead`, `clearNotifications` | M08 Notifications | All roles | In-app notification feed | Not implemented | Notification model; user FK; read/unread state | Must enforce user scope | Enterprise Shell batch |
-| `app.js` | WhatsApp reminder concept (pattern rejected) | M08 Notifications (channel abstraction) | R14 | Out-of-band contact | Not implemented | Channel abstraction; template-based messaging; consent | PII in URL is rejected; canonical must dispatch server-side | Future batch |
+| `app.js` | WhatsApp reminder concept (pattern rejected) | M08 Notifications (channel abstraction) | R13 | Out-of-band contact | Not implemented | Channel abstraction; template-based messaging; consent | PII in URL is rejected; canonical must dispatch server-side | Future batch |
 
 ### 3.14 Reports
 
@@ -368,7 +397,7 @@ This section extracts every meaningful function from the legacy prototypes and g
 
 | Legacy source | Legacy function | Canonical module | Target roles | Business value | Implementation status | Architectural prerequisites | Security concerns | Recommended batch |
 |---|---|---|---|---|---|---|---|---|
-| `app.js` | `logAction` — append to mutable array | M16 Audit | R14, R10 | Activity log | Audit primitive implemented (Batch 9); UI deferred per ADR-014 | Public audit query surface is deferred; verifier is implemented | Mutable array pattern is rejected; canonical is HMAC-chained, append-only, immutable at DB level | Future batch (audit query UI) |
+| `app.js` | `logAction` — append to mutable array | M16 Audit | R13, R10 | Activity log | Audit primitive implemented (Batch 9); UI deferred per ADR-014 | Public audit query surface is deferred; verifier is implemented | Mutable array pattern is rejected; canonical is HMAC-chained, append-only, immutable at DB level | Future batch (audit query UI) |
 
 ### 3.17 Clinic-Type Extensions (Specialty)
 
@@ -394,11 +423,11 @@ This section is the complete screen-level inventory extracted from the prototype
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | Login | `/login` (existing) | Unauthenticated | M14 Identity & Access | Authenticate user | Login card, brand mark, form, error state, throttle state | Submit, recover password | None | Platform scope | User directory | `authentication.login.succeeded`, `authentication.login.failed`, `authentication.login.throttled` | Arabic-first with English toggle; full RTL/LTR mirroring | D=T, M | Reuse as design — already implemented; redesign demo-account section |
 | 2 | Authenticated dashboard shell | `/app` (existing `/dashboard`) | All authenticated | Enterprise shell | Navigation and global context | Sidebar, top bar, facility switcher, command search, notifications, user menu | Switch view, switch facility, search, open notifications | None beyond authenticated | Tenant + Facility | Tenant membership, facility assignment | `tenant_context.viewed`, `tenant_context.selected`, `tenant_context.cleared` | Arabic-first; full RTL | D=T, M | Reuse as design — immediate next batch |
-| 3 | Platform Super Admin Overview | `/admin` | R14 | Platform Administration | Single-glance platform health | KPI strip (5 cards), alert feed, quick actions | View KPIs, drill into alert | `platform.admin.read` | Platform scope | All tenants (aggregated, PHI-redacted) | `platform.admin.viewed` | Arabic-first; full RTL | D=T, M | Reuse as design |
-| 4 | Clinics and Organisations Directory | `/admin/tenants` | R14 | Platform Administration | Tenant directory | Filterable table, category tabs, search, status badges, row actions | Filter, search, add, open detail, impersonate | `tenant.read`, `tenant.create` | Platform scope | Tenant list | `tenant.read`, `tenant.create`, `impersonation.start` | Arabic-first; full RTL | D=T, M | Reuse as design |
-| 5 | Tenant Detail and Subscription | `/admin/tenants/[tenantId]` | R14 | Platform Administration + Subscription | Manage one tenant | Tenant profile, subscription panel, facility list, audit timeline | Edit plan, extend time, suspend, reactivate, terminate | `tenant.read`, `subscription.update`, `tenant.suspend` | Tenant scope | Tenant, subscription, facilities | `subscription.update`, `subscription.extend`, `tenant.suspend` | Arabic-first; full RTL | D=T, M | Reuse as design |
-| 6 | Support Ticket Queue | `/admin/support` | R14, R13 | Support and Ticketing | Triage tenant support requests | Ticket table, priority filter, assignee selector | Assign, resolve, escalate | `ticket.read`, `ticket.update` | Platform scope | Tickets, tenants | `ticket.assign`, `ticket.resolve` | Arabic-first; full RTL | D=T, M | Reuse as design |
-| 7 | Platform Audit Feed (deferred) | `/admin/audit` | R14, R10 | M16 Audit | Platform activity (deferred per ADR-014) | Audit timeline, filter, export (deferred) | Filter, view detail | `audit.read` (deferred) | Platform scope | Audit store | `audit.read` (deferred) | Arabic-first; full RTL | D=T, M | Defer |
+| 3 | Platform Super Admin Overview | `/admin` | R13 | Platform Administration | Single-glance platform health | KPI strip (5 cards), alert feed, quick actions | View KPIs, drill into alert | `platform.admin.read` | Platform scope | All tenants (aggregated, PHI-redacted) | `platform.admin.viewed` | Arabic-first; full RTL | D=T, M | Reuse as design |
+| 4 | Clinics and Organisations Directory | `/admin/tenants` | R13 | Platform Administration | Tenant directory | Filterable table, category tabs, search, status badges, row actions | Filter, search, add, open detail, impersonate | `tenant.read`, `tenant.create` | Platform scope | Tenant list | `tenant.read`, `tenant.create`, `impersonation.start` | Arabic-first; full RTL | D=T, M | Reuse as design |
+| 5 | Tenant Detail and Subscription | `/admin/tenants/[tenantId]` | R13 | Platform Administration + Subscription | Manage one tenant | Tenant profile, subscription panel, facility list, audit timeline | Edit plan, extend time, suspend, reactivate, terminate | `tenant.read`, `subscription.update`, `tenant.suspend` | Tenant scope | Tenant, subscription, facilities | `subscription.update`, `subscription.extend`, `tenant.suspend` | Arabic-first; full RTL | D=T, M | Reuse as design |
+| 6 | Support Ticket Queue | `/admin/support` | R13 | Support and Ticketing | Triage tenant support requests | Ticket table, priority filter, assignee selector | Assign, resolve, escalate | `ticket.read`, `ticket.update` | Platform scope | Tickets, tenants | `ticket.assign`, `ticket.resolve` | Arabic-first; full RTL | D=T, M | Reuse as design |
+| 7 | Platform Audit Feed (deferred) | `/admin/audit` | R13, R10 | M16 Audit | Platform activity (deferred per ADR-014) | Audit timeline, filter, export (deferred) | Filter, view detail | `audit.read` (deferred) | Platform scope | Audit store | `audit.read` (deferred) | Arabic-first; full RTL | D=T, M | Defer |
 | 8 | Clinic Admin Overview | `/app/:facility` | R09 | Clinic Administration | Single-glance clinic health | KPI strip (4 cards), today's appointment board, alerts | View KPIs, drill into board | `facility.read`, `scheduling.read` | Facility scope | Facility, appointments, encounters | `facility.viewed`, `scheduling.read` | Arabic-first; full RTL | D=T, M | Reuse as design |
 | 9 | Doctors Directory | `/app/:facility/doctors` | R09, R11 | M12 HR + M13 | Doctor directory | Doctor table, specialty filter, add button | Add, edit, pay, delete | `practitioner.read`, `practitioner.create`, `practitioner.update`, `payroll.execute` | Facility scope | Practitioners, specialties, payroll | `practitioner.read`, `practitioner.create`, `practitioner.update`, `payroll.execute` | Arabic-first; full RTL | D=T, M | Reuse as design |
 | 10 | Employees Directory | `/app/:facility/employees` | R09, R11 | M12 HR | Staff directory | Employee table, department filter, add button | Add, edit, pay salary, delete | `employee.read`, `employee.create`, `employee.update`, `payroll.execute` | Facility scope | Employees, departments, payroll | `employee.read`, `employee.create`, `employee.update`, `payroll.execute` | Arabic-first; full RTL | D=T, M | Reuse as design |
@@ -418,7 +447,7 @@ This section is the complete screen-level inventory extracted from the prototype
 | 24 | Lab Sample Tracking | `/app/:facility/lab/samples` | R04, R09 | M04 + lab overlay | Sample lifecycle | Sample table, barcode search, status pipeline | Draw, process, verify, deliver | `order.read`, `order.update`, `result.create` | Facility scope | Samples, orders, results | `order.update`, `result.create` | Arabic-first; full RTL | D=T, M | Reuse as design (specialty extension) |
 | 25 | Lab Result Entry | `/app/:facility/lab/samples/[sampleId]` | R04, R01 | M04 + M03 + lab overlay | Result documentation | Result entry form, reference range, verification, critical-result alert | Enter, verify, flag critical | `result.create`, `result.verify` | Facility scope | Sample, result, reference range | `result.create`, `result.verify` | Arabic-first; full RTL | D=T, M read-only | Reuse as design (specialty extension) |
 
-The inventory contains **25 screens**: 7 platform-surface screens (including the deferred audit feed), 11 clinic-surface shell screens, and 7 specialty-extension screens. Of these, **8 are the recommended first-set Stitch reference screens** (see Section 10 of `GOOGLE_STITCH_MASTER_BRIEF.md`): Login, Platform Super Admin Overview, Clinics and Organisations Directory, Tenant Detail and Subscription, Clinic Admin Overview, Patient Directory, Patient Profile, and Daily Appointment Operations Board.
+The inventory contains **25 screens**: 7 platform-surface screens (rows 1–7, including the deferred audit feed), 12 clinic-surface shell screens (rows 8–19), and 6 specialty-extension screens (rows 20–25). Arabic and English variants of the same screen are counted once; the bilingual requirement is recorded per row, not as a separate screen. Of these, **8 are the recommended first-set Stitch reference screens** (see Section 3 of `GOOGLE_STITCH_MASTER_BRIEF.md`): Login, Platform Super Admin Overview, Clinics and Organisations Directory, Tenant Detail and Subscription, Clinic Admin Overview, Patient Directory, Patient Profile, and Daily Appointment Operations Board.
 
 ---
 
@@ -434,11 +463,11 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** The browser is trusted to authenticate. Credentials are public. The redirect destination is decided client-side. The "clinicType" written to localStorage is treated as authoritative tenancy context.
 
-**Canonical roles and permissions.** The Super Admin is R14 (System Administrator) per `02_PRODUCT/USER_ROLES.md`. Authentication is governed by ADR-013 (Authentication and Session Strategy). Login does not require a specific permission; it establishes the identity that subsequent permission checks evaluate.
+**Canonical roles and permissions.** The Super Admin is R13 (System Administrator) per `02_PRODUCT/USER_ROLES.md` §6.1. R14 (Integration Account) is a non-human system principal (`02_PRODUCT/USER_ROLES.md` §6.2 and §8.1) and is not used for interactive browser administration. Authentication is governed by ADR-013 (Authentication and Session Strategy). Login does not require a specific permission; it establishes the identity that subsequent permission checks evaluate.
 
 **Required audit events.** `authentication.login.succeeded`, `authentication.login.failed`, `authentication.login.throttled` (when safely interceptable), `authentication.session.created`, `authentication.session.rotated`. Per ADR-014, failed-login identifiers are HMAC-hashed with the identifier key; the raw attempted email/username is never persisted; the response body must not reveal whether the account exists.
 
-**Recommended enterprise workflow.** (1) User submits username/email and password over TLS to `POST /auth/login`. (2) The API verifies the credential against the stored Argon2 hash (already implemented in `password.service.ts`). (3) The audited throttler (already implemented in `audited-throttler.guard.ts`) applies rate-limiting and emits `authentication.login.throttled` when safely interceptable. (4) On success, a session token is issued (already implemented in `session-token.service.ts`), an httpOnly Secure SameSite=Lax cookie is set, CSRF token is issued, and `authentication.login.succeeded` + `authentication.session.created` are emitted atomically through the audit outbox. (5) On failure, `authentication.login.failed` is emitted with the HMAC-hashed identifier; the response body is identical whether the account exists or not. (6) The redirect destination is decided server-side based on the user's roles and tenant memberships; the client never decides routing based on `localStorage`. (7) MFA challenge is required for R13 and R14 before the session is promoted to authenticated state.
+**Recommended enterprise workflow.** (1) User submits username/email and password over TLS to `POST /auth/login`. (2) The API verifies the credential against the stored Argon2 hash (already implemented in `password.service.ts`). (3) The audited throttler (already implemented in `audited-throttler.guard.ts`) applies rate-limiting and emits `authentication.login.throttled` when safely interceptable. (4) On success, a session token is issued (already implemented in `session-token.service.ts`), an httpOnly Secure SameSite=Lax cookie is set, CSRF token is issued, and `authentication.login.succeeded` + `authentication.session.created` are emitted atomically through the audit outbox. (5) On failure, `authentication.login.failed` is emitted with the HMAC-hashed identifier; the response body is identical whether the account exists or not. (6) The redirect destination is decided server-side based on the user's roles and tenant memberships; the client never decides routing based on `localStorage`. (7) When MFA is implemented per ADR-013 (currently deferred, not yet implemented — see §7.1 and §8 row 23), an MFA challenge will be required for R13 (and other privileged human roles) before the session is promoted to authenticated state. R14 is a non-human principal and does not authenticate interactively, so MFA does not apply to it. Today, no MFA challenge is performed; privileged accounts are protected only by Argon2id password hashing, login throttling, generic failure responses, and audit emission.
 
 ### 5.2 Create a clinic or Tenant
 
@@ -448,11 +477,11 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** Tenant identity is a localStorage string. Manager phone is captured as plaintext and later exposed in WhatsApp deep links. The system type is mutable from the moment of creation, inviting data corruption.
 
-**Canonical roles and permissions.** R14 only. `tenant.create` permission required. The new tenant is created with a default R09 (Administrator) role slot for the named manager, who must separately accept an invitation to claim it.
+**Canonical roles and permissions.** R13 only. `tenant.create` permission required. The new tenant is created with a default R09 (Administrator) role slot for the named manager, who must separately accept an invitation to claim it.
 
 **Required audit events.** `tenant.create`, `subscription.create`, `organisation.create` (if multi-org), `facility.create` (at least one default facility), `role.assign` (R09 to the manager invitation), `invitation.create`.
 
-**Recommended enterprise workflow.** (1) R14 navigates to `/admin/tenants/new`. (2) R14 enters tenant name, legal entity type, primary contact (name + email, not phone), desired clinic-type overlay, subscription plan, and billing address. (3) The API validates uniqueness, validates the clinic-type overlay against the catalogue, computes the subscription term from the plan-to-days table, and creates: a `Tenant`, an `Organisation`, a default `Facility`, a `Subscription` with `active` or `grace` status, an `Invitation` to the primary contact with a one-time claim token, and a `RoleAssignment` pending the invitation claim. (4) All five writes commit atomically with their audit outbox records. (5) The invitation email is dispatched through the notification channel. (6) The R14 lands on the new tenant's detail page. (7) The manager later clicks the invitation link, sets a password, and the `role.assign` is activated.
+**Recommended enterprise workflow.** (1) R13 navigates to `/admin/tenants/new`. (2) R13 enters tenant name, legal entity type, primary contact (name + email, not phone), desired clinic-type overlay, subscription plan, and billing address. (3) The API validates uniqueness, validates the clinic-type overlay against the catalogue, computes the subscription term from the plan-to-days table, and creates: a `Tenant`, an `Organisation`, a default `Facility`, a `Subscription` with `active` or `grace` status, an `Invitation` to the primary contact with a one-time claim token, and a `RoleAssignment` pending the invitation claim. (4) All five writes commit atomically with their audit outbox records. (5) The invitation email is dispatched through the notification channel. (6) The R13 lands on the new tenant's detail page. (7) The manager later clicks the invitation link, sets a password, and the `role.assign` is activated.
 
 ### 5.3 Change clinic status
 
@@ -462,11 +491,11 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** Status is a free-text string on a localStorage object, not a state machine. Any Super Admin action is unaccountable.
 
-**Canonical roles and permissions.** R14. `tenant.suspend`, `tenant.reactivate`, `tenant.terminate` permissions required (distinct from `subscription.update`).
+**Canonical roles and permissions.** R13. `tenant.suspend`, `tenant.reactivate`, `tenant.terminate` permissions required (distinct from `subscription.update`).
 
 **Required audit events.** `tenant.suspend`, `tenant.reactivate`, `tenant.terminate`, `subscription.update` (when status change is a side effect of subscription change). Each event must capture the reason, the actor, and the previous status.
 
-**Recommended enterprise workflow.** (1) R14 opens the tenant detail page. (2) R14 selects the status action; a modal captures the reason and confirms. (3) The API validates that the transition is legal (e.g., cannot suspend an already-terminated tenant; cannot reactivate a terminated tenant without a new subscription). (4) The transition commits atomically with its audit record. (5) The tenant's active sessions are invalidated if suspended or terminated. (6) A notification is dispatched to the tenant's primary contact. (7) For terminated tenants, the data-retention clock starts per `09_SECURITY/COMPLIANCE/DATA_RETENTION.md`; no immediate deletion.
+**Recommended enterprise workflow.** (1) R13 opens the tenant detail page. (2) R13 selects the status action; a modal captures the reason and confirms. (3) The API validates that the transition is legal (e.g., cannot suspend an already-terminated tenant; cannot reactivate a terminated tenant without a new subscription). (4) The transition commits atomically with its audit record. (5) The tenant's active sessions are invalidated if suspended or terminated. (6) A notification is dispatched to the tenant's primary contact. (7) For terminated tenants, the data-retention clock starts per `09_SECURITY/COMPLIANCE/DATA_RETENTION.md`; no immediate deletion.
 
 ### 5.4 Activate, suspend, or renew subscription
 
@@ -476,7 +505,7 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** Subscription is a field on the tenant, not a separate aggregate. Plan change is free with no financial transaction. The once-per-year extension guard is enforced only client-side.
 
-**Canonical roles and permissions.** R14 for plan changes; R12 (Executive) for read; the system itself (R14 Integration Account or a scheduled job) for expiry-driven transitions.
+**Canonical roles and permissions.** R13 for plan changes; R12 (Executive) for read; the system itself (R14 Integration Account or a scheduled job) for expiry-driven transitions. R14 is correct here because expiry-driven transitions are non-interactive system actions; this is the only valid use of R14 in the platform-administration surface.
 
 **Required audit events.** `subscription.create`, `subscription.update`, `subscription.extend`, `subscription.expire` (system-driven), `subscription.suspend` (system-driven on grace-period expiry), `subscription.renew`, `billing.collect` (when payment is recorded).
 
@@ -490,11 +519,11 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** The browser's `localStorage` clinicType is the tenancy context. Impersonation is indistinguishable from a normal login.
 
-**Canonical roles and permissions.** R14 only. `impersonation.start` permission required. The impersonated session carries an `impersonator` claim that is distinct from the `actor` claim; the audit actor is the impersonator, the session actor is the impersonated user.
+**Canonical roles and permissions.** R13 only. `impersonation.start` permission required. The impersonated session carries an `impersonator` claim that is distinct from the `actor` claim; the audit actor is the impersonator, the session actor is the impersonated user.
 
 **Required audit events.** `impersonation.start`, `impersonation.end`, and every action taken during the impersonated session is attributed to the impersonator in the audit chain (with the impersonated user recorded in metadata).
 
-**Recommended enterprise workflow.** (1) R14 navigates to the tenant directory, selects a tenant, and chooses "Impersonate" from the row menu. (2) A modal captures the reason and requires MFA re-verification. (3) The API creates a new session token that carries both `impersonator` and `actor` claims, with a hard time limit (e.g., 60 minutes). (4) `impersonation.start` is emitted. (5) R14 is redirected to `/app/:facility` with the impersonated context. (6) A persistent banner indicates impersonation and offers "End impersonation". (7) Every action during the session emits audit events attributed to the impersonator with the impersonated user in metadata. (8) On end (manual or timeout), `impersonation.end` is emitted and the session is invalidated; R14 returns to `/admin`.
+**Recommended enterprise workflow.** (1) R13 navigates to the tenant directory, selects a tenant, and chooses "Impersonate" from the row menu. (2) A modal captures the reason and, when MFA is implemented (currently deferred per ADR-013, not yet implemented — see §7.1 and §8 row 23), requires MFA re-verification; until MFA is implemented, the workflow requires a second human approver (R13) and emits an `impersonation.start` audit event with heightened scrutiny. (3) The API creates a new session token that carries both `impersonator` and `actor` claims, with a hard time limit (e.g., 60 minutes). (4) `impersonation.start` is emitted. (5) R13 is redirected to `/app/:facility` with the impersonated context. (6) A persistent banner indicates impersonation and offers "End impersonation". (7) Every action during the session emits audit events attributed to the impersonator with the impersonated user in metadata. (8) On end (manual or timeout), `impersonation.end` is emitted and the session is invalidated; R13 returns to `/admin`.
 
 ### 5.6 Create support ticket
 
@@ -504,11 +533,11 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** Tickets exist by fiat. Tenant scoping is implicit.
 
-**Canonical roles and permissions.** Any authenticated role may create a ticket within their tenant. R14 and R13 may read across tenants. `ticket.create`, `ticket.read`, `ticket.update`, `ticket.assign`, `ticket.resolve` permissions.
+**Canonical roles and permissions.** Any authenticated role may create a ticket within their tenant. R13 may read across tenants. `ticket.create`, `ticket.read`, `ticket.update`, `ticket.assign`, `ticket.resolve` permissions. (R14 is a non-human principal and is not used for interactive ticket triage.)
 
 **Required audit events.** `ticket.create`, `ticket.assign`, `ticket.update`, `ticket.resolve`, `ticket.escalate`.
 
-**Recommended enterprise workflow.** (1) A tenant user navigates to `/app/:facility/support` and clicks "New ticket". (2) A modal captures category, severity, subject, description, and optional attachment. (3) The API validates, assigns a ticket ID, sets status to `open`, sets SLA based on severity, and commits atomically with the audit record. (4) A notification is dispatched to the tenant's R09 and to the platform's R14 queue. (5) R14 (or R13) opens `/admin/support`, assigns the ticket to an operator, and works it. (6) Status transitions are audited. (7) On resolution, the tenant user is notified and may reopen within a window.
+**Recommended enterprise workflow.** (1) A tenant user navigates to `/app/:facility/support` and clicks "New ticket". (2) A modal captures category, severity, subject, description, and optional attachment. (3) The API validates, assigns a ticket ID, sets status to `open`, sets SLA based on severity, and commits atomically with the audit record. (4) A notification is dispatched to the tenant's R09 and to the platform's R13 queue. (5) R13 opens `/admin/support`, assigns the ticket to an operator, and works it. (6) Status transitions are audited. (7) On resolution, the tenant user is notified and may reopen within a window.
 
 ### 5.7 Add doctor
 
@@ -686,7 +715,7 @@ This section maps each legacy workflow to its canonical roles and permissions, i
 
 **Unsafe assumptions.** None (no implementation).
 
-**Canonical roles and permissions.** System-driven (R14 Integration Account for the scheduler). `notification.dispatch` permission (system).
+**Canonical roles and permissions.** System-driven (R14 Integration Account for the scheduler). `notification.dispatch` permission (system). This is a correct use of R14: the scheduler is a non-interactive system process, not a human administrator.
 
 **Required audit events.** `notification.dispatch` (low-stock), `inventory.threshold.crossed`.
 
@@ -733,8 +762,8 @@ This section extracts every meaningful entity from the legacy JavaScript and HTM
 | Legacy fields | `id`, `name`, `category` (free text: أسنان/جلدية وليزر/أطفال/عام وباطنية), `type` (enum: GENERAL/DERMA_LASER/DENTAL/PEDIATRICS/INTERNAL/LAB), `manager` (free text), `phone` (E.164-ish), `plan` (enum: شهري/3 أشهر/نصف سنوي/سنوي), `status` (enum: نشط/فترة السماح/متوقف), `expiry` (date), `bookings` (integer), `extendedThisYear` (boolean) |
 | Likely canonical aggregate | `Tenant` aggregate (per ADR-004 Multi-Tenant Strategy); paired with `Organisation` and `Facility` aggregates per `01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md` |
 | Sensitive-data classification | Manager name and phone are PII; subscription status and expiry are commercially sensitive |
-| Tenant scope | Platform scope (R14 reads across tenants; tenant users read only their own) |
-| Ownership | Platform-owned; created by R14 |
+| Tenant scope | Platform scope (R13 reads across tenants; tenant users read only their own) |
+| Ownership | Platform-owned; created by R13 |
 | Lifecycle states | `pending → active → grace → suspended → terminated` (canonical); the legacy `نشط/فترة السماح/متوقف` maps to `active/grace/suspended` |
 | Missing fields | `legalName`, `taxId`, `billingAddress`, `contractAcceptedAt`, `contractVersion`, `primaryContactEmail`, `primaryContactName`, `createdAt`, `createdBy`, `terminatedAt`, `terminatedBy`, `terminationReason`, `dataRetentionClock` |
 | Fields that must not be copied directly | `phone` (must be captured as `primaryContactPhone` with explicit consent and never exposed in URLs); `manager` (must be a foreign key to a `User`, not free text); `extendedThisYear` (must be a server-enforced policy, not a boolean on the tenant); `bookings` (must be a computed aggregation, not a stored counter) |
@@ -747,8 +776,8 @@ This section extracts every meaningful entity from the legacy JavaScript and HTM
 | Legacy fields | Implicit in `Clinic.plan`, `Clinic.status`, `Clinic.expiry` |
 | Likely canonical aggregate | `Subscription` aggregate (separate from `Tenant`) |
 | Sensitive-data classification | Plan and expiry are commercially sensitive; payment evidence is sensitive |
-| Tenant scope | Tenant scope (R14 reads across; R12 reads own) |
-| Ownership | Platform-owned; managed by R14 |
+| Tenant scope | Tenant scope (R13 reads across; R12 reads own) |
+| Ownership | Platform-owned; managed by R13 |
 | Lifecycle states | `pending → active → grace → suspended → terminated`; plus `renewed` as a transition |
 | Missing fields | `subscriptionId`, `tenantId`, `planId`, `periodStart`, `periodEnd`, `status`, `autoRenew`, `paymentMethodId`, `lastPaymentAt`, `lastPaymentAmount`, `lastPaymentStatus`, `graceReason`, `graceEndsAt`, `suspendedReason`, `suspendedAt`, `terminatedReason`, `terminatedAt`, `renewedFrom` (previous subscription ID) |
 | Fields that must not be copied directly | The plan-to-revenue mapping (120k/350k/650k/1.2M IQD) must be in a `Plan` catalogue, not hardcoded; the plan-to-days mapping must be in the same catalogue |
@@ -761,7 +790,7 @@ This section extracts every meaningful entity from the legacy JavaScript and HTM
 | Legacy fields | `id`, `clinicName` (free text), `type` (free text), `text` (free text), `priority` (enum: عالية/متوسطة) |
 | Likely canonical aggregate | `SupportTicket` aggregate (new; not in M-catalogue; recommended for addition) |
 | Sensitive-data classification | Ticket body may contain PHI if the tenant describes a clinical issue; assignee is PII |
-| Tenant scope | Tenant scope on read (tenant users see only their tickets); platform scope on read for R14/R13 |
+| Tenant scope | Tenant scope on read (tenant users see only their tickets); platform scope on read for R13 |
 | Ownership | Tenant-created; platform-resolved |
 | Lifecycle states | `open → assigned → in_progress → resolved → closed`; plus `reopened` |
 | Missing fields | `ticketId`, `tenantId`, `facilityId`, `category` (enum), `severity` (enum: low/medium/high/critical), `subject`, `body`, `attachments` (array of file references), `createdBy` (user), `createdByRole`, `assignedTo` (user), `assignedAt`, `status`, `priority`, `slaDueAt`, `resolvedAt`, `resolvedBy`, `resolutionNote`, `reopenedAt`, `reopenedBy`, `reopenedReason` |
@@ -946,7 +975,7 @@ This section analyses the five clinic types present in the legacy prototypes (De
 
 Every clinic type, regardless of specialty, shares these platform features. These are not specialty-specific and must be implemented once in the platform shell, not duplicated per clinic type.
 
-- **Authentication and session**: login, logout, session rotation, MFA for R13/R14, CSRF protection. Already implemented in Batch 5 and Batch 7.
+- **Authentication and session**: login, logout, session rotation, CSRF protection, Origin validation, login throttling, generic authentication failures. Already implemented in Batch 5 and Batch 7. **MFA, step-up authentication, OIDC, SAML, enterprise SSO, biometric authentication, account-recovery workflow, and full account-lockout lifecycle are NOT implemented today; they are deferred per ADR-013 and are described in this document as future canonical design, not as current implementation.** Privileged human roles (e.g., R13) currently rely on Argon2id password hashing, login throttling, generic failure responses, and audit emission. R14 (Integration Account) is a non-human principal and does not authenticate interactively, so MFA does not apply to it.
 - **Tenant membership context**: viewing, selecting, and clearing tenant context. Already implemented in Batch 6.
 - **Authorization**: canonical R01–R14 roles, permissions, and the authorization guard. Already implemented in Batch 8.
 - **Audit**: HMAC-SHA-256 chained integrity, transactional outbox, immutable audit store. Already implemented in Batch 9.
@@ -1036,7 +1065,7 @@ This section explicitly documents every unsafe legacy pattern and identifies the
 
 | # | Unsafe legacy pattern | Legacy source | Risk | Canonical replacement |
 |---|---|---|---|---|
-| 1 | Hardcoded credentials in client source | `login.js` (`superadmin/admin123`, `manager_kzo/kzo123`, `doctor_pedia/pedia123`, `doctor_internal/internal123`, `doctor_dental/dental123`, `doctor_lab/lab123`) | Total authentication bypass; anyone reading the source gains Super Admin | Already replaced: `password.service.ts` uses Argon2 hashing; credentials are never stored in client code. The login screen must not expose demo accounts in production. Demo accounts, if any, are seeded only in development databases and are clearly marked. |
+| 1 | Hardcoded credentials in client source | `login.js` (six `<username>/<password>` pairs; values redacted in this document — see §2.11 for the SHA-256 source manifest that identifies the exact source file) | Total authentication bypass; anyone reading the source gains Super Admin | Already replaced: `password.service.ts` uses Argon2 hashing; credentials are never stored in client code. The login screen must not expose demo accounts in production. Demo accounts, if any, are seeded only in development databases and are clearly marked. |
 | 2 | Browser-only login (client-side credential check) | `login.js` `handleLogin` | Authentication is a fiction; the server has no idea who is calling | Already replaced: `auth.controller.ts` + `auth.service.ts` verify credentials server-side; the client only submits the form. |
 | 3 | LocalStorage-based authorization (`clinicType`) | `login.js` `handleLogin`, `app.js` `loginToClinic`, `clinic-laser.js` `clinicType = getStorage('clinicType', 'DERMA_LASER')` | Any user can edit localStorage and assume any role or tenant | Already replaced: authorization is enforced server-side via `AuthorizationGuard` (Batch 8); the client never authorizes. |
 | 4 | LocalStorage-based PHI (patients, encounters, payments) | `clinic-laser.js` `patientsData = getStorage('patientsData', ...)` | PHI stored in browser; no encryption; no audit; no retention control | Required: PHI lives only in the PostgreSQL transactional store (per ADR-006) with row-level tenant scoping; the client never persists PHI to localStorage; the local-first store (per ADR-003) is governed and encrypted. |
@@ -1058,7 +1087,7 @@ This section explicitly documents every unsafe legacy pattern and identifies the
 | 20 | Inline `onclick` handlers | `index.html` (5+), `clinic-admin-laser.html` (10+), generated HTML in `app.js` and `clinic-laser.js` (many) | CSP violation; XSS surface; hard to audit | Required: React event handlers (already the canonical pattern); Content Security Policy forbids inline handlers. |
 | 21 | `<base target="_blank">` opening every link in a new tab | `clinic-admin-laser.html` line 53 | UX confusion; security (new tabs don't carry referrer policy by default); accessibility | Required: links open in the same tab by default; explicit `target="_blank"` only with `rel="noopener noreferrer"` where the new tab is intentional. |
 | 22 | `alert()` for placeholder actions | `clinic-dental.html`, `clinic-pediatrics.html`, `clinic-internal.html`, `clinic-lab.html` | Not a security risk per se, but indicates the screens have no real implementation | Required: real implementations in future batches; no `alert()` in production. |
-| 23 | No MFA for privileged roles | `login.js` | R13/R14 accounts are protected only by a single password | Required: MFA for R13 and R14 per ADR-013; TOTP or WebAuthn; MFA challenge before session promotion to authenticated state. |
+| 23 | No MFA for privileged roles | `login.js` | R13 accounts (and other privileged human roles) are protected only by a single password | Required (future, deferred per ADR-013, not yet implemented): MFA for R13 and other privileged human roles (e.g., TOTP or WebAuthn); MFA challenge before session promotion to authenticated state. R14 (Integration Account) is a non-human principal and does not authenticate interactively, so MFA does not apply to it. ADR-013 explicitly defers MFA implementation details to a future ADR; the current implementation provides Argon2id hashing, login throttling, generic failure responses, and audit emission as the privileged-account protection baseline. |
 | 24 | No account-existence protection | `login.js` `handleLogin` returns "username or password incorrect" but the demo-account buttons reveal which accounts exist | Account enumeration | Already mitigated: the canonical login response is identical whether the account exists; failed-login audit records HMAC-hash the identifier (Batch 9). The login screen must not list accounts. |
 | 25 | No rate limiting on login | `login.js` | Brute-force attacks | Already replaced: `audited-throttler.guard.ts` (Batch 5/9) applies rate-limiting and emits `authentication.login.throttled` when safely interceptable. |
 | 26 | No secure cookie attributes | `login.js` (no cookies at all) | Session fixation; XSS session theft | Already replaced: httpOnly, Secure, SameSite=Lax cookies (Batch 5). |
@@ -1164,7 +1193,7 @@ This batch does not implement patient or clinical business modules.
 - Tenant Detail and Subscription (`/admin/tenants/[tenantId]`)
 - Subscription lifecycle (create, plan change, extend, suspend, reactivate, terminate)
 - Support Ticket Queue (`/admin/support`)
-- Impersonation (with MFA, time-limit, audit, banner)
+- Impersonation (with MFA as a prerequisite future capability per ADR-013, time-limit, audit, banner, second-human-approver fallback until MFA is implemented)
 - Audit Feed (`/admin/audit`) — deferred per ADR-014 until public audit query is ratified
 
 ### 10.4 Clinic Admin (post-shell, provisional Batch 12)
@@ -1265,6 +1294,51 @@ This stage should implement:
 - Notification drawer and feed
 
 This stage must **not** yet implement patient or clinical business modules. It must produce a runnable, accessible, bilingual shell that all subsequent batches build upon, and it must be the substrate against which the Google Stitch reference designs are validated.
+
+---
+
+## 12. Product Terminology and Authority Clarifications
+
+This section records the canonical product terminology that governs the platform-administration surface, the tenant-administration surface, and the system-integration surface. It exists to prevent the legacy prototypes' informal vocabulary from leaking into the canonical role and permission model. Where the prototypes and this section disagree, this section is authoritative because it is reconciled against `02_PRODUCT/USER_ROLES.md` §6 and §8, and against the ratified role-permission matrix.
+
+### 12.1 The five administration surfaces
+
+The platform distinguishes five administration surfaces, each with its own scope, principal kind, and canonical role assignment. They are not interchangeable, and a screen designed for one surface must not be reassigned to another without an explicit role-permission review.
+
+1. **Ibn Hayan platform administration** — the cross-tenant surface that operates the platform itself: tenant lifecycle, platform-wide KPIs, platform-wide support ticket triage, platform-wide audit (deferred per ADR-014). The canonical human principal for this surface is **R13 (System Administrator)** per `02_PRODUCT/USER_ROLES.md` §6.1. The Super Admin console in the legacy prototypes (`index.html` + `app.js`) corresponds to this surface. The legacy `superadmin` username in `login.js` is evidence of user intent that this surface should exist; it is **not** a canonical role definition and must not override R13/R14 semantics. No fifteenth role is introduced to capture this surface; R13 is the canonical human role for platform administration.
+
+2. **Tenant administration** — the within-tenant surface that configures one tenant's settings, integrations, and user-role assignments. The canonical human principal for this surface is **R13 (System Administrator)**, scoped to the tenant. R13 in tenant A has no authority in tenant B per `02_PRODUCT/USER_ROLES.md` §6.4 (single-tenant scoping of technical roles).
+
+3. **Organisation administration** — the within-organisation surface that configures one organisation within a tenant (per the Tenant → Organisation → Facility hierarchy in `01_ARCHITECTURE/SYSTEM_ARCHITECTURE.md`). The canonical human principal is **R09 (Administrator)** at organisation scope, with R13 available for cross-organisation actions within the tenant.
+
+4. **Facility administration** — the within-facility surface that runs one clinic facility: practitioner directories, employee directories, scheduling, inventory, finance. The canonical human principal is **R09 (Administrator)** at facility scope, supported by R11 (HR Manager) for HR and payroll, R08 (Biller) for billing, and R12 (Executive) for read.
+
+5. **Clinic operational administration** — the day-to-day clinical operations surface: patient check-in, encounter documentation, clinical ordering, result entry. The canonical human principals are **R01 (Physician)**, **R02 (Nurse)**, **R03 (Pharmacist)**, **R04 (Lab Technician)**, **R05 (Radiology Technician)** as appropriate to the operation, supported by **R06 (Receptionist)** and **R07 (Scheduler)** for non-clinical patient-flow operations.
+
+### 12.2 Non-human integration accounts
+
+The platform's sixth surface is not an interactive administration surface at all: it is the system-to-system integration surface used by external laboratory, imaging, pharmacy, and billing systems to exchange data with Ibn Hayan through M17 (Integration). The canonical principal for this surface is **R14 (Integration Account)** per `02_PRODUCT/USER_ROLES.md` §6.2 and §8.1.
+
+R14 is a **non-human** principal. It does not authenticate interactively, does not log in through a browser, does not navigate a UI, and does not have any interactive Tenant-context permission in the current permission catalogue (R01–R13 receive `context:view`, `context:select`, `context:clear`; R14 receives none of these — see the Batch 8 RBAC foundation and the Batch 9 audit primitive worklog entries). R14 is therefore not the principal for any interactive Platform Super Admin screen, including the Platform Super Admin Overview, the Clinics and Organisations Directory, the Tenant Detail and Subscription, the Support Ticket Queue, or the Platform Audit Feed.
+
+R14 is correctly used in two narrow, non-interactive contexts identified elsewhere in this document:
+
+- **System-driven subscription expiry transitions** (§5.4): a scheduled job running as R14 performs expiry-driven state transitions on the `Subscription` aggregate. This is correct because the action is non-interactive and system-initiated.
+- **System-driven low-stock notification dispatch** (§5.19): a scheduled job running as R14 queries inventory and dispatches notifications. This is correct because the action is non-interactive and system-initiated.
+
+In every other occurrence in this document, the principal for a platform-administration action is R13 (human System Administrator), not R14.
+
+### 12.3 The legacy `superadmin` username is not a canonical role
+
+The legacy prototype's `superadmin` demo account (`login.js`, redacted — see §2.11 for the SHA-256 of the source file) is evidence that the original product owner intended a platform-operator surface to exist. It is **not** a canonical role definition. The canonical spine defines the platform-operator human role as R13 (System Administrator), and the canonical non-human integration role as R14 (Integration Account). The extraction in this document maps the legacy `superadmin` intent to R13 throughout. No fifteenth role is introduced, and the legacy `superadmin` username is not used as a role code in any canonical artefact.
+
+### 12.4 Future platform-operator separation (deferred)
+
+A future product evolution may split the platform-administration surface into a dedicated platform-operator role (e.g., a "Platform Operator" human role distinct from a tenant-scoped System Administrator). This evolution is **not** ratified in the current canonical spine and is **not** introduced by this document. If and when it is ratified, it will be introduced through the standard role-catalogue amendment process described in `02_PRODUCT/USER_ROLES.md` §1, will receive a new role code in the R-catalogue (R15 or later — never a reuse of R14, which is permanently the Integration Account), and will be recorded in the worklog and in `CHANGELOG.md`. Until then, R13 is the canonical human role for platform administration, and any reference to a "platform operator" in this document is a description of the surface, not a role definition.
+
+### 12.5 Permission and field-level access is provisional and server-authoritative
+
+Several extracted screens reference field-level permissions (e.g., `patient.read.phi`, `patient.read.sensitive`, `subscription.read`) and facility-level permissions that are not yet implemented in the current permission catalogue (which defines only `context:view`, `context:select`, `context:clear` per the Batch 8 RBAC foundation). Where this document references such permissions, the reference is a **design intent** for the future permission catalogue, not a claim that the permission is currently enforced. The server is the authoritative source for permission decisions; the client never decides access based on local state. Broad PHI access is not granted to any role merely because the legacy prototype displayed the data; field-level and facility-level access will be defined per-resource, per-action, per-field, and per-scope when the corresponding business module is implemented.
 
 ---
 

@@ -26,7 +26,7 @@
 
 ### 1.1 Product
 
-The **Ibn Hayan Healthcare Operating System** is a bilingual (Arabic-first, English-capable) healthcare clinic management platform for large Iraqi clinics, multi-branch clinic groups, and Gulf healthcare organisations. It is a premium enterprise software product (valued around USD 10,000+ per engagement) sold through enterprise sales, not a low-cost template. The product serves two distinct surfaces: a **platform Super Admin console** (for the platform operator, R14) and a **clinic workspace** (for tenant users, R01–R13). Both surfaces share one design system, one component vocabulary, one bilingual posture, and one accessibility standard.
+The **Ibn Hayan Healthcare Operating System** is a bilingual (Arabic-first, English-capable) healthcare clinic management platform for large Iraqi clinics, multi-branch clinic groups, and Gulf healthcare organisations. It is a premium enterprise software product (valued around USD 10,000+ per engagement) sold through enterprise sales, not a low-cost template. The product serves two distinct surfaces: a **platform Super Admin console** (for the platform operator, R13 System Administrator — the canonical human role for interactive platform administration per `02_PRODUCT/USER_ROLES.md` §6.1) and a **clinic workspace** (for tenant users, R01–R13). R14 (Integration Account) is a non-human system principal and is not a target user for any screen in this brief. Both surfaces share one design system, one component vocabulary, one bilingual posture, and one accessibility standard.
 
 ### 1.2 What this brief asks for
 
@@ -127,10 +127,10 @@ This brief asks Stitch to design only these eight reference screens, in all thre
 | User | Unauthenticated |
 | Purpose | Authenticate the user; establish the session |
 | Layout | Centred card on a muted background; brand mark at top; form below; locale toggle in the corner |
-| Key components | Brand mark (H square, primary), product name, locale toggle (AR/EN), username field, password field with show/hide, primary "Sign in" button, secondary "Forgot password" link, MFA challenge field (shown when applicable) |
+| Key components | Brand mark (H square, primary), product name, locale toggle (AR/EN), username field, password field with show/hide, primary "Sign in" button, secondary "Forgot password" link. Note: an MFA challenge field is a future canonical design per ADR-013 (currently deferred, not yet implemented); Stitch may include the MFA field as a future-state affordance but must not imply that MFA is currently operational. |
 | Primary action | Sign in |
 | Secondary actions | Forgot password; switch locale |
-| States | Default, populated, loading (spinner on button), error (inline message, no account-existence leak), throttled (inline message with retry countdown), MFA required |
+| States | Default, populated, loading (spinner on button), error (inline message, no account-existence leak), throttled (inline message with retry countdown). Note: an "MFA required" state is a future canonical design per ADR-013 (currently deferred, not yet implemented); Stitch may include the MFA-required state as a future-state affordance but must not imply that MFA is currently operational. |
 | Responsive behaviour | Desktop: 480px card centred. Tablet: 480px card centred. Mobile: full-width card with 24px margin. |
 | Arabic RTL version | Card is centred; labels are right-aligned; password show/hide icon is on the left; locale toggle shows "EN" (to switch to English). |
 | English LTR version | Card is centred; labels are left-aligned; password show/hide icon is on the right; locale toggle shows "AR" (to switch to Arabic). |
@@ -140,13 +140,13 @@ This brief asks Stitch to design only these eight reference screens, in all thre
 
 | Property | Value |
 |---|---|
-| User | R14 System Administrator |
+| User | R13 System Administrator |
 | Purpose | Single-glance platform health; alert feed; quick actions |
 | Layout | Page header with "Platform Overview" title and date-range selector; KPI strip (5 cards); two-column body with alert feed (start side) and quick actions (end side); sidebar with platform navigation |
 | Key components | Page header, KPI strip (Total tenants, Active subscriptions, Grace-period tenants, Today's bookings across platform, New patients across platform — all PHI-redacted aggregations), alert feed (tenant suspensions, failed payments, support ticket escalations), quick-action buttons (Add tenant, Open support queue, View audit feed) |
 | Primary action | Add tenant |
 | Secondary actions | Open support queue; view audit feed; change date range |
-| States | Populated (normal), empty (no tenants — first-run), loading (skeleton KPIs), error (aggregation failure), permission-denied (should not happen for R14, but defined for safety) |
+| States | Populated (normal), empty (no tenants — first-run), loading (skeleton KPIs), error (aggregation failure), permission-denied (should not happen for R13, but defined for safety) |
 | Responsive behaviour | Desktop: full layout. Tablet: KPIs wrap to 2x3; body becomes single column. |
 | Arabic RTL version | Sidebar on right; KPI cards flow right-to-left; numbers in Arabic-Indic; "Add tenant" button on the left of the page header. |
 | English LTR version | Sidebar on left; KPI cards flow left-to-right; numbers in Latin; "Add tenant" button on the right of the page header. |
@@ -156,7 +156,7 @@ This brief asks Stitch to design only these eight reference screens, in all thre
 
 | Property | Value |
 |---|---|
-| User | R14 |
+| User | R13 |
 | Purpose | Find, filter, and act on any tenant from one screen |
 | Layout | Page header with "Tenants" title and "Add tenant" primary action; filter bar (search, status filter, clinic-type filter, plan filter); table with sticky header; row actions |
 | Key components | Page header, filter bar (search field, status chips, clinic-type chips, plan chips, sort selector, density toggle), table (Tenant name, Clinic type, Plan, Status, Expiry, Booking count, Row actions), row-action menu (Open detail, Impersonate, Edit plan, Suspend, Terminate) |
@@ -172,7 +172,7 @@ This brief asks Stitch to design only these eight reference screens, in all thre
 
 | Property | Value |
 |---|---|
-| User | R14 |
+| User | R13 |
 | Purpose | Manage one tenant's profile, subscription, facilities, and audit timeline |
 | Layout | Page header with tenant name and status chip; tabbed body (Profile, Subscription, Facilities, Audit, Support); each tab has its own content |
 | Key components | Page header (tenant name, status chip, primary action menu), tabs, profile tab (legal name, tax ID, address, primary contact — name and email only, no phone), subscription tab (plan, period, status, payment history, extend-time action, change-plan action, suspend action, terminate action), facilities tab (list of facilities with name, address, clinic type), audit tab (timeline of tenant-scoped audit events), support tab (list of the tenant's support tickets) |
@@ -368,7 +368,7 @@ Stitch must NOT generate the following.
 
 ### 6.1 No production-ready authentication or backend code
 
-Stitch produces design artefacts (HTML/CSS for the visual directions, design tokens, component specifications), not production authentication or backend code. The platform's authentication, authorization, audit, and API are already implemented (Batches 5–9) and are the canonical authority.
+Stitch produces design artefacts (HTML/CSS for the visual directions, design tokens, component specifications), not production authentication or backend code. The platform's authentication, authorization, audit, and API are partially implemented today (Batches 5–9): Argon2id local password authentication, opaque server-side sessions, HttpOnly cookies, session rotation and expiry handling, CSRF protection, Origin validation, login throttling, generic authentication failures, RBAC, the authorization guard, and the immutable audit primitive are all implemented and are the canonical authority. The following are **not** implemented today and must not be implied as operational in Stitch's output: MFA, step-up authentication, OIDC, SAML, enterprise SSO, biometric authentication, account-recovery workflow, full account-lockout lifecycle, and the production Platform Super Admin module. These are documented as future canonical design per ADR-013 and `LEGACY_PROTOTYPE_EXTRACTION.md` §12; Stitch's designs may include them as future-state affordances but must visually communicate that they are not yet operational (e.g., the MFA field on the Login screen is a future-state affordance, not a current capability).
 
 ### 6.2 No hardcoded patient data beyond safe fictional examples
 
