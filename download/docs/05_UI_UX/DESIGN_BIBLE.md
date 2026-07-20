@@ -3,7 +3,7 @@
 
 > **Document Purpose:** The master design reference for the Ibn Hayan Healthcare Operating System — philosophy, principles, brand identity, visual language, quality bar, and the official registry of approved canonical interface designs.
 >
-> **Status:** Living · **Version:** 0.3.0 · **Last Updated:** 2026-07-20
+> **Status:** Living · **Version:** 0.3.1 · **Last Updated:** 2026-07-20
 >
 > This document is part of the official Ibn Hayan Healthcare Operating System
 > documentation framework and serves as the authoritative reference for its
@@ -250,14 +250,14 @@ This approval registers the design as a canonical visual reference; it does not 
 
 ## 14. Superseded Screen Experiments
 
-This section records prior Clinic Admin Overview experiments that have been superseded by the entries in §11, §12, and §13. The historical records of these experiments are retained for traceability; they must not be implemented. New implementations must follow §12 (Arabic RTL) and §13 (English LTR) exclusively.
+This section records prior screen experiments and legacy prototype references that must be respected before any new implementation begins. Entries in this section belong to one of two distinct product surfaces and must not be conflated. The Clinic Administrator surface entries have been superseded by the approved Clinic Admin Overview specifications in §12 (Arabic RTL) and §13 (English LTR); they must not be implemented, and new implementations of the Clinic Administrator surface must follow §12 and §13 exclusively. The Platform Super Admin surface entries are **not** superseded by §12 or §13, because §12 and §13 govern the Clinic Administrator surface only; they remain historical product-intent evidence for the Platform Super Admin surface, pending replacement by separately approved canonical Platform Super Admin reference screens (no such screens are registered yet in §11). Insecure legacy code recorded in this section must never be reused under any circumstances; the historical records are retained for traceability only.
 
 | # | Experiment | Source | Status | Superseded by | Notes |
 |---|---|---|---|---|---|
 | 1 | Legacy prototype — `clinic-admin-laser.html` Super Admin / Clinic Admin dashboard composition | `upload/clinic-admin-laser.html` (legacy prototype; untracked; SHA-256 recorded in `download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md` §2.11 row 5) | SUPERSEDED — DO NOT IMPLEMENT | §12 (Arabic RTL) and §13 (English LTR) of this document | The legacy prototype used LocalStorage-based state, hardcoded credentials, client-side routing, raw innerHTML rendering, and unscoped patient data. It is rejected as an implementation reference and retained only as evidence of original product intent. See `download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md` §8 for the full rejection list. |
-| 2 | Legacy prototype — `index.html` + `app.js` platform Super Admin dashboard adapted for clinic-admin use | `upload/index.html`, `upload/app.js` (legacy prototypes; untracked; SHA-256 recorded in `download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md` §2.11 rows 1 and 2) | SUPERSEDED — DO NOT IMPLEMENT | §12 (Arabic RTL) and §13 (English LTR) of this document | The legacy platform dashboard conflated platform-surface and clinic-surface concerns, used LocalStorage for tenancy, and rendered patient data without masking. It is rejected as an implementation reference. |
+| 2 | Legacy prototype — `index.html` + `app.js` Platform Super Admin console | `upload/index.html`, `upload/app.js` (legacy prototypes; untracked; SHA-256 recorded in `download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md` §2.11 rows 1 and 2) | LEGACY PLATFORM SUPER ADMIN REFERENCE — NOT PRODUCTION IMPLEMENTATION | Not superseded by §12 or §13. Pending replacement by a future approved canonical Platform Super Admin reference screen (no such screen is registered yet in §11). | This prototype remains historical product-intent evidence for the Platform Super Admin surface. It is not superseded by the Clinic Admin Overview because the two screens belong to different roles, scopes and product surfaces. Its insecure code must never be reused. It may only be superseded later by separately approved canonical Platform Super Admin reference screens. |
 
-Future supersede records will be appended to this table. Historical records must not be deleted.
+Future supersede and replacement records will be appended to this table. Historical records must not be deleted.
 
 ---
 
