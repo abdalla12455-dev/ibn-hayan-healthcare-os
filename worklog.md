@@ -1147,3 +1147,22 @@ Stage Summary:
 - §12 (Arabic Clinic Admin) and §13 (English Clinic Admin) sections are byte-identical to commit 4884693; their substantive contents and PNG assets are unchanged.
 - No production code, prototype code, schema, migration, dependency, or lockfile was modified. No push was performed.
 - Working tree clean after commit. Final Git status: empty (clean).
+
+---
+Task ID: remediation-1
+Agent: main
+Task: Surgical remediation of accidental unpushed bundle commit 25b135c — remove commit via mixed reset, add *.bundle to .gitignore, commit hygiene fix, no push.
+
+Work Log:
+- Pre-state confirmed: HEAD=25b135c2daa1524525ba1abe07020506f5e36d77, branch=main, parent=299cd95.
+- Step 1: `git reset --mixed 299cd95d3e1b197a85dee5244f565d84a4c6d4d9` — exit 0. HEAD moved to 299cd95; bundle file remains on disk, unstaged.
+- Step 2: Appended blank line + comment + `*.bundle` rule to `.gitignore` (3 lines added at end; existing rules byte-identical to HEAD).
+- Step 3 (pre-commit verification, 7 checks): HEAD=299cd95 PASS; 25b135c not ancestor of HEAD PASS; bundle on disk (6,226,231 bytes, SHA-256 3f4f8f22b71d7bde42aebcca6d1487366951f85f1c8ea1aba7084043880055db) PASS; bundle ignored by .gitignore:56 `*.bundle` and untracked PASS; bundle not staged PASS; no production/docs/schema/migration/dependency/lockfile modified (only .gitignore) PASS; `git diff --check` PASS.
+- Step 4: `git add .gitignore` (only .gitignore staged; bundle confirmed not staged). `git commit -m "Ignore portable Git bundle artifacts"` — created commit 309b5eaa039e8a625e4b0e52b796d5747b313b8b, parent 299cd95, 1 file changed, 3 insertions(+).
+- Step 5 (final verification): HEAD=309b5ea; 25b135c not ancestor of HEAD; parent of HEAD=299cd95 (correct); bundle still on disk (6,226,231 bytes, SHA-256 3f4f8f22b71d7bde42aebcca6d1487366951f85f1c8ea1aba7084043880055db); bundle ignored by .gitignore:56 and untracked; commit touches only .gitignore; branch=main; ahead of origin/main by 24, behind by 0; `git status` clean; origin/main unchanged at 84e5b565626a70862630c27f2c2730038357db34 (no push occurred).
+
+Stage Summary:
+- Removed: commit 25b135c2daa1524525ba1abe07020506f5e36d77 (accidental bundle-in-repo commit) from main history via mixed reset. The commit object still exists in the object database but is unreachable from any branch ref; it will be reclaimed by git gc at the next pruning cycle.
+- Added: commit 309b5eaa039e8a625e4b0e52b796d5747b313b8b "Ignore portable Git bundle artifacts" — parent 299cd95, single change is +3 lines at end of .gitignore (blank line, comment "# Portable Git backup bundles — never track", rule `*.bundle`).
+- Bundle file `download/ibn-hayan-healthcare-os-backup.bundle` remains physically on disk, byte-identical (SHA-256 3f4f8f22b71d7bde42aebcca6d1487366951f85f1c8ea1aba7084043880055db, 6,226,231 bytes), now ignored and untracked.
+- Repository state: branch=main, HEAD=309b5ea, working tree clean, 24 commits ahead of origin/main, 0 behind, no push performed, no tags created, no earlier commit altered.
