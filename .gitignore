@@ -51,3 +51,6 @@ Thumbs.db
 # transient runtime output that does not belong in version control.
 .preview-logs/*.log
 .preview-logs/*.pid
+
+# Portable Git backup bundles — never track
+*.bundle
