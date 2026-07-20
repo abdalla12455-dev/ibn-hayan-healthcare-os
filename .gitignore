@@ -41,3 +41,13 @@ Thumbs.db
 # download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md §2.11 for the
 # SHA-256 source manifest that identifies the exact files used as extraction input.
 /upload/
+
+# Preview-server runtime artefacts — never track
+# The .preview-logs/ directory contains intentional preview-infrastructure
+# scripts (preview-proxy.py, start-api.sh, start-web.sh) that ARE tracked.
+# The *.log and *.pid files in the same directory are runtime artefacts
+# produced by the preview server; they must not be tracked because they
+# are non-deterministic, may be regenerated at any time, and may capture
+# transient runtime output that does not belong in version control.
+.preview-logs/*.log
+.preview-logs/*.pid
