@@ -1079,3 +1079,29 @@ Stage Summary:
 - bun.lock restored to committed state; upload/ restored to untracked status; b23ba48 (the accidental upload-tracking commit) removed from branch history; 0f355970 preserved verbatim.
 - Remaining blockers: none. All twelve task sections have been completed. All previously unchecked or incorrect items have been resolved. No production code, schema, migration, dependency, lockfile, prototype file, or secret was modified or exposed.
 - Stage result: LEGACY EXTRACTION ACCEPTED.
+
+---
+Task ID: DESIGN_BIBLE_v0.3.1_legacy_surface_classification_correction
+Agent: Main Agent (Design Authority role)
+Task: Perform one minimal documentation-only correction to DESIGN_BIBLE.md §14 "Superseded Screen Experiments" so that the Platform Super Admin legacy prototype (index.html + app.js) is no longer incorrectly marked as superseded by the Clinic Admin Overview specifications in §12 and §13. The two legacy prototype rows belong to two distinct product surfaces and must not be conflated.
+
+Work Log:
+- Re-read the current §14 rows in download/docs/05_UI_UX/DESIGN_BIBLE.md at HEAD 4884693: row 1 (clinic-admin-laser.html, Clinic Admin surface) was correctly marked SUPERSEDED — DO NOT IMPLEMENT and superseded by §12 and §13; row 2 (index.html + app.js, Platform Super Admin surface) was incorrectly marked SUPERSEDED — DO NOT IMPLEMENT and superseded by §12 and §13.
+- Cross-checked the canonical legacy classification in download/docs/99_WORKLOG/LEGACY_PROTOTYPE_EXTRACTION.md §2.1–§2.6 and §2.11 to confirm: index.html (§2.1, "Platform Super Admin Console"), app.js (§2.2, "Super Admin Logic"), login.html (§2.3), login.js (§2.4) are the Platform Super Admin surface; clinic-admin-laser.html (§2.5, "Dermatology/Laser Clinic Workspace Shell") and clinic-laser.js (§2.6, "Clinic Workspace Logic") are the Clinic Admin surface.
+- Bumped DESIGN_BIBLE.md version from 0.3.0 to 0.3.1 (patch bump for a documentation-only correction to an existing section; consistent with the prior convention where 0.1.0 → 0.2.0 and 0.2.0 → 0.3.0 were minor bumps for new section registrations).
+- Rewrote the §14 intro paragraph to distinguish the two product surfaces: only the Clinic Administrator surface entries are superseded by §12 and §13; the Platform Super Admin surface entries are NOT superseded by §12 or §13 (which govern the Clinic Administrator surface only) and remain pending replacement by separately approved canonical Platform Super Admin reference screens (none registered yet in §11).
+- Corrected row 2 only: experiment name changed from "platform Super Admin dashboard adapted for clinic-admin use" to "Platform Super Admin console" (the prototype is not clinic-adapted; it is platform-surface); status changed from "SUPERSEDED — DO NOT IMPLEMENT" to "LEGACY PLATFORM SUPER ADMIN REFERENCE — NOT PRODUCTION IMPLEMENTATION"; "Superseded by" column changed from "§12 (Arabic RTL) and §13 (English LTR) of this document" to "Not superseded by §12 or §13. Pending replacement by a future approved canonical Platform Super Admin reference screen (no such screen is registered yet in §11)"; notes replaced with the canonical wording supplied by the user.
+- Left row 1 (clinic-admin-laser.html) unchanged. Left §12 (Arabic RTL approved screen) and §13 (English LTR approved screen) unchanged. Left §11 (Approved Screen Registry) unchanged. Left the Arabic and English approved PNG assets unchanged.
+- Did NOT invent any section reference for an approved Platform Super Admin screen, because no such section exists in the document; instead, the row explicitly states that no such screen is registered yet in §11.
+- Ran git diff --check (clean), git status --short (only DESIGN_BIBLE.md modified), git diff --stat (1 file changed, 4 insertions(+), 4 deletions(-)).
+- Created one documentation-only commit with the exact required message "Correct legacy surface supersession classification". The commit contains only download/docs/05_UI_UX/DESIGN_BIBLE.md.
+
+Stage Summary:
+- Commit hash: 3e2d0e3ed7c6b7e911ad4c513ba40aaadd3d06c3
+- Commit message: "Correct legacy surface supersession classification"
+- Files in commit: download/docs/05_UI_UX/DESIGN_BIBLE.md only (1 file, +4/-4 lines)
+- Final status of index.html and app.js (legacy Platform Super Admin prototype): LEGACY PLATFORM SUPER ADMIN REFERENCE — NOT PRODUCTION IMPLEMENTATION. Not superseded by §12 or §13. Pending replacement by a future approved canonical Platform Super Admin reference screen (not yet registered).
+- Final status of clinic-admin-laser.html and clinic-laser.js (legacy Clinic Admin prototype): row 1 of §14 remains SUPERSEDED — DO NOT IMPLEMENT, superseded by §12 (Arabic RTL) and §13 (English LTR). (Note: clinic-laser.js is implicitly part of the same legacy Clinic Admin prototype row 1 covers; row 1's source path field explicitly names only clinic-admin-laser.html per the original §14 wording, which was preserved unchanged per the user's "Correct only the row or wording" constraint.)
+- §12 (Arabic RTL approved screen) and §13 (English LTR approved screen) are unchanged and verified.
+- No production code, schema, migration, dependency, lockfile, approved Arabic design image, approved English design image, or approved registry entry was modified.
+- No push was performed. Commit 488469350f01bf0c056c9589f98ce4e25d4c914b was not amended.
