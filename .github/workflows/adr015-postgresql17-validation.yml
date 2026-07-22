@@ -77,20 +77,26 @@ jobs:
       - name: Verify execution environment
         shell: bash
         run: |
-          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+          docker run --rm ibn-hayan-adr015-pg17 bash -c '
             set -euo pipefail
             node --version
             pnpm --version
-            postgres --version
-            initdb --version
-            pg_ctl --version
-            psql --version
+            test -x "$PG_BINDIR/postgres"
+            test -x "$PG_BINDIR/initdb"
+            test -x "$PG_BINDIR/pg_ctl"
+            test -x "$PG_BINDIR/psql"
+            "$PG_BINDIR/postgres" --version
+            "$PG_BINDIR/initdb" --version
+            "$PG_BINDIR/pg_ctl" --version
+            "$PG_BINDIR/psql" --version
+            printf "PG_BINDIR=%s\n" "$PG_BINDIR"
+            printf "PATH=%s\n" "$PATH"
           '
 
       - name: Run complete monorepo gates
         shell: bash
         run: |
-          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+          docker run --rm ibn-hayan-adr015-pg17 bash -c '
             set -euo pipefail
             pnpm exec prisma validate --schema apps/api/prisma/schema.prisma
             pnpm exec prisma generate --schema apps/api/prisma/schema.prisma
@@ -103,7 +109,7 @@ jobs:
       - name: Run PostgreSQL 17 suites
         shell: bash
         run: |
-          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+          docker run --rm ibn-hayan-adr015-pg17 bash -c '
             set -euo pipefail
             pnpm run build:shared
             cd apps/api
