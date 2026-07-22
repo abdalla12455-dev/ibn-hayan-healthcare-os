@@ -36,14 +36,32 @@
  *   `P2002`.
  *
  * Per ADR-015 (Scoped Organisation and Facility Context):
- * - The `TenantRoleAssignment` model gains three new fields:
- *   `scopeLevel` ('tenant' | 'organisation' | 'facility'),
- *   `scopeOrganisationId` (nullable `OrganisationId`), and
- *   `scopeFacilityId` (nullable `FacilityId`).
+ * - The `TenantRoleAssignment` model gains four new fields:
+ *   `tenantId` (required `TenantId`, derived server-side from the
+ *   referenced `TenantMembership`), `scopeLevel` ('tenant' |
+ *   'organisation' | 'facility'), `scopeOrganisationId` (nullable
+ *   `OrganisationId`), and `scopeFacilityId` (nullable
+ *   `FacilityId`).
+ * - `tenantId` is derived server-side from the referenced
+ *   `TenantMembership`. It MUST NOT be supplied by the caller. The
+ *   persistence layer loads the membership, derives the tenantId,
+ *   and persists it on the assignment row. The persisted tenantId
+ *   is the structural anchor for the composite foreign keys that
+ *   enforce tenant, organisation, and facility consistency at the
+ *   database level.
  * - The scope level narrows where a granted permission may be
  *   exercised, not whether the role grants it. The role-permission
  *   matrix in `role-permissions.ts` continues to grant permissions
  *   by role code; scope is orthogonal to permission.
+ * - Per ADR-015 §1.5 (Scope-authorisation semantics), a generic
+ *   tenant-scoped assignment for R01-R12 does NOT grant access to
+ *   every organisation or facility under the tenant. Only an R13
+ *   System Administrator assignment at tenant scope grants
+ *   tenant-wide organisation and facility selection. Legacy R09
+ *   tenant-scoped rows may remain stored for migration
+ *   compatibility, but they do NOT authorise organisation or
+ *   facility context selection until explicitly reassigned at
+ *   organisation or facility scope.
  * - The original unique constraint on
  *   `(tenantMembershipId, roleCode)` is replaced by three partial
  *   unique indexes (one per scope level) because PostgreSQL treats
@@ -55,9 +73,28 @@
  *   target IDs are null; organisation scope implies the
  *   organisation ID is non-null and the facility ID is null;
  *   facility scope implies both scope target IDs are non-null.
+ * - Composite foreign keys (added by the migration) enforce at the
+ *   database level that:
+ *   - the assignment's `(tenantMembershipId, tenantId)` matches a
+ *     `tenant_memberships(id, tenant_id)` row (membership and
+ *     assignment tenant IDs must match);
+ *   - when `scopeOrganisationId` is populated, the assignment's
+ *     `(tenantId, scopeOrganisationId)` matches an
+ *     `organisations(tenant_id, id)` row (organisation belongs to
+ *     the assignment's tenant);
+ *   - when `scopeFacilityId` is populated, the assignment's
+ *     `(tenantId, scopeOrganisationId, scopeFacilityId)` matches a
+ *     `facilities(tenant_id, organisation_id, id)` row (facility
+ *     belongs to the assignment's tenant and parent organisation).
+ *   The composite FKs use PostgreSQL's nullable composite-FK
+ *   behaviour: a NULL in any column of the referencing side makes
+ *   the FK unenforced for that row, so tenant-scoped assignments
+ *   (with null scope targets) are not subject to the organisation
+ *   and facility composite FKs.
  * - Existing rows are migrated to explicit tenant scope with no
  *   scope-target by the migration's UPDATE statement. Their
- *   behaviour is unchanged.
+ *   `tenantId` is backfilled from `tenant_memberships.tenant_id`
+ *   via `tenant_membership_id`. Their behaviour is unchanged.
  * - Department and Care-Team scope levels are deferred to a future
  *   ADR. The `scopeLevel` field is typed as a closed union so that
  *   adding a new scope level requires a coordinated extension of
@@ -72,6 +109,7 @@
  */
 
 import type { TenantMembershipId } from '../identity/membership.js';
+import type { TenantId } from '../tenancy/tenant.js';
 import type { OrganisationId } from '../tenancy/organisation.js';
 import type { FacilityId } from '../tenancy/facility.js';
 import type { PlatformRoleCode } from './role-catalogue.js';
@@ -117,6 +155,15 @@ export type RoleAssignmentScopeLevel = 'tenant' | 'organisation' | 'facility';
  *   Foreign key to the TenantMembership row; the persistence layer
  *   enforces restricted deletion (a membership with active role
  *   assignments cannot be deleted).
+ * - `tenantId`: the Tenant this assignment is scoped to. Derived
+ *   server-side from the referenced TenantMembership's `tenantId`;
+ *   never accepted from caller input. The persisted `tenantId` is
+ *   the structural anchor for the composite foreign keys that
+ *   enforce tenant, organisation, and facility consistency at the
+ *   database level. A composite foreign key on
+ *   `(tenantMembershipId, tenantId)` → `tenant_memberships(id,
+ *   tenant_id)` rejects any attempt to persist an assignment whose
+ *   derived tenantId does not match the membership's tenantId.
  * - `roleCode`: the canonical platform role code (R01 through R14).
  *   The persistence layer validates that the code is in the
  *   catalogue before insertion.
@@ -128,12 +175,19 @@ export type RoleAssignmentScopeLevel = 'tenant' | 'organisation' | 'facility';
  *   Null when `scopeLevel` is 'tenant'. The persistence layer
  *   enforces (via a CHECK constraint) that the field is non-null
  *   when `scopeLevel` is 'organisation' or 'facility', and null
- *   when `scopeLevel` is 'tenant'.
+ *   when `scopeLevel` is 'tenant'. A composite foreign key on
+ *   `(tenantId, scopeOrganisationId)` → `organisations(tenant_id,
+ *   id)` enforces that the organisation belongs to the assignment's
+ *   tenant when populated.
  * - `scopeFacilityId`: the facility the assignment is scoped to,
  *   when `scopeLevel` is 'facility'. Null otherwise. The
  *   persistence layer enforces (via a CHECK constraint) that the
  *   field is non-null when `scopeLevel` is 'facility', and null
- *   otherwise.
+ *   otherwise. A composite foreign key on `(tenantId,
+ *   scopeOrganisationId, scopeFacilityId)` →
+ *   `facilities(tenant_id, organisation_id, id)` enforces that the
+ *   facility belongs to the assignment's tenant and parent
+ *   organisation when populated.
  * - `createdAt`: timezone-aware timestamp recording when the
  *   assignment row was inserted. Set by the persistence layer.
  * - `updatedAt`: timezone-aware timestamp recording when the
@@ -149,6 +203,7 @@ export type RoleAssignmentScopeLevel = 'tenant' | 'organisation' | 'facility';
 export interface TenantRoleAssignment {
   readonly id: TenantRoleAssignmentId;
   readonly tenantMembershipId: TenantMembershipId;
+  readonly tenantId: TenantId;
   readonly roleCode: PlatformRoleCode;
   readonly scopeLevel: RoleAssignmentScopeLevel;
   readonly scopeOrganisationId: OrganisationId | null;
@@ -189,8 +244,16 @@ export interface TenantRoleAssignment {
  * The application layer additionally validates that the
  * scope-organisation belongs to the membership's tenant and that
  * the scope-facility belongs to the scope-organisation. The
- * database constraints are the structural backstop; the
+ * database composite foreign keys are the structural backstop; the
  * application-layer checks provide a clear error path.
+ *
+ * `tenantId` is NOT accepted from the caller. The persistence layer
+ * derives it from the referenced `TenantMembership.tenantId`.
+ * Supplying a `tenantId` through any code path other than the
+ * persistence layer's derivation is a defect; the composite foreign
+ * key on `(tenantMembershipId, tenantId)` references
+ * `tenant_memberships(id, tenant_id)` and rejects any mismatched
+ * derivation at the database level.
  */
 export interface CreateTenantRoleAssignmentInput {
   readonly tenantMembershipId: TenantMembershipId;

@@ -181,6 +181,7 @@ model Tenant {
 
   organisations Organisation[]
   memberships  TenantMembership[]
+  roleAssignments TenantRoleAssignment[]
 
   @@map("tenants")
 }
@@ -270,6 +271,7 @@ model Facility {
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
+  @@unique([tenantId, organisationId, id], map: "facilities_tenant_id_organisation_id_id_key")
   @@index([tenantId], map: "facilities_tenant_id_idx")
   @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
   @@map("facilities")
@@ -409,6 +411,7 @@ model TenantMembership {
 
   @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
   @@unique([id, userId], map: "tenant_memberships_id_user_id_key")
+  @@unique([id, tenantId], map: "tenant_memberships_id_tenant_id_key")
   @@index([tenantId], map: "tenant_memberships_tenant_id_idx")
   @@index([userId], map: "tenant_memberships_user_id_idx")
   @@map("tenant_memberships")
@@ -482,6 +485,7 @@ model TenantMembership {
 model TenantRoleAssignment {
   id                   String   @id @default(uuid()) @db.Uuid
   tenantMembershipId   String   @map("tenant_membership_id") @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
   roleCode             String   @map("role_code") @db.VarChar(40)
   scopeLevel           String   @default("tenant") @map("scope_level") @db.VarChar(20)
   scopeOrganisationId  String?  @map("scope_organisation_id") @db.Uuid
@@ -490,10 +494,12 @@ model TenantRoleAssignment {
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   tenantMembership   TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenant             Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   scopeOrganisation  Organisation?    @relation("TenantRoleAssignmentScopeOrganisation", fields: [scopeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   scopeFacility      Facility?        @relation("TenantRoleAssignmentScopeFacility", fields: [scopeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([tenantMembershipId], map: "tenant_role_assignments_tenant_membership_id_idx")
+  @@index([tenantId], map: "tenant_role_assignments_tenant_id_idx")
   @@index([roleCode], map: "tenant_role_assignments_role_code_idx")
   @@index([scopeOrganisationId], map: "tenant_role_assignments_scope_organisation_id_idx")
   @@index([scopeFacilityId], map: "tenant_role_assignments_scope_facility_id_idx")

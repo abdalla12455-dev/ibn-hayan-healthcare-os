@@ -3,6 +3,7 @@ import type {
   TenantRoleAssignmentId,
   PlatformRoleCode,
   TenantMembershipId,
+  TenantId,
   RoleAssignmentScopeLevel,
 } from '@ibn-hayan/domain';
 import { isPlatformRoleCode } from '@ibn-hayan/domain';
@@ -116,6 +117,7 @@ export function tenantRoleAssignmentFromPrisma(
   return {
     id: row.id as TenantRoleAssignmentId,
     tenantMembershipId: row.tenantMembershipId as TenantMembershipId,
+    tenantId: row.tenantId as TenantId,
     roleCode: prismaRoleCodeToDomain(row.roleCode),
     scopeLevel: prismaScopeLevelToDomain(row.scopeLevel),
     scopeOrganisationId:

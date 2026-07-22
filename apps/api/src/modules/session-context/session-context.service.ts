@@ -1222,12 +1222,27 @@ export class SessionContextService {
    * authorised to select and the currently active organisation
    * context (or null).
    *
-   * Per ADR-015, the options list includes only organisations that:
-   * - belong to the active Tenant;
-   * - have at least one organisation-scoped or facility-scoped role
-   *   assignment for the principal's membership, OR have a
-   *   tenant-scoped role assignment (which is valid across every
-   *   organisation under the tenant).
+   * Per ADR-015 §1.5 (corrected scope-authorisation semantics),
+   * the options list includes only organisations that:
+   * - belong to the active Tenant; AND
+   * - have at least one organisation-scoped role assignment for
+   *   the principal's membership whose `scopeOrganisationId`
+   *   matches the organisation; OR
+   * - have at least one facility-scoped role assignment for the
+   *   principal's membership whose `scopeOrganisationId` (the
+   *   facility's parent organisation) matches the organisation; OR
+   * - the principal holds an R13 System Administrator assignment
+   *   at tenant scope for the active tenant. When this third
+   *   condition is true, every active organisation under the
+   *   tenant is included.
+   *
+   * A generic tenant-scoped assignment for R01–R12 does NOT grant
+   * access to every organisation under the tenant. In particular,
+   * an R09 tenant-scoped assignment does NOT grant tenant-wide
+   * organisation access. Legacy R09 tenant-scoped rows may remain
+   * stored for migration compatibility, but they do NOT authorise
+   * organisation context selection and therefore do NOT add
+   * organisations to the options list.
    *
    * If the session's currently active organisation is no longer
    * valid (organisation deleted, organisation made inactive, or
@@ -1254,17 +1269,22 @@ export class SessionContextService {
     // assignment and an organisation-scoped assignment at the same
     // organisation should not produce duplicate options).
     const authorisedOrgIds = new Set<OrganisationId>();
-    // Always include organisations where the principal has a
-    // tenant-scoped assignment (valid across every organisation
-    // under the tenant). Loading all tenant-scoped assignments is
-    // a single round-trip; we then add every active organisation
-    // in the tenant to the authorised set.
+    // Per ADR-015 §1.5 (corrected): include every active
+    // organisation under the tenant ONLY when the principal holds
+    // an R13 System Administrator assignment at tenant scope.
+    // A generic tenant-scoped assignment for R01–R12 does NOT
+    // grant organisation access; only R13 at tenant scope grants
+    // tenant-wide organisation selection. Legacy R09 tenant-scoped
+    // rows do NOT authorise organisation context selection.
     const tenantScopedAssignments =
       await this.roleAssignments.listForMembershipAtScope(
         membershipId,
         'tenant',
       );
-    if (tenantScopedAssignments.length > 0) {
+    const hasR13TenantScoped = tenantScopedAssignments.some(
+      (a) => a.roleCode === 'R13_SYSTEM_ADMINISTRATOR',
+    );
+    if (hasR13TenantScoped) {
       for (const org of allOrganisations) {
         if (org.status === 'active') {
           authorisedOrgIds.add(org.id);
@@ -1359,12 +1379,20 @@ export class SessionContextService {
    * authorised to select and the currently active facility context
    * (or null).
    *
-   * Per ADR-015, the options list includes only facilities that:
-   * - belong to the active Organisation;
+   * Per ADR-015 §1.5 (corrected scope-authorisation semantics),
+   * the options list includes only facilities that:
+   * - belong to the active Organisation; AND
    * - have at least one facility-scoped role assignment for the
-   *   principal's membership, OR have an organisation-scoped
-   *   assignment at the active organisation, OR have a tenant-scoped
-   *   assignment.
+   *   principal's membership whose `scopeFacilityId` matches the
+   *   facility; OR
+   * - the principal holds an organisation-scoped role assignment
+   *   at the active organisation; OR
+   * - the principal holds an R13 System Administrator assignment
+   *   at tenant scope for the active tenant.
+   *
+   * A generic tenant-scoped assignment for R01–R12 does NOT grant
+   * facility access. Legacy R09 tenant-scoped rows do NOT
+   * authorise facility context selection.
    */
   private async loadFacilityContext(
     _userId: UserId,
@@ -1385,8 +1413,16 @@ export class SessionContextService {
     // Filter to active facilities for which the principal holds an
     // applicable scoped role assignment.
     const authorisedFacIds = new Set<FacilityId>();
-    // Tenant-scoped and organisation-scoped assignments authorise
-    // every facility under the active organisation.
+    // Per ADR-015 §1.5 (corrected): tenant-scoped and
+    // organisation-scoped assignments authorise every facility
+    // under the active organisation ONLY when:
+    // - the principal holds an R13 System Administrator assignment
+    //   at tenant scope (grants tenant-wide facility selection); OR
+    // - the principal holds an organisation-scoped assignment at
+    //   the active organisation (grants organisation-wide facility
+    //   selection).
+    // A generic tenant-scoped assignment for R01–R12 does NOT
+    // grant facility access.
     const tenantScopedAssignments =
       await this.roleAssignments.listForMembershipAtScope(
         membershipId,
@@ -1397,13 +1433,13 @@ export class SessionContextService {
         membershipId,
         'organisation',
       );
-    if (
-      tenantScopedAssignments.length > 0 ||
-      (orgScopedAssignments.length > 0 &&
-        orgScopedAssignments.some(
-          (a) => a.scopeOrganisationId === organisationId,
-        ))
-    ) {
+    const hasR13TenantScoped = tenantScopedAssignments.some(
+      (a) => a.roleCode === 'R13_SYSTEM_ADMINISTRATOR',
+    );
+    const hasOrgScopedAtActiveOrg = orgScopedAssignments.some(
+      (a) => a.scopeOrganisationId === organisationId,
+    );
+    if (hasR13TenantScoped || hasOrgScopedAtActiveOrg) {
       for (const fac of allFacilities) {
         if (fac.status === 'active') {
           authorisedFacIds.add(fac.id);

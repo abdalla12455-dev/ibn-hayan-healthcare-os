@@ -52,8 +52,46 @@ import type {
  * filtering on scope level. The `listForMembershipAtOrganisation`
  * and `listForMembershipAtFacility` ports return only the
  * assignments that grant authority at the supplied organisation or
- * facility, including tenant-scoped assignments (which are valid
- * across every organisation and facility under the tenant).
+ * facility.
+ *
+ * Per ADR-015 §1.5 (Scope-authorisation semantics — corrected),
+ * the applicability rules are fail-closed and explicit:
+ *
+ * - A principal may select an organisation only when at least one
+ *   of these conditions is true:
+ *   1. The principal has an organisation-scoped assignment for that
+ *      exact organisation.
+ *   2. The principal has a facility-scoped assignment to a facility
+ *      whose parent is that organisation.
+ *   3. The principal has an R13 System Administrator assignment at
+ *      tenant scope for the active tenant.
+ *
+ * - A principal may select a facility only when at least one of
+ *   these conditions is true:
+ *   1. The principal has a facility-scoped assignment for that
+ *      exact facility.
+ *   2. The principal has an organisation-scoped assignment for the
+ *      facility's parent organisation.
+ *   3. The principal has an R13 System Administrator assignment at
+ *      tenant scope for the active tenant.
+ *
+ * A generic tenant-scoped assignment for R01–R12 does NOT grant
+ * access to every organisation or facility under the tenant. In
+ * particular, an R09 tenant-scoped assignment does NOT grant
+ * tenant-wide organisation or facility access. Legacy R09
+ * tenant-scoped rows may remain stored for migration compatibility,
+ * but they do NOT authorise organisation or facility context
+ * selection until explicitly reassigned at organisation or facility
+ * scope.
+ *
+ * The `listForMembershipAtOrganisation` and
+ * `listForMembershipAtFacility` ports enforce these rules
+ * structurally: they return organisation-scoped and facility-scoped
+ * assignments that match the supplied target, plus tenant-scoped
+ * assignments ONLY when the role code is R13_SYSTEM_ADMINISTRATOR.
+ * Tenant-scoped assignments for R01–R12 are excluded by the
+ * repository implementation; the application layer does not need
+ * to re-filter them.
  */
 export interface TenantRoleAssignmentRepository {
   /**
@@ -106,15 +144,18 @@ export interface TenantRoleAssignmentRepository {
    * List the TenantRoleAssignments for a specific TenantMembership
    * that grant authority at the supplied organisation. The result
    * includes:
-   * - tenant-scoped assignments for the membership (valid across
-   *   every organisation under the tenant);
    * - organisation-scoped assignments for the membership whose
    *   `scopeOrganisationId` matches the supplied organisationId;
    * - facility-scoped assignments for the membership whose
    *   `scopeOrganisationId` matches the supplied organisationId
    *   (these grant authority at the organisation level by
    *   implication, because a facility-scoped assignment grants
-   *   authority at the facility's parent organisation).
+   *   authority at the facility's parent organisation);
+   * - tenant-scoped assignments for the membership ONLY when the
+   *   role code is R13_SYSTEM_ADMINISTRATOR. Per ADR-015 §1.5, a
+   *   generic tenant-scoped assignment for R01–R12 does NOT grant
+   *   organisation access; only R13 at tenant scope grants
+   *   tenant-wide organisation selection.
    *
    * The result is membership-and-organisation-scoped; no
    * assignment belonging to a different membership or targeting a
@@ -140,14 +181,17 @@ export interface TenantRoleAssignmentRepository {
    * List the TenantRoleAssignments for a specific TenantMembership
    * that grant authority at the supplied facility. The result
    * includes:
-   * - tenant-scoped assignments for the membership (valid across
-   *   every facility under the tenant);
+   * - facility-scoped assignments for the membership whose
+   *   `scopeFacilityId` matches the supplied facilityId;
    * - organisation-scoped assignments for the membership whose
    *   `scopeOrganisationId` matches the facility's parent
    *   organisation (valid across every facility under the
    *   organisation);
-   * - facility-scoped assignments for the membership whose
-   *   `scopeFacilityId` matches the supplied facilityId.
+   * - tenant-scoped assignments for the membership ONLY when the
+   *   role code is R13_SYSTEM_ADMINISTRATOR. Per ADR-015 §1.5, a
+   *   generic tenant-scoped assignment for R01–R12 does NOT grant
+   *   facility access; only R13 at tenant scope grants tenant-wide
+   *   facility selection.
    *
    * The result is membership-and-facility-scoped; no assignment
    * belonging to a different membership or targeting a different
