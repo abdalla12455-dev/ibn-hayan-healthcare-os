@@ -75,19 +75,50 @@ The decision does not commit Department or Care-Team scope levels (deferred). Th
 
 ### 1.3 Database Model Chosen
 
-The chosen database model extends the existing `tenant_role_assignments` table with two nullable columns and adds two nullable columns to `auth_sessions`. No new tables are introduced. The model preserves every existing tenant, organisation, and facility boundary by reusing the existing primary and foreign keys.
+The chosen database model extends the existing `tenant_role_assignments` table with four columns — a required `tenant_id` plus the scope-target triple — and adds two nullable columns to `auth_sessions`. No new tables are introduced. The model preserves every existing tenant, organisation, and facility boundary through a combination of database-enforced composite foreign keys, partial unique indexes, and CHECK constraints; the application layer provides clear error paths but is no longer the sole enforcement point.
 
 **`tenant_role_assignments` extension:**
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
+| `tenant_id` | `UUID` | No | **Derived server-side from the referenced `TenantMembership.tenant_id`. Never accepted from caller input.** Added by the migration as nullable, backfilled from `tenant_memberships.tenant_id` via `tenant_membership_id`, verified by a `DO $$ ... RAISE EXCEPTION` block when any row remains NULL, then set `NOT NULL`. The persisted `tenant_id` is the structural anchor for the three composite foreign keys added below. |
 | `scope_level` | `VARCHAR(20)` NOT NULL DEFAULT `'tenant'` | No | One of `'tenant'`, `'organisation'`, `'facility'`. A CHECK constraint enforces the catalogue. |
 | `scope_organisation_id` | `UUID` | Yes | Required when `scope_level = 'organisation'` or `scope_level = 'facility'`. Must be null when `scope_level = 'tenant'`. A CHECK constraint enforces the implication. |
 | `scope_facility_id` | `UUID` | Yes | Required when `scope_level = 'facility'`. Must be null otherwise. A CHECK constraint enforces the implication. |
 
-The existing unique constraint on `(tenant_membership_id, role_code)` is replaced with a unique constraint on `(tenant_membership_id, role_code, scope_level, scope_organisation_id, scope_facility_id)`. This permits the same role to be assigned at multiple scope levels (e.g. R09 at tenant scope and R09 at facility scope) without conflict, while preventing duplicate assignments at the same scope. PostgreSQL treats `NULL` as distinct in a unique index, which would defeat the constraint for tenant-scoped rows; the migration therefore replaces the unique index with a partial unique index per scope level (one partial index where `scope_level = 'tenant'` and `scope_organisation_id IS NULL` and `scope_facility_id IS NULL`, one where `scope_level = 'organisation'` and `scope_facility_id IS NULL`, one where `scope_level = 'facility'`). This is the structural enforcement of "no duplicate assignments at the same scope" at the database level.
+The existing unique constraint on `(tenant_membership_id, role_code)` is replaced by three partial unique indexes, one per scope level. This permits the same role to be assigned at multiple scope levels (e.g. R09 at tenant scope and R09 at facility scope) without conflict, while preventing duplicate assignments at the same scope. PostgreSQL treats `NULL` as distinct in a unique index, which would defeat the constraint for tenant-scoped rows; the migration therefore replaces the unique index with a partial unique index per scope level:
 
-A composite foreign key `tenant_role_assignments(scope_organisation_id, tenant_membership_id)` is not directly expressible because the membership does not carry `tenant_id`. The application layer therefore validates, before insertion, that the supplied `scope_organisation_id` belongs to the same tenant as the membership; a single-column foreign key `tenant_role_assignments.scope_organisation_id` → `organisations.id` with `ON DELETE RESTRICT` is the structural backstop. The same approach is used for `scope_facility_id` → `facilities.id` with `ON DELETE RESTRICT`. The application layer additionally verifies, before insertion, that the facility belongs to the organisation when both are supplied.
+- `tenant_role_assignments_tenant_scope_uniq` on `(tenant_membership_id, role_code)` `WHERE scope_level = 'tenant' AND scope_organisation_id IS NULL AND scope_facility_id IS NULL`
+- `tenant_role_assignments_organisation_scope_uniq` on `(tenant_membership_id, role_code, scope_organisation_id)` `WHERE scope_level = 'organisation' AND scope_facility_id IS NULL`
+- `tenant_role_assignments_facility_scope_uniq` on `(tenant_membership_id, role_code, scope_organisation_id, scope_facility_id)` `WHERE scope_level = 'facility'`
+
+This is the structural enforcement of "no duplicate assignments at the same scope" at the database level.
+
+**Migration sequence for `tenant_id`:**
+
+1. `ALTER TABLE tenant_role_assignments ADD COLUMN tenant_id UUID;` (initially nullable)
+2. `UPDATE tenant_role_assignments AS tra SET tenant_id = tm.tenant_id FROM tenant_memberships AS tm WHERE tra.tenant_membership_id = tm.id;` (backfill via join)
+3. `DO $$ ... SELECT COUNT(*) INTO null_count FROM tenant_role_assignments WHERE tenant_id IS NULL; IF null_count > 0 THEN RAISE EXCEPTION ... END IF; END $$;` (fail-closed verification — the migration aborts if any orphan assignment is detected; Prisma migrate applies the migration inside a single transaction, so the entire migration rolls back)
+4. `ALTER TABLE tenant_role_assignments ALTER COLUMN tenant_id SET NOT NULL;`
+5. `UPDATE tenant_role_assignments SET scope_level = 'tenant', scope_organisation_id = NULL, scope_facility_id = NULL WHERE scope_level IS NULL OR scope_organisation_id IS NOT NULL OR scope_facility_id IS NOT NULL;` (preserve existing assignments as tenant scope)
+
+**Composite unique targets required for the composite foreign keys:**
+
+- `tenant_memberships(id, tenant_id)` — composite unique index `tenant_memberships_id_tenant_id_key` (added by this migration; required for the membership-tenant composite FK below)
+- `organisations(tenant_id, id)` — composite unique index already added by the third canonical batch (`organisations_tenant_id_id_key`); this migration references it without re-creating it
+- `facilities(tenant_id, organisation_id, id)` — composite unique index `facilities_tenant_id_organisation_id_id_key` (added by this migration; required for the facility composite FK below)
+
+**Composite foreign keys on `tenant_role_assignments`:**
+
+All three composite foreign keys are added as reviewed raw SQL because Prisma 7 cannot express composite foreign keys in the schema language. Each uses `ON DELETE RESTRICT` and `ON UPDATE RESTRICT`. PostgreSQL treats a composite foreign key as unenforced when any referencing column is `NULL`; the tenant-scoped rows (where `scope_organisation_id` and `scope_facility_id` are both NULL) are therefore subject only to the membership-tenant composite FK, while organisation-scoped and facility-scoped rows are subject to the additional composite FKs as their scope-target identifiers become non-null.
+
+1. `tenant_role_assignments(tenant_membership_id, tenant_id)` → `tenant_memberships(id, tenant_id)` — enforces at the database level that the assignment's derived `tenant_id` matches the membership's `tenant_id`. A SQL `INSERT` that supplies a mismatched `tenant_id` is rejected. This is the structural enforcement of the invariant "tenantId is derived server-side from TenantMembership; it must never be supplied arbitrarily".
+
+2. `tenant_role_assignments(tenant_id, scope_organisation_id)` → `organisations(tenant_id, id)` — enforces at the database level that the scope-organisation belongs to the assignment's tenant. Applies only to rows where `scope_organisation_id` is non-null (organisation-scoped and facility-scoped assignments).
+
+3. `tenant_role_assignments(tenant_id, scope_organisation_id, scope_facility_id)` → `facilities(tenant_id, organisation_id, id)` — enforces at the database level that the scope-facility belongs to the assignment's tenant and to the scope-organisation. Applies only to rows where both `scope_organisation_id` and `scope_facility_id` are non-null (facility-scoped assignments).
+
+Single-column foreign keys `tenant_role_assignments.scope_organisation_id` → `organisations.id` and `tenant_role_assignments.scope_facility_id` → `facilities.id` are retained alongside the composite FKs for Prisma relation compatibility and as defence-in-depth; the composite FKs are the structural enforcement of tenant consistency. The application layer (`PrismaTenantRoleAssignmentRepository.create`) additionally validates, before insertion, that the supplied `scope_organisation_id` belongs to the derived tenant and that the supplied `scope_facility_id` belongs to the supplied organisation; this provides a clear error path that does not depend on the database raising a constraint violation.
 
 **`auth_sessions` extension:**
 
@@ -112,21 +143,57 @@ Single-column foreign keys `auth_sessions.active_organisation_id` → `organisat
 
 ### 1.4 Interaction with the Existing TenantRoleAssignment Model
 
-The existing `TenantRoleAssignment` model (ratified by Batch 8) is preserved. Existing rows are migrated by the migration's `UPDATE` statement: every existing row receives `scope_level = 'tenant'`, `scope_organisation_id = NULL`, `scope_facility_id = NULL`. The migration is forward-only; no down migration is provided. The migration does not insert any new rows. The migration does not modify the existing `(tenant_membership_id, role_code)` data; it only adds the scope columns and backfills the default scope level.
+The existing `TenantRoleAssignment` model (ratified by Batch 8) is extended, not replaced. The model gains a required `tenantId` field that is derived server-side from the referenced `TenantMembership.tenantId`; the `CreateTenantRoleAssignmentInput` type does NOT accept `tenantId` from the caller, and the persistence layer (`PrismaTenantRoleAssignmentRepository.create`) loads the membership, derives `tenantId`, validates any scope-target identifiers against the derived tenant, and only then persists the row. Existing rows are migrated by the migration's `UPDATE` statement: every existing row receives `tenant_id` backfilled from `tenant_memberships.tenant_id` (verified by a fail-closed `DO $$ ... RAISE EXCEPTION` block), `scope_level = 'tenant'`, `scope_organisation_id = NULL`, `scope_facility_id = NULL`. The migration is forward-only; no down migration is provided. The migration does not insert any new rows. The migration does not modify the existing `(tenant_membership_id, role_code)` data; it only adds the `tenant_id` and scope columns and backfills them.
 
-The existing `TenantRoleAssignmentRepository` port is extended with two new methods: `listForMembershipAtOrganisation(membershipId, organisationId)` and `listForMembershipAtFacility(membershipId, facilityId)`. The existing `listForMembership(membershipId)` method continues to return all assignments for the membership regardless of scope; the authorisation layer interprets the result by filtering on scope level. The `create` method is extended to accept the scope fields; the existing single-role-assignment creation path (tenant scope) is preserved for backward compatibility with the development bootstrap command.
+The `TenantRoleAssignmentRepository` port is extended with three new methods: `listForMembershipAtOrganisation(membershipId, organisationId)`, `listForMembershipAtFacility(membershipId, facilityId)`, and `listForMembershipAtScope(membershipId, scopeLevel)`. The existing `listForMembership(membershipId)` method continues to return all assignments for the membership regardless of scope; the authorisation layer interprets the result by filtering on scope level. The `create` method is extended to accept the scope fields; the existing single-role-assignment creation path (tenant scope) is preserved for backward compatibility with the development bootstrap command. Per §1.5 (Scope-authorisation Semantics), `listForMembershipAtOrganisation` and `listForMembershipAtFacility` return organisation-scoped and facility-scoped assignments that match the supplied target, plus tenant-scoped assignments ONLY when the role code is `R13_SYSTEM_ADMINISTRATOR`; tenant-scoped assignments for R01–R12 are excluded by the repository implementation and therefore do not authorise organisation or facility context selection.
 
-The role-permission matrix in `packages/domain/src/authorization/role-permissions.ts` is unchanged. The matrix grants permissions by role code; scope narrows where the permission may be exercised. A principal with R09 at tenant scope may exercise R09 permissions at tenant scope; a principal with R09 at organisation scope may exercise R09 permissions at organisation scope; a principal with R09 at facility scope may exercise R09 permissions at facility scope. The authorisation guard consults both the role-permission matrix (does the role grant the permission?) and the scope level (does the scope match the request's target scope?).
+The role-permission matrix in `packages/domain/src/authorization/role-permissions.ts` is unchanged in its permission grants but is extended in its commentary: the seven context permissions (`context:view`, `context:select`, `context:clear`, `context:select_organisation`, `context:clear_organisation`, `context:select_facility`, `context:clear_facility`) are granted to R01–R13 and denied to R14. The matrix grants permissions by role code; scope narrows where a permission may be exercised. A principal with R09 at tenant scope may exercise R09 permissions at tenant scope; a principal with R09 at organisation scope may exercise R09 permissions at organisation scope; a principal with R09 at facility scope may exercise R09 permissions at facility scope. The authorisation guard consults both the role-permission matrix (does the role grant the permission?) and the scope level (does the scope match the request's target scope?). Permission possession alone never grants scope access: a principal with R09 at tenant scope and no organisation-scoped or facility-scoped assignment cannot select an organisation or facility context.
 
-### 1.5 Separation from Platform Super Admin Authorisation
+### 1.5 Scope-authorisation Semantics
+
+This section documents the fail-closed rules that govern organisation and facility context selection. The rules are enforced structurally by the repository (`PrismaTenantRoleAssignmentRepository.listForMembershipAtOrganisation` and `.listForMembershipAtFacility`) and by the session-context service (`SessionContextService.selectOrganisationContext`, `.selectFacilityContext`, `.loadOrganisationContext`, `.loadFacilityContext`). The application layer is the primary enforcement point; the database composite foreign keys documented in §1.3 are the structural backstop.
+
+#### Organisation selection
+
+A principal may select an organisation as the active organisation context only when at least one of the following conditions is true:
+
+1. The principal has an organisation-scoped role assignment for that exact organisation (i.e. an assignment whose `scopeLevel = 'organisation'` and `scopeOrganisationId` matches the selected organisation).
+2. The principal has a facility-scoped role assignment to a facility whose parent organisation is the selected organisation (i.e. an assignment whose `scopeLevel = 'facility'` and `scopeOrganisationId` matches the selected organisation).
+3. The principal has a tenant-scoped `R13_SYSTEM_ADMINISTRATOR` assignment for the active tenant.
+
+A tenant-scoped assignment for any role in R01–R12 does NOT grant organisation selection. In particular, a tenant-scoped R09 Administrator assignment does NOT grant tenant-wide organisation selection. Legacy R09 tenant-scoped rows (created before this ADR was ratified) remain valid stored records for migration compatibility, but they do NOT authorise organisation context selection until the assignment is explicitly re-scoped to an organisation or facility.
+
+#### Facility selection
+
+A principal may select a facility as the active facility context only when at least one of the following conditions is true:
+
+1. The principal has a facility-scoped role assignment for that exact facility (i.e. an assignment whose `scopeLevel = 'facility'` and `scopeFacilityId` matches the selected facility).
+2. The principal has an organisation-scoped role assignment for the facility's parent organisation (i.e. an assignment whose `scopeLevel = 'organisation'` and `scopeOrganisationId` matches the facility's parent organisation).
+3. The principal has a tenant-scoped `R13_SYSTEM_ADMINISTRATOR` assignment for the active tenant.
+
+A tenant-scoped assignment for any role in R01–R12 does NOT grant facility selection. In particular, a tenant-scoped R09 Administrator assignment does NOT grant tenant-wide facility selection. Legacy R09 tenant-scoped rows do NOT authorise facility context selection.
+
+#### R09 and R13 do not follow identical scope-selection semantics
+
+R09 Administrator and R13 System Administrator do NOT follow identical scope-selection semantics. A tenant-scoped R09 assignment grants R09 permissions at tenant scope (e.g. `context:select_organisation` is granted by the role-permission matrix), but the scope-authorisation layer denies organisation and facility selection because no organisation-scoped or facility-scoped R09 assignment exists. A tenant-scoped R13 assignment grants both R13 permissions at tenant scope AND tenant-wide organisation and facility selection: the repository's `listForMembershipAtOrganisation` and `listForMembershipAtFacility` methods return the R13 tenant-scoped assignment for every organisation and facility under the tenant. This asymmetry is intentional: R13 is the platform's tenant-wide administrator role; R09 is the facility/organisation administrator role and must be explicitly scoped.
+
+#### R14 Integration Account denial
+
+R14 Integration Account is non-interactive and receives no browser context-selection capability. The role-permission matrix denies R14 all seven context permissions (`context:view`, `context:select`, `context:clear`, `context:select_organisation`, `context:clear_organisation`, `context:select_facility`, `context:clear_facility`). The authorisation guard rejects any context-selection request from an R14 principal before any business logic runs; no scope-authorisation evaluation occurs. An R14 principal may not invoke `GET /api/v1/context`, `PUT /api/v1/context/tenant`, `DELETE /api/v1/context/tenant`, `PUT /api/v1/context/organisation`, `DELETE /api/v1/context/organisation`, `PUT /api/v1/context/facility`, or `DELETE /api/v1/context/facility`.
+
+#### Cross-tenant and cross-organisation selections fail closed
+
+A request that targets an organisation or facility outside the session's active tenant is rejected with a generic 403 Forbidden response that does not reveal whether the supplied identifier exists for another user, another tenant, or another organisation. A request that targets a facility outside the session's active organisation is rejected with the same generic 403. Cross-tenant, cross-organisation, and missing-identifier cases return the same generic 403; the response does not reveal which condition failed. The authorisation guard logs a security audit event for every denial; the audit event records the endpoint and the failure category but does not record the supplied identifier, the principal's role assignments, or any PHI.
+
+### 1.6 Separation from Platform Super Admin Authorisation
 
 Platform Super Admin is a separate product surface consumed by R13 System Administrator operating in their platform-administration capacity. The Platform Super Admin surface authorises cross-tenant operations: a Platform Super Admin may administrate tenants, organisations, and facilities across the entire platform, not just within their own tenant membership.
 
 This batch implements the Clinic Admin scoped surface only. The authorisation guard does not acquire any cross-tenant capability. The existing default-deny posture is preserved for every cross-tenant attempt: a request that targets an organisation or facility outside the session's active tenant is rejected with a generic 403, regardless of the principal's role assignments. The `AuthorisationGuard` does not consult Platform Super Admin authorisation in this batch; that capability is deferred to a future ADR.
 
-The R13 role continues to be a tenant-scoped role assignment in this batch. An R13 principal operating within their tenant membership may select organisations and facilities within that tenant, subject to the same scope rules as R09. The R13 principal does not acquire cross-tenant capability through this batch.
+The R13 role continues to be a tenant-scoped role assignment in this batch. Per §1.5 (Scope-authorisation Semantics), an R13 principal operating within their tenant membership may select organisations and facilities within that tenant by virtue of the tenant-scoped R13 assignment; this is the single exception to the rule that tenant-scoped assignments do not grant organisation or facility selection. R13 does not acquire cross-tenant capability through this batch: an R13 principal in Tenant T may not select an organisation or facility in Tenant U, and the session's active tenant membership must match the target's tenant. Cross-tenant Platform Super Admin authorisation is deferred to a future ADR.
 
-### 1.6 Decision Properties
+### 1.7 Decision Properties
 
 | Property | Value |
 |---|---|
@@ -136,7 +203,7 @@ The R13 role continues to be a tenant-scoped role assignment in this batch. An R
 | Affected Principles | P1 (Healthcare First), P10 (Multi-Tenancy), P13 (Auditability), least-privilege |
 | ADR Required | Yes — this ADR |
 
-### 1.7 Decision Boundaries
+### 1.8 Decision Boundaries
 
 This ADR ratifies the scoped-context model. It does not ratify the specific Clinic Admin Overview design (deferred to the Design Bible), the specific Platform Super Admin Overview design (deferred to the Design Bible), the Department or Care-Team scope levels (deferred to a future ADR), the customer-defined custom-role catalogue (deferred), the cross-tenant Platform Super Admin authorisation model (deferred), or the row-level security policy set (deferred). Those are implementation decisions or future ADRs. This ADR does not perform implementation work; it authorises and bounds the implementation. The implementation must respect every commitment in this ADR; the implementation may choose any concrete technology that satisfies the commitments.
 

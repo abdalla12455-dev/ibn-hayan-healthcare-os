@@ -260,7 +260,14 @@ async function main(): Promise<void> {
     const existingMembership = await prisma.tenantMembership.findUnique({
       where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
     });
+    // Per ADR-015, TenantRoleAssignment.tenantId is derived
+    // server-side from the referenced TenantMembership; it must
+    // never be supplied from an external or caller-provided source.
+    // The bootstrap script holds the membership row in memory
+    // (either freshly created or freshly loaded); the derived
+    // tenantId is the membership's `tenantId` field.
     let membershipId: string;
+    let membershipTenantId: string;
     if (existingMembership === null) {
       const membership = await prisma.tenantMembership.create({
         data: {
@@ -269,11 +276,13 @@ async function main(): Promise<void> {
         },
       });
       membershipId = membership.id;
+      membershipTenantId = membership.tenantId;
       logger.log(
         `Created tenant membership: id=${membership.id} tenantId=${membership.tenantId} userId=${membership.userId}`,
       );
     } else {
       membershipId = existingMembership.id;
+      membershipTenantId = existingMembership.tenantId;
       logger.log(
         `Tenant membership already exists: id=${existingMembership.id}`,
       );
@@ -342,11 +351,24 @@ async function main(): Promise<void> {
         metadata: { roleCode: 'R13_SYSTEM_ADMINISTRATOR' },
       });
       if (auditDraft.ok) {
+        // The role-assignment create is performed inside this
+        // transaction alongside the audit outbox insertion. We
+        // cannot delegate to PrismaTenantRoleAssignmentRepository
+        // .create here because the repository would start its own
+        // transaction and would not join this one; the atomicity
+        // guarantee (role assignment + audit event commit or roll
+        // back together) would be lost. The tenantId is therefore
+        // derived explicitly from the membership row held in
+        // memory; it is never read from caller input or hardcode.
         await prisma.$transaction(async (tx) => {
           await tx.tenantRoleAssignment.create({
             data: {
               tenantMembershipId: membershipId,
+              tenantId: membershipTenantId,
               roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+              scopeLevel: 'tenant',
+              scopeOrganisationId: null,
+              scopeFacilityId: null,
             },
           });
           await tx.auditOutboxEvent.create({
@@ -369,10 +391,18 @@ async function main(): Promise<void> {
         logger.warn(
           `Audit draft build failed (${auditDraft.reason}); creating role assignment without audit event.`,
         );
+        // Non-transactional fallback when the audit draft build
+        // failed. The tenantId is the derived value from the
+        // membership row; tenant-scope targets are explicitly
+        // null per ADR-015's CHECK constraint.
         await prisma.tenantRoleAssignment.create({
           data: {
             tenantMembershipId: membershipId,
+            tenantId: membershipTenantId,
             roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+            scopeLevel: 'tenant',
+            scopeOrganisationId: null,
+            scopeFacilityId: null,
           },
         });
         logger.log(

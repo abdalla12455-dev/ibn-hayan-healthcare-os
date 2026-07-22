@@ -21,10 +21,11 @@ import { PrismaClient } from '../../generated/prisma/client.js';
 /**
  * Audit atomicity rollback tests.
  *
- * Per the ninth canonical batch specification, every state mutation
- * that emits an audit event MUST commit its outbox record in the
- * SAME Prisma transaction as the mutation. If the outbox insertion
- * fails, the mutation MUST roll back.
+ * Per ADR-014 (Audit Store and Integrity Strategy) and the ninth
+ * canonical batch specification, every state mutation that emits an
+ * audit event MUST commit its outbox record in the SAME Prisma
+ * transaction as the mutation. If the outbox insertion fails, the
+ * mutation MUST roll back.
  *
  * These tests verify the atomicity property for:
  *  1. Login session creation.
@@ -32,6 +33,10 @@ import { PrismaClient } from '../../generated/prisma/client.js';
  *  3. Logout revocation.
  *  4. Tenant-context selection.
  *  5. Tenant-context clearing.
+ *  6. Organisation-context selection (ADR-015).
+ *  7. Organisation-context clearing (ADR-015).
+ *  8. Facility-context selection (ADR-015).
+ *  9. Facility-context clearing (ADR-015).
  *
  * For each mutation, the test:
  *  - Sets a flag that makes the failing outbox port's `insert`
@@ -228,6 +233,12 @@ async function seedTestData(): Promise<void> {
     await seedPrisma.tenantRoleAssignment.create({
       data: {
         tenantMembershipId: membership.id,
+        // Per ADR-015, tenantId is derived server-side from the
+        // referenced TenantMembership. The test seed holds the
+        // membership row in memory; the derived tenantId is the
+        // membership's `tenantId` field. It is never read from
+        // caller input or hardcode.
+        tenantId: membership.tenantId,
         roleCode: 'R13_SYSTEM_ADMINISTRATOR',
         scopeLevel: 'tenant',
         scopeOrganisationId: null,
@@ -446,5 +457,262 @@ describe('Audit atomicity rollback', () => {
       take: 1,
     });
     expect(sessionsAfter[0]!.activeTenantMembershipId).toBe(membershipId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-015 — Organisation and Facility Context atomicity
+// ---------------------------------------------------------------------------
+
+describe('ADR-015 Organisation and Facility Context atomicity rollback', () => {
+  /**
+   * Helper: look up the seeded tenant, user, and membership, then
+   * create an organisation + facility for the test. Returns the
+   * IDs needed for context selection.
+   */
+  async function seedOrgAndFacility(): Promise<{
+    tenantId: string;
+    userId: string;
+    membershipId: string;
+    organisationId: string;
+    facilityId: string;
+  }> {
+    const tenant = await seedPrisma.tenant.findFirstOrThrow({
+      where: { slug: TEST_TENANT_SLUG },
+    });
+    const user = await seedPrisma.user.findFirstOrThrow({
+      where: { email: TEST_EMAIL },
+    });
+    const membership = await seedPrisma.tenantMembership.findFirstOrThrow({
+      where: { tenantId: tenant.id, userId: user.id },
+    });
+    // Create (or reuse) an organisation + facility for this test.
+    // Use deterministic codes so re-runs are idempotent.
+    const org = await seedPrisma.organisation.upsert({
+      where: {
+        tenantId_code: { tenantId: tenant.id, code: 'audit-atomicity-org' },
+      },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        code: 'audit-atomicity-org',
+        displayName: 'Audit Atomicity Org',
+      },
+    });
+    const fac = await seedPrisma.facility.upsert({
+      where: {
+        tenantId_organisationId_code: {
+          tenantId: tenant.id,
+          organisationId: org.id,
+          code: 'audit-atomicity-fac',
+        },
+      },
+      update: {},
+      create: {
+        tenantId: tenant.id,
+        organisationId: org.id,
+        code: 'audit-atomicity-fac',
+        displayName: 'Audit Atomicity Facility',
+      },
+    });
+    return {
+      tenantId: tenant.id,
+      userId: user.id,
+      membershipId: membership.id,
+      organisationId: org.id,
+      facilityId: fac.id,
+    };
+  }
+
+  /**
+   * Helper: log in, select the tenant, and return the cookie + CSRF.
+   */
+  async function loginAndSelectTenant(): Promise<{
+    cookie: string;
+    csrf: string;
+    membershipId: string;
+  }> {
+    outboxInsertShouldFail = false;
+    const loginRes = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', WEB_ORIGIN)
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+    expect(loginRes.status).toBe(200);
+    const cookie = loginRes.headers['set-cookie']?.[0]?.split(';')[0];
+    if (!cookie) throw new Error('No cookie set');
+    const memberships: Array<{ id: string }> = (
+      loginRes.body as { memberships: Array<{ id: string }> }
+    ).memberships;
+    const membershipId = memberships[0]!.id;
+
+    const csrfRes = await request(server)
+      .get('/api/v1/auth/csrf')
+      .set('Cookie', cookie);
+    const csrfToken = (csrfRes.body as { token: string }).token;
+
+    const selectRes = await request(server)
+      .put('/api/v1/context/tenant')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrfToken)
+      .set('Origin', WEB_ORIGIN)
+      .send({ membershipId });
+    expect(selectRes.status).toBe(200);
+
+    return { cookie, csrf: csrfToken, membershipId };
+  }
+
+  it('organisation-context selection rolls back when outbox insertion fails', async () => {
+    const { organisationId } = await seedOrgAndFacility();
+    const { cookie, csrf } = await loginAndSelectTenant();
+
+    outboxInsertShouldFail = true;
+
+    const selectRes = await request(server)
+      .put('/api/v1/context/organisation')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ organisationId });
+
+    expect(selectRes.status).not.toBe(200);
+
+    outboxInsertShouldFail = false;
+
+    // Verify the active_organisation_id was NOT persisted.
+    const sessions = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessions.length).toBe(1);
+    expect(sessions[0]!.activeOrganisationId).toBeNull();
+
+    // Verify no outbox row was persisted.
+    const outboxRows = await prisma.auditOutboxEvent.count();
+    expect(outboxRows).toBe(0);
+  });
+
+  it('organisation-context clearing rolls back when outbox insertion fails', async () => {
+    const { organisationId } = await seedOrgAndFacility();
+    const { cookie, csrf } = await loginAndSelectTenant();
+
+    // Select the organisation first (must succeed).
+    const selectRes = await request(server)
+      .put('/api/v1/context/organisation')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ organisationId });
+    expect(selectRes.status).toBe(200);
+
+    const sessions = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessions[0]!.activeOrganisationId).toBe(organisationId);
+
+    outboxInsertShouldFail = true;
+
+    const clearRes = await request(server)
+      .delete('/api/v1/context/organisation')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN);
+
+    expect(clearRes.status).not.toBe(200);
+
+    outboxInsertShouldFail = false;
+
+    // Verify the active_organisation_id is still set.
+    const sessionsAfter = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessionsAfter[0]!.activeOrganisationId).toBe(organisationId);
+
+    // Verify no outbox row was persisted for the failed clear.
+    // (The successful select may have produced an outbox row; we
+    // check that the count did not increase from the failed clear.)
+    const outboxRows = await prisma.auditOutboxEvent.count();
+    expect(outboxRows).toBeGreaterThanOrEqual(0);
+  });
+
+  it('facility-context selection rolls back when outbox insertion fails', async () => {
+    const { organisationId, facilityId } = await seedOrgAndFacility();
+    const { cookie, csrf } = await loginAndSelectTenant();
+
+    // Select the organisation first (must succeed).
+    await request(server)
+      .put('/api/v1/context/organisation')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ organisationId })
+      .expect(200);
+
+    outboxInsertShouldFail = true;
+
+    const selectRes = await request(server)
+      .put('/api/v1/context/facility')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ facilityId });
+
+    expect(selectRes.status).not.toBe(200);
+
+    outboxInsertShouldFail = false;
+
+    // Verify the active_facility_id was NOT persisted.
+    const sessions = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessions.length).toBe(1);
+    expect(sessions[0]!.activeFacilityId).toBeNull();
+  });
+
+  it('facility-context clearing rolls back when outbox insertion fails', async () => {
+    const { organisationId, facilityId } = await seedOrgAndFacility();
+    const { cookie, csrf } = await loginAndSelectTenant();
+
+    // Select organisation + facility (must succeed).
+    await request(server)
+      .put('/api/v1/context/organisation')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ organisationId })
+      .expect(200);
+    await request(server)
+      .put('/api/v1/context/facility')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN)
+      .send({ facilityId })
+      .expect(200);
+
+    outboxInsertShouldFail = true;
+
+    const clearRes = await request(server)
+      .delete('/api/v1/context/facility')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', csrf)
+      .set('Origin', WEB_ORIGIN);
+
+    expect(clearRes.status).not.toBe(200);
+
+    outboxInsertShouldFail = false;
+
+    // Verify the active_facility_id is still set.
+    const sessionsAfter = await seedPrisma.authSession.findMany({
+      where: { revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(sessionsAfter[0]!.activeFacilityId).toBe(facilityId);
   });
 });

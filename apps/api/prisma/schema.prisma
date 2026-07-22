@@ -179,8 +179,8 @@ model Tenant {
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
-  organisations Organisation[]
-  memberships  TenantMembership[]
+  organisations   Organisation[]
+  memberships     TenantMembership[]
   roleAssignments TenantRoleAssignment[]
 
   @@map("tenants")
@@ -215,10 +215,10 @@ model Organisation {
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  facilities          Facility[]
-  roleAssignments     TenantRoleAssignment[]  @relation("TenantRoleAssignmentScopeOrganisation")
-  activeSessions      AuthSession[]           @relation("AuthSessionActiveOrganisation")
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facilities      Facility[]
+  roleAssignments TenantRoleAssignment[] @relation("TenantRoleAssignmentScopeOrganisation")
+  activeSessions  AuthSession[]          @relation("AuthSessionActiveOrganisation")
 
   @@unique([tenantId, code], map: "organisations_tenant_id_code_key")
   @@unique([tenantId, id], map: "organisations_tenant_id_id_key")
@@ -265,9 +265,9 @@ model Facility {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  organisation     Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  roleAssignments  TenantRoleAssignment[]  @relation("TenantRoleAssignmentScopeFacility")
-  activeSessions   AuthSession[]           @relation("AuthSessionActiveFacility")
+  organisation    Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roleAssignments TenantRoleAssignment[] @relation("TenantRoleAssignmentScopeFacility")
+  activeSessions  AuthSession[]          @relation("AuthSessionActiveFacility")
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
@@ -405,8 +405,8 @@ model TenantMembership {
   createdAt DateTime               @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime               @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   roleAssignments TenantRoleAssignment[]
 
   @@unique([tenantId, userId], map: "tenant_memberships_tenant_id_user_id_key")
@@ -483,20 +483,20 @@ model TenantMembership {
 /// explicitly assign R13 System Administrator to the development
 /// membership.
 model TenantRoleAssignment {
-  id                   String   @id @default(uuid()) @db.Uuid
-  tenantMembershipId   String   @map("tenant_membership_id") @db.Uuid
-  tenantId             String   @map("tenant_id") @db.Uuid
-  roleCode             String   @map("role_code") @db.VarChar(40)
-  scopeLevel           String   @default("tenant") @map("scope_level") @db.VarChar(20)
-  scopeOrganisationId  String?  @map("scope_organisation_id") @db.Uuid
-  scopeFacilityId      String?  @map("scope_facility_id") @db.Uuid
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantMembershipId  String   @map("tenant_membership_id") @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  roleCode            String   @map("role_code") @db.VarChar(40)
+  scopeLevel          String   @default("tenant") @map("scope_level") @db.VarChar(20)
+  scopeOrganisationId String?  @map("scope_organisation_id") @db.Uuid
+  scopeFacilityId     String?  @map("scope_facility_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenantMembership   TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  tenant             Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  scopeOrganisation  Organisation?    @relation("TenantRoleAssignmentScopeOrganisation", fields: [scopeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  scopeFacility      Facility?        @relation("TenantRoleAssignmentScopeFacility", fields: [scopeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenantMembership  TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeOrganisation Organisation?    @relation("TenantRoleAssignmentScopeOrganisation", fields: [scopeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeFacility     Facility?        @relation("TenantRoleAssignmentScopeFacility", fields: [scopeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([tenantMembershipId], map: "tenant_role_assignments_tenant_membership_id_idx")
   @@index([tenantId], map: "tenant_role_assignments_tenant_id_idx")
@@ -595,21 +595,21 @@ model TenantRoleAssignment {
 ///   are enforced at the application layer in the same Prisma
 ///   transaction as the selection or clearing.
 model AuthSession {
-  id                       String   @id @default(uuid()) @db.Uuid
-  userId                   String   @map("user_id") @db.Uuid
-  tokenHash                String   @unique @map("token_hash") @db.Char(64)
-  activeTenantMembershipId String?  @map("active_tenant_membership_id") @db.Uuid
-  activeOrganisationId     String?  @map("active_organisation_id") @db.Uuid
-  activeFacilityId         String?  @map("active_facility_id") @db.Uuid
-  expiresAt                DateTime @map("expires_at") @db.Timestamptz
-  lastSeenAt               DateTime @map("last_seen_at") @db.Timestamptz
+  id                       String    @id @default(uuid()) @db.Uuid
+  userId                   String    @map("user_id") @db.Uuid
+  tokenHash                String    @unique @map("token_hash") @db.Char(64)
+  activeTenantMembershipId String?   @map("active_tenant_membership_id") @db.Uuid
+  activeOrganisationId     String?   @map("active_organisation_id") @db.Uuid
+  activeFacilityId         String?   @map("active_facility_id") @db.Uuid
+  expiresAt                DateTime  @map("expires_at") @db.Timestamptz
+  lastSeenAt               DateTime  @map("last_seen_at") @db.Timestamptz
   rotatedAt                DateTime? @map("rotated_at") @db.Timestamptz
   revokedAt                DateTime? @map("revoked_at") @db.Timestamptz
-  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  user               User           @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  activeOrganisation Organisation?  @relation("AuthSessionActiveOrganisation", fields: [activeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  activeFacility     Facility?      @relation("AuthSessionActiveFacility", fields: [activeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user               User          @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activeOrganisation Organisation? @relation("AuthSessionActiveOrganisation", fields: [activeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activeFacility     Facility?     @relation("AuthSessionActiveFacility", fields: [activeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")
@@ -675,18 +675,18 @@ model AuthSession {
 /// outbox does NOT store secrets. The `canonical_event_draft` is
 /// sanitised through the forbidden-key detector before insertion.
 model AuditOutboxEvent {
-  id                   String   @id @default(uuid()) @db.Uuid
-  eventId              String   @unique @map("event_id") @db.Uuid
-  eventVersion         Int      @map("event_version")
-  canonicalEventDraft  Json     @map("canonical_event_draft")
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
-  availableAt          DateTime @default(dbgenerated("CURRENT_TIMESTAMP")) @map("available_at") @db.Timestamptz
-  attemptCount         Int      @default(0) @map("attempt_count")
-  deliveredAt          DateTime? @map("delivered_at") @db.Timestamptz
-  lastFailureCode      String?  @map("last_failure_code") @db.VarChar(60)
-  lastFailureAt        DateTime? @map("last_failure_at") @db.Timestamptz
-  leaseOwner           String?  @map("lease_owner") @db.VarChar(80)
-  leaseExpiresAt       DateTime? @map("lease_expires_at") @db.Timestamptz
+  id                  String    @id @default(uuid()) @db.Uuid
+  eventId             String    @unique @map("event_id") @db.Uuid
+  eventVersion        Int       @map("event_version")
+  canonicalEventDraft Json      @map("canonical_event_draft")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  availableAt         DateTime  @default(dbgenerated("CURRENT_TIMESTAMP")) @map("available_at") @db.Timestamptz
+  attemptCount        Int       @default(0) @map("attempt_count")
+  deliveredAt         DateTime? @map("delivered_at") @db.Timestamptz
+  lastFailureCode     String?   @map("last_failure_code") @db.VarChar(60)
+  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz
+  leaseOwner          String?   @map("lease_owner") @db.VarChar(80)
+  leaseExpiresAt      DateTime? @map("lease_expires_at") @db.Timestamptz
 
   @@index([deliveredAt, availableAt], map: "audit_outbox_events_delivered_at_available_at_idx")
   @@index([leaseExpiresAt], map: "audit_outbox_events_lease_expires_at_idx")

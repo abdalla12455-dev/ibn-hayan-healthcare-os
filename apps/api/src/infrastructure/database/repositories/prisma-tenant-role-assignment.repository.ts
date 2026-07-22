@@ -149,7 +149,10 @@ export class PrismaTenantRoleAssignmentRepository implements TenantRoleAssignmen
     let scopeOrganisationId: string | null = null;
     let scopeFacilityId: string | null = null;
     if (scopeLevel === 'organisation') {
-      if (input.scopeOrganisationId === null || input.scopeOrganisationId === undefined) {
+      if (
+        input.scopeOrganisationId === null ||
+        input.scopeOrganisationId === undefined
+      ) {
         throw new Error(
           "Cannot create organisation-scoped role assignment: scopeOrganisationId is required when scopeLevel is 'organisation'.",
         );
@@ -169,12 +172,18 @@ export class PrismaTenantRoleAssignmentRepository implements TenantRoleAssignmen
       }
       scopeOrganisationId = input.scopeOrganisationId;
     } else if (scopeLevel === 'facility') {
-      if (input.scopeOrganisationId === null || input.scopeOrganisationId === undefined) {
+      if (
+        input.scopeOrganisationId === null ||
+        input.scopeOrganisationId === undefined
+      ) {
         throw new Error(
           "Cannot create facility-scoped role assignment: scopeOrganisationId is required when scopeLevel is 'facility'.",
         );
       }
-      if (input.scopeFacilityId === null || input.scopeFacilityId === undefined) {
+      if (
+        input.scopeFacilityId === null ||
+        input.scopeFacilityId === undefined
+      ) {
         throw new Error(
           "Cannot create facility-scoped role assignment: scopeFacilityId is required when scopeLevel is 'facility'.",
         );
