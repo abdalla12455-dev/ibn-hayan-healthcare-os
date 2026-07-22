@@ -1,0 +1,109 @@
+name: ADR-015 PostgreSQL 17 Validation
+
+on:
+  push:
+    branches:
+      - adr-015-validation
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adr015-postgresql17-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PostgreSQL 17 validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create isolated Node and PostgreSQL test image
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/Dockerfile.adr015" <<'DOCKERFILE'
+          FROM node:22-bookworm AS node_runtime
+
+          FROM postgres:17-bookworm
+
+          USER root
+
+          COPY --from=node_runtime /usr/local/ /usr/local/
+
+          RUN apt-get update \
+              && apt-get install -y --no-install-recommends \
+                 ca-certificates \
+                 git \
+                 python3 \
+                 make \
+                 g++ \
+              && rm -rf /var/lib/apt/lists/*
+
+          RUN corepack enable
+
+          ENV CI=true
+          ENV PG_BINDIR=/usr/lib/postgresql/17/bin
+          ENV PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+          WORKDIR /workspace
+
+          COPY --chown=postgres:postgres . /workspace
+
+          USER postgres
+
+          RUN pnpm install --frozen-lockfile
+          DOCKERFILE
+
+      - name: Build validation image
+        shell: bash
+        run: |
+          docker build \
+            --file "${RUNNER_TEMP}/Dockerfile.adr015" \
+            --tag ibn-hayan-adr015-pg17 \
+            .
+
+      - name: Verify execution environment
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+            set -euo pipefail
+            node --version
+            pnpm --version
+            postgres --version
+            initdb --version
+            pg_ctl --version
+            psql --version
+          '
+
+      - name: Run complete monorepo gates
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+            set -euo pipefail
+            pnpm exec prisma validate --schema apps/api/prisma/schema.prisma
+            pnpm exec prisma generate --schema apps/api/prisma/schema.prisma
+            pnpm run typecheck
+            pnpm run lint
+            pnpm run test
+            pnpm run build
+          '
+
+      - name: Run PostgreSQL 17 suites
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-adr015-pg17 bash -lc '
+            set -euo pipefail
+            pnpm run build:shared
+            cd apps/api
+            pnpm test:context
+            pnpm test:database
+            pnpm audit:test:atomicity
+            pnpm audit:test:integration
+            pnpm audit:test:database
+            pnpm audit:test:concurrency
+            pnpm audit:test:verify
+          '
