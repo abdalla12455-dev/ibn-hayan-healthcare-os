@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           cat > "${RUNNER_TEMP}/Dockerfile.adr015" <<'DOCKERFILE'
-          FROM node:22-bookworm AS node_runtime
+          FROM node:24-bookworm AS node_runtime
 
           FROM postgres:17-bookworm
 
@@ -54,6 +54,8 @@ jobs:
           ENV CI=true
           ENV PG_BINDIR=/usr/lib/postgresql/17/bin
           ENV PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+          RUN install -d -o postgres -g postgres /workspace
 
           WORKDIR /workspace
 
