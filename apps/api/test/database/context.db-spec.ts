@@ -4,6 +4,8 @@ import {
   setupDatabaseTests,
   getDatabaseUrl,
   getPsqlBin,
+  startMigrationUpgradeCluster,
+  type MigrationUpgradeHandle,
 } from './_pg-bootstrap.js';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
 import { PrismaTenantRepository } from '../../src/infrastructure/database/repositories/prisma-tenant.repository.js';
@@ -82,9 +84,17 @@ import type {
  * 32. Existing assignments are backfilled with scope_level = tenant.
  * 33. Existing role codes survive migration.
  * 34. Existing membership associations survive migration.
- * 35. Migration-upgrade test: insert a pre-ADR-015 row, apply the
- *     ADR-015 migration, verify tenant_id + scope_level + null scope
- *     targets.
+ * 35. Genuine migration-upgrade test: boot a SECOND disposable
+ *     PostgreSQL 17 cluster, apply every pre-ADR-015 migration,
+ *     insert a pre-ADR-015 tenant_role_assignments row (no
+ *     tenant_id, scope_level, scope_organisation_id, or
+ *     scope_facility_id columns), verify those columns are absent,
+ *     expose the ADR-015 migration, apply it, verify the row was
+ *     backfilled with tenant_id (derived from the membership),
+ *     scope_level = 'tenant', NULL scope_organisation_id, NULL
+ *     scope_facility_id, unchanged role_code and
+ *     tenant_membership_id, and verify the new CHECK constraints,
+ *     partial unique indexes, and composite foreign keys exist.
  *
  * All tests use real PostgreSQL 17 via the disposable cluster
  * bootstrap (`_pg-bootstrap.ts`).
@@ -1087,47 +1097,243 @@ describe('31-34. Migration backfill verification', () => {
   });
 });
 
-describe('35. Migration-upgrade test (real disposable PostgreSQL harness)', () => {
-  // This test verifies the ADR-015 migration's backfill behaviour
-  // end-to-end. The migration is applied against a fresh disposable
-  // PostgreSQL 17 cluster by the test bootstrap; we cannot re-run
-  // the migration against an already-migrated cluster. We therefore
-  // verify the backfill invariants against the current schema by
-  // simulating a "pre-ADR-015 row" via direct SQL INSERT with all
-  // ADR-015 columns populated to their post-migration defaults.
+describe('35. Genuine migration-upgrade test (disposable PostgreSQL harness)', () => {
+  // This test exercises the ADR-015 migration's backfill behaviour
+  // against a real pre-ADR-015 database state. It does NOT run
+  // against the already-migrated shared cluster; it boots a second
+  // disposable PostgreSQL 17 cluster via
+  // `startMigrationUpgradeCluster()`, applies ONLY the pre-ADR-015
+  // migrations to it, inserts a pre-ADR-015 tenant_role_assignments
+  // row (whose shape is exactly what the
+  // 20260719110000_rbac_authorization_foundation migration created:
+  // id, tenant_membership_id, role_code, created_at, updated_at —
+  // NO tenant_id, scope_level, scope_organisation_id, or
+  // scope_facility_id columns), verifies those columns are absent,
+  // then exposes and applies the ADR-015 migration, and verifies
+  // the row was backfilled correctly.
   //
-  // The authoritative migration-upgrade test (apply migrations only
-  // through the migration immediately preceding ADR-015, insert a
-  // pre-ADR-015 row, then apply the ADR-015 migration) requires a
-  // separate test harness that re-runs Prisma migrate against a
-  // second cluster. The harness is not available in this batch;
-  // the test below is the closest equivalent that runs against the
-  // current schema.
-  it('a row inserted with tenant_id + scope defaults matches the post-migration shape', async () => {
-    const user = await createUser('chk35@example.invalid', 'User 35');
-    const tenant = await createTenant('tenant-35.invalid', 'Tenant 35');
-    const membership = await createMembership(tenant.id, user.id);
-    // Simulate a pre-ADR-015 row by inserting with the explicit
-    // post-migration defaults that the migration would have applied.
-    insertRoleAssignmentRowDirectly({
-      id: '11111111-1111-1111-1111-111111111135',
-      tenantMembershipId: membership.id,
-      tenantId: tenant.id,
-      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
-      scopeLevel: 'tenant',
-      scopeOrganisationId: null,
-      scopeFacilityId: null,
-    });
-    // Verify the post-migration shape.
-    const result = runSql(
-      `SELECT tenant_id, scope_level, scope_organisation_id, scope_facility_id, role_code, tenant_membership_id FROM tenant_role_assignments WHERE id = '11111111-1111-1111-1111-111111111135';`,
-    );
-    const parts = result.split('|').map((s) => s.trim());
-    expect(parts[0]).toBe(tenant.id); // tenant_id
-    expect(parts[1]).toBe('tenant'); // scope_level
-    expect(parts[2]).toBe(''); // scope_organisation_id (NULL)
-    expect(parts[3]).toBe(''); // scope_facility_id (NULL)
-    expect(parts[4]).toBe('R13_SYSTEM_ADMINISTRATOR'); // role_code
-    expect(parts[5]).toBe(membership.id); // tenant_membership_id
+  // The test cannot pass without applying the ADR-015 migration:
+  // the post-migration assertions query columns that exist only
+  // after the migration has run. The pre-migration assertions
+  // query information_schema for columns that must NOT exist
+  // before the migration runs. The test queries the SAME row id
+  // before and after migration, preserving the original IDs and
+  // role code across the upgrade.
+  //
+  // The cluster is completely isolated from the shared disposable
+  // cluster: its own port, data directory, and migrations
+  // directory. The shared DATABASE_URL env var is NOT mutated;
+  // the upgrade cluster's URL is exposed only on the handle and
+  // passed explicitly to the spawned prisma process via
+  // UPGRADE_DATABASE_URL.
+  //
+  // PostgreSQL 17 being unavailable in the current environment
+  // causes this test to fail at runtime (the harness throws when
+  // initdb/pg_ctl/psql cannot be discovered). The test is still
+  // discovered by vitest, and the failure surfaces as a single
+  // clear error rather than a silent skip.
+
+  it('backfills a pre-ADR-015 row with derived tenant_id and tenant scope on ADR-015 migration', async () => {
+    // Deterministic IDs for the pre-ADR-015 row and its
+    // dependencies. These IDs are stable across the migration
+    // boundary; the test verifies they are unchanged.
+    const tenantId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1';
+    const userId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1';
+    const membershipId = 'cccccccc-cccc-cccc-cccc-ccccccccccc1';
+    const assignmentId = 'dddddddd-dddd-dddd-dddd-ddddddddddd1';
+    const roleCode = 'R09_ADMINISTRATOR';
+
+    let upgrade: MigrationUpgradeHandle | null = null;
+    try {
+      upgrade = await startMigrationUpgradeCluster();
+
+      // 1. Apply every pre-ADR-015 migration. After this call the
+      //    upgrade cluster has the schema shape that existed
+      //    immediately before ADR-015 was applied.
+      upgrade.applyPreAdr015Migrations();
+
+      // Helper: run a SQL statement against the upgrade cluster.
+      const runUpgradeSql = (sql: string): string =>
+        execFileSync(
+          upgrade!.psqlBin,
+          [
+            upgrade!.databaseUrl,
+            '-t',
+            '-A',
+            '-v',
+            'ON_ERROR_STOP=1',
+            '-c',
+            sql,
+          ],
+          { encoding: 'utf-8' },
+        );
+
+      // 2. Insert the pre-ADR-015 dependency rows: tenant, user,
+      //    tenant_membership. The shapes match the
+      //    20260718170628_tenancy_foundation and
+      //    20260718194955_identity_session_foundation migrations.
+      runUpgradeSql(
+        `INSERT INTO tenants (id, slug, display_name, status, created_at, updated_at) ` +
+          `VALUES ('${tenantId}', 'upgrade-tenant', 'Upgrade Tenant', 'active', NOW(), NOW());`,
+      );
+      runUpgradeSql(
+        `INSERT INTO users (id, email, normalised_email, display_name, status, created_at, updated_at) ` +
+          `VALUES ('${userId}', 'upgrade@example.invalid', 'upgrade@example.invalid', 'Upgrade User', 'active', NOW(), NOW());`,
+      );
+      runUpgradeSql(
+        `INSERT INTO tenant_memberships (id, tenant_id, user_id, status, created_at, updated_at) ` +
+          `VALUES ('${membershipId}', '${tenantId}', '${userId}', 'active', NOW(), NOW());`,
+      );
+
+      // 3. Insert the pre-ADR-015 tenant_role_assignments row.
+      //    This is the OLD table shape: only id,
+      //    tenant_membership_id, role_code, created_at,
+      //    updated_at. No tenant_id, no scope_level, no
+      //    scope_organisation_id, no scope_facility_id.
+      runUpgradeSql(
+        `INSERT INTO tenant_role_assignments (id, tenant_membership_id, role_code, created_at, updated_at) ` +
+          `VALUES ('${assignmentId}', '${membershipId}', '${roleCode}', NOW(), NOW());`,
+      );
+
+      // 4. Confirm that the ADR-015 columns do NOT yet exist on
+      //    tenant_role_assignments. information_schema.columns
+      //    must return zero rows for each of the four new
+      //    columns. This is the structural pre-condition that
+      //    proves the test is exercising the upgrade path, not
+      //    an already-migrated schema.
+      const preColumns = runUpgradeSql(
+        `SELECT column_name FROM information_schema.columns ` +
+          `WHERE table_name = 'tenant_role_assignments' ` +
+          `AND column_name IN ('tenant_id', 'scope_level', 'scope_organisation_id', 'scope_facility_id') ` +
+          `ORDER BY column_name;`,
+      );
+      expect(preColumns.trim()).toBe('');
+
+      // 5. Expose the ADR-015 migration into the isolated
+      //    migrations directory.
+      upgrade.exposeAdr015Migration();
+
+      // 6. Apply the ADR-015 migration to the populated cluster.
+      //    Prisma migrate deploy will run the ADR-015 migration
+      //    as the only pending migration; the pre-ADR-015
+      //    migrations are already recorded as applied in the
+      //    cluster's _prisma_migrations table.
+      upgrade.applyAdr015Migration();
+
+      // 7. Verify the previously-inserted row was backfilled
+      //    correctly. We query the SAME row id that was inserted
+      //    before the migration; the IDs and role_code must be
+      //    unchanged.
+      const postRow = runUpgradeSql(
+        `SELECT tenant_id, scope_level, scope_organisation_id, scope_facility_id, role_code, tenant_membership_id ` +
+          `FROM tenant_role_assignments WHERE id = '${assignmentId}';`,
+      );
+      const parts = postRow.split('|').map((s) => s.trim());
+      expect(parts[0]).toBe(tenantId); // tenant_id derived from membership
+      expect(parts[1]).toBe('tenant'); // scope_level = 'tenant'
+      expect(parts[2]).toBe(''); // scope_organisation_id NULL
+      expect(parts[3]).toBe(''); // scope_facility_id NULL
+      expect(parts[4]).toBe(roleCode); // role_code unchanged
+      expect(parts[5]).toBe(membershipId); // tenant_membership_id unchanged
+
+      // 8. Verify the new CHECK constraints exist on
+      //    tenant_role_assignments.
+      const checkConstraints = runUpgradeSql(
+        `SELECT con.conname ` +
+          `FROM pg_constraint con ` +
+          `JOIN pg_class cls ON cls.oid = con.conrelid ` +
+          `WHERE cls.relname = 'tenant_role_assignments' ` +
+          `AND con.contype = 'c' ` +
+          `AND con.conname IN (` +
+          `'tenant_role_assignments_scope_level_check', ` +
+          `'tenant_role_assignments_scope_target_consistency_check'` +
+          `) ORDER BY con.conname;`,
+      );
+      const checkNames = checkConstraints
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(checkNames).toEqual([
+        'tenant_role_assignments_scope_level_check',
+        'tenant_role_assignments_scope_target_consistency_check',
+      ]);
+
+      // 9. Verify the three partial unique indexes exist.
+      const partialIndexes = runUpgradeSql(
+        `SELECT indexname FROM pg_indexes ` +
+          `WHERE tablename = 'tenant_role_assignments' ` +
+          `AND indexname IN (` +
+          `'tenant_role_assignments_tenant_scope_uniq', ` +
+          `'tenant_role_assignments_organisation_scope_uniq', ` +
+          `'tenant_role_assignments_facility_scope_uniq'` +
+          `) ORDER BY indexname;`,
+      );
+      const indexNames = partialIndexes
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(indexNames).toEqual([
+        'tenant_role_assignments_facility_scope_uniq',
+        'tenant_role_assignments_organisation_scope_uniq',
+        'tenant_role_assignments_tenant_scope_uniq',
+      ]);
+
+      // 10. Verify the three composite foreign keys exist on
+      //     tenant_role_assignments.
+      const compositeFks = runUpgradeSql(
+        `SELECT con.conname ` +
+          `FROM pg_constraint con ` +
+          `JOIN pg_class cls ON cls.oid = con.conrelid ` +
+          `WHERE cls.relname = 'tenant_role_assignments' ` +
+          `AND con.contype = 'f' ` +
+          `AND con.conname IN (` +
+          `'tenant_role_assignments_membership_tenant_id_fkey', ` +
+          `'tenant_role_assignments_tenant_organisation_id_fkey', ` +
+          `'tenant_role_assignments_tenant_organisation_facility_id_fkey'` +
+          `) ORDER BY con.conname;`,
+      );
+      const fkNames = compositeFks
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(fkNames).toEqual([
+        'tenant_role_assignments_membership_tenant_id_fkey',
+        'tenant_role_assignments_tenant_organisation_facility_id_fkey',
+        'tenant_role_assignments_tenant_organisation_id_fkey',
+      ]);
+
+      // 11. Verify the supporting composite unique constraints
+      //     required by the composite FKs exist on
+      //     tenant_memberships and facilities.
+      const membershipUniq = runUpgradeSql(
+        `SELECT indexname FROM pg_indexes ` +
+          `WHERE tablename = 'tenant_memberships' ` +
+          `AND indexname = 'tenant_memberships_id_tenant_id_key';`,
+      );
+      expect(membershipUniq.trim()).toBe('tenant_memberships_id_tenant_id_key');
+
+      const facilitiesUniq = runUpgradeSql(
+        `SELECT indexname FROM pg_indexes ` +
+          `WHERE tablename = 'facilities' ` +
+          `AND indexname IN (` +
+          `'facilities_tenant_id_organisation_id_id_key', ` +
+          `'facilities_id_organisation_id_key'` +
+          `) ORDER BY indexname;`,
+      );
+      const facilityIndexNames = facilitiesUniq
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      expect(facilityIndexNames).toEqual([
+        'facilities_id_organisation_id_key',
+        'facilities_tenant_id_organisation_id_id_key',
+      ]);
+    } finally {
+      // Always tear down the upgrade cluster, even on assertion
+      // failure. The shared disposable cluster is unaffected.
+      if (upgrade) {
+        upgrade.teardown();
+      }
+    }
   });
 });

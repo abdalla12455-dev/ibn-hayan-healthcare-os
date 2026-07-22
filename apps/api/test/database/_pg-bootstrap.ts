@@ -7,6 +7,9 @@ import {
   rmSync,
   readFileSync,
   writeFileSync,
+  copyFileSync,
+  cpSync,
+  readdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
@@ -590,4 +593,360 @@ export function setupDatabaseTests(): void {
  */
 export function readFileSyncText(path: string): string {
   return readFileSync(path, 'utf-8');
+}
+
+// ---------------------------------------------------------------------------
+// Migration-upgrade scenario harness (ADR-015)
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical ADR-015 migration directory name. Used by the
+ * migration-upgrade scenario harness to identify the boundary
+ * between pre-ADR-015 migrations and the ADR-015 migration itself.
+ */
+export const ADR_015_MIGRATION_DIR =
+  '20260722100000_scoped_organisation_facility_context';
+
+/**
+ * Handle returned by `startMigrationUpgradeCluster()`. Represents an
+ * ISOLATED disposable PostgreSQL 17 cluster plus an isolated
+ * temporary migrations directory whose initial contents are every
+ * transactional migration preceding ADR-015. The caller is expected
+ * to:
+ *
+ * 1. Call `applyPreAdr015Migrations()` once to bring the cluster to
+ *    the pre-ADR-015 schema state.
+ * 2. Insert a pre-ADR-015 `tenant_role_assignments` row via raw SQL
+ *    using `psqlBin` and `databaseUrl` (the row has only `id`,
+ *    `tenant_membership_id`, `role_code`, `created_at`,
+ *    `updated_at`).
+ * 3. Optionally verify that the ADR-015 columns are absent on the
+ *    row at this point.
+ * 4. Call `exposeAdr015Migration()` to copy the ADR-015 migration
+ *    directory into the isolated migrations directory.
+ * 5. Call `applyAdr015Migration()` to apply the ADR-015 migration
+ *    to the already-populated cluster.
+ * 6. Verify the post-migration shape of the previously-inserted
+ *    row.
+ * 7. Always call `teardown()` in a `finally` block.
+ *
+ * The handle is completely independent of the shared `handle`
+ * used by `setupDatabaseTests()`: it uses its own port, its own
+ * data directory, its own socket directory, and its own
+ * `DATABASE_URL`. The shared `DATABASE_URL` env var is NOT
+ * mutated; the upgrade cluster's URL is exposed only on the
+ * handle.
+ *
+ * The harness does NOT install PostgreSQL. If PostgreSQL 17 is not
+ * available on PATH or via `PG_BINDIR`, the harness throws a
+ * descriptive error during `startMigrationUpgradeCluster()`. The
+ * calling test is expected to be discovered by vitest regardless;
+ * the failure surfaces at runtime, not at compile time.
+ */
+export interface MigrationUpgradeHandle {
+  /** psql binary path. Use to run raw SQL against the upgrade cluster. */
+  psqlBin: string;
+  /** postgresql:// URL pointing at the upgrade cluster's database. */
+  databaseUrl: string;
+  /**
+   * Apply every pre-ADR-015 transactional migration to the
+   * upgrade cluster. Idempotent: throws if called twice.
+   */
+  applyPreAdr015Migrations: () => void;
+  /**
+   * Copy the ADR-015 migration directory into the isolated
+   * migrations directory. Idempotent: throws if called twice.
+   */
+  exposeAdr015Migration: () => void;
+  /**
+   * Apply the ADR-015 migration to the upgrade cluster. Requires
+   * `exposeAdr015Migration()` to have been called first.
+   */
+  applyAdr015Migration: () => void;
+  /**
+   * Stop the cluster and recursively delete the temporary data
+   * directory, socket directory, log file, and isolated migrations
+   * directory. Safe to call multiple times; subsequent calls are
+   * no-ops. MUST be called in a `finally` block by the caller.
+   */
+  teardown: () => void;
+}
+
+/**
+ * Internal state for the migration-upgrade cluster. Kept separate
+ * from the shared `handle` to avoid any cross-contamination with
+ * `setupDatabaseTests()`.
+ */
+interface UpgradeClusterState {
+  pgBin: { initdb: string; pgCtl: string; psql: string };
+  rootTmp: string;
+  pgData: string;
+  pgSocketDir: string;
+  pgLog: string;
+  pgPort: number;
+  databaseUrl: string;
+  migrationsDir: string;
+  migrationsLockFile: string;
+  prismaConfigPath: string;
+  preAdr015Applied: boolean;
+  adr015Exposed: boolean;
+  adr015Applied: boolean;
+  tornDown: boolean;
+}
+
+/**
+ * Start a SECOND disposable PostgreSQL 17 cluster dedicated to the
+ * migration-upgrade scenario. The cluster is completely isolated
+ * from the main test cluster: it has its own data directory, port,
+ * socket directory, and DATABASE_URL.
+ *
+ * The function also creates an isolated temporary migrations
+ * directory under the OS temp tree and copies every transactional
+ * migration preceding ADR-015 into it. A temporary Prisma config
+ * file pointing at the isolated migrations directory and the
+ * canonical schema is written next to it.
+ *
+ * The caller MUST call `handle.teardown()` in a `finally` block.
+ */
+export async function startMigrationUpgradeCluster(): Promise<MigrationUpgradeHandle> {
+  const initdb = resolvePgExecutable('initdb');
+  const pgCtl = resolvePgExecutable('pg_ctl');
+  const psql = resolvePgExecutable('psql');
+  verifyPostgreSQL17(initdb, pgCtl, psql);
+
+  // Resolve repository paths.
+  const apiDir = resolve(__dirname, '..', '..');
+  const canonicalMigrationsDir = join(apiDir, 'prisma', 'migrations');
+  const canonicalSchemaPath = join(apiDir, 'prisma', 'schema.prisma');
+  if (!existsSync(canonicalMigrationsDir)) {
+    throw new Error(
+      `Canonical migrations directory not found at ${canonicalMigrationsDir}.`,
+    );
+  }
+  if (!existsSync(canonicalSchemaPath)) {
+    throw new Error(`Canonical schema not found at ${canonicalSchemaPath}.`);
+  }
+
+  // List every migration directory preceding ADR-015, sorted
+  // lexicographically (Prisma applies migrations in lexicographic
+  // order of their directory names).
+  const allMigrationDirs = readdirSync(canonicalMigrationsDir, {
+    withFileTypes: true,
+  })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .sort();
+  const preAdr015MigrationDirs = allMigrationDirs.filter(
+    (name) => name < ADR_015_MIGRATION_DIR,
+  );
+  if (preAdr015MigrationDirs.length === 0) {
+    throw new Error(
+      `No pre-ADR-015 migrations found in ${canonicalMigrationsDir}.`,
+    );
+  }
+  if (!allMigrationDirs.includes(ADR_015_MIGRATION_DIR)) {
+    throw new Error(
+      `ADR-015 migration directory ${ADR_015_MIGRATION_DIR} not found in ${canonicalMigrationsDir}.`,
+    );
+  }
+
+  // Create the isolated temp tree.
+  const rootTmp = mkdtempSync(join(tmpdir(), 'ibn-hayan-adr015-upgrade-'));
+  const pgData = join(rootTmp, 'data');
+  const pgSocketDir = join(rootTmp, 'sockets');
+  const pgLog = join(rootTmp, 'postgres.log');
+  const migrationsDir = join(rootTmp, 'migrations');
+  const migrationsLockFile = join(migrationsDir, 'migration_lock.toml');
+  const prismaConfigPath = join(rootTmp, 'prisma-upgrade.config.ts');
+  mkdirSync(pgSocketDir, { recursive: true, mode: 0o700 });
+  mkdirSync(migrationsDir, { recursive: true, mode: 0o700 });
+
+  // Copy the migration_lock.toml verbatim (provider must remain
+  // 'postgresql').
+  const canonicalLockFile = join(canonicalMigrationsDir, 'migration_lock.toml');
+  copyFileSync(canonicalLockFile, migrationsLockFile);
+
+  // Copy each pre-ADR-015 migration directory verbatim.
+  for (const name of preAdr015MigrationDirs) {
+    const src = join(canonicalMigrationsDir, name);
+    const dst = join(migrationsDir, name);
+    cpSync(src, dst, { recursive: true });
+  }
+
+  // Write a Prisma config that points at the canonical schema
+  // (so Prisma's schema parser has every model definition it
+  // needs) and at the isolated migrations directory. The
+  // datasource URL is sourced from the spawned process env, not
+  // from process.env.DATABASE_URL — the upgrade cluster's URL is
+  // passed explicitly to avoid colliding with the shared
+  // disposable cluster's URL.
+  const prismaConfigContents = [
+    "import { defineConfig } from 'prisma/config';",
+    '',
+    'export default defineConfig({',
+    `  schema: ${JSON.stringify(canonicalSchemaPath)},`,
+    '  migrations: {',
+    `    path: ${JSON.stringify(migrationsDir)},`,
+    '  },',
+    '  datasource: {',
+    '    url: process.env.UPGRADE_DATABASE_URL,',
+    '  },',
+    '});',
+    '',
+  ].join('\n');
+  writeFileSync(prismaConfigPath, prismaConfigContents, { encoding: 'utf-8' });
+
+  // Boot the isolated cluster.
+  const pgPort = await pickFreePort();
+  const superuser = 'postgres';
+  const databaseName = 'ibn_hayan_upgrade_test';
+
+  runPgSync(initdb, [
+    '-D',
+    pgData,
+    '-U',
+    superuser,
+    '-A',
+    'trust',
+    '--encoding=UTF8',
+    '--locale=C.UTF-8',
+  ]);
+
+  const confPath = join(pgData, 'postgresql.conf');
+  const confOverrides = [
+    '',
+    '# Disposable upgrade cluster overrides (added by _pg-bootstrap.ts)',
+    `listen_addresses = '127.0.0.1'`,
+    `port = ${pgPort}`,
+    `unix_socket_directories = '${pgSocketDir}'`,
+    `max_connections = 10`,
+    `shared_buffers = '16MB'`,
+    `fsync = off`,
+    `synchronous_commit = off`,
+    '',
+  ].join('\n');
+  writeFileSync(confPath, confOverrides, { flag: 'a' });
+
+  runPgSync(pgCtl, ['-D', pgData, '-l', pgLog, '-w', '-t', '30', 'start']);
+
+  runPgSync(psql, [
+    '-h',
+    '127.0.0.1',
+    '-p',
+    String(pgPort),
+    '-U',
+    superuser,
+    '-d',
+    'postgres',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-c',
+    `CREATE DATABASE "${databaseName}";`,
+  ]);
+
+  const databaseUrl = `postgresql://${superuser}@127.0.0.1:${pgPort}/${databaseName}`;
+
+  const state: UpgradeClusterState = {
+    pgBin: { initdb, pgCtl, psql },
+    rootTmp,
+    pgData,
+    pgSocketDir,
+    pgLog,
+    pgPort,
+    databaseUrl,
+    migrationsDir,
+    migrationsLockFile,
+    prismaConfigPath,
+    preAdr015Applied: false,
+    adr015Exposed: false,
+    adr015Applied: false,
+    tornDown: false,
+  };
+
+  const teardown = (): void => {
+    if (state.tornDown) {
+      return;
+    }
+    state.tornDown = true;
+    try {
+      runPgSync(state.pgBin.pgCtl, [
+        '-D',
+        state.pgData,
+        '-m',
+        'fast',
+        '-w',
+        '-t',
+        '10',
+        'stop',
+      ]);
+    } catch {
+      // Best-effort.
+    }
+    try {
+      rmSync(state.rootTmp, { recursive: true, force: true });
+    } catch {
+      // Best-effort.
+    }
+  };
+
+  const applyMigrationsInternal = (): void => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      UPGRADE_DATABASE_URL: state.databaseUrl,
+      // Explicitly UNSET DATABASE_URL so the upgrade cluster's
+      // Prisma invocation cannot accidentally pick up the shared
+      // disposable cluster's URL.
+      DATABASE_URL: undefined,
+    };
+    runPgSync(
+      'pnpm',
+      [
+        'exec',
+        'prisma',
+        'migrate',
+        'deploy',
+        '--config',
+        state.prismaConfigPath,
+      ],
+      { cwd: apiDir, env },
+    );
+  };
+
+  return {
+    psqlBin: psql,
+    databaseUrl,
+    applyPreAdr015Migrations: (): void => {
+      if (state.preAdr015Applied) {
+        throw new Error(
+          'applyPreAdr015Migrations() called twice. The pre-ADR-015 migrations are already applied.',
+        );
+      }
+      applyMigrationsInternal();
+      state.preAdr015Applied = true;
+    },
+    exposeAdr015Migration: (): void => {
+      if (state.adr015Exposed) {
+        throw new Error(
+          'exposeAdr015Migration() called twice. The ADR-015 migration is already exposed.',
+        );
+      }
+      const src = join(canonicalMigrationsDir, ADR_015_MIGRATION_DIR);
+      const dst = join(state.migrationsDir, ADR_015_MIGRATION_DIR);
+      cpSync(src, dst, { recursive: true });
+      state.adr015Exposed = true;
+    },
+    applyAdr015Migration: (): void => {
+      if (!state.adr015Exposed) {
+        throw new Error(
+          'applyAdr015Migration() called before exposeAdr015Migration().',
+        );
+      }
+      if (state.adr015Applied) {
+        throw new Error('applyAdr015Migration() called twice.');
+      }
+      applyMigrationsInternal();
+      state.adr015Applied = true;
+    },
+    teardown,
+  };
 }
