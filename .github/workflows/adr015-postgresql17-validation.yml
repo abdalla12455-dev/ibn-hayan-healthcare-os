@@ -98,8 +98,8 @@ jobs:
         run: |
           docker run --rm ibn-hayan-adr015-pg17 bash -c '
             set -euo pipefail
-            pnpm exec prisma validate --schema apps/api/prisma/schema.prisma
-            pnpm exec prisma generate --schema apps/api/prisma/schema.prisma
+            pnpm --dir apps/api exec prisma validate --schema prisma/schema.prisma
+            pnpm --dir apps/api exec prisma generate --schema prisma/schema.prisma
             pnpm run typecheck
             pnpm run lint
             pnpm run test
