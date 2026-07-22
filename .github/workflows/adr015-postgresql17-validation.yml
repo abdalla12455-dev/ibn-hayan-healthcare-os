@@ -43,7 +43,13 @@ jobs:
                  g++ \
               && rm -rf /var/lib/apt/lists/*
 
-          RUN corepack enable
+          RUN rm -f \
+                /usr/local/bin/pnpm \
+                /usr/local/bin/pnpx \
+                /usr/local/bin/yarn \
+                /usr/local/bin/yarnpkg \
+              && npm install --global "pnpm@11.14.0" \
+              && pnpm --version
 
           ENV CI=true
           ENV PG_BINDIR=/usr/lib/postgresql/17/bin
