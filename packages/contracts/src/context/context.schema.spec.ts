@@ -285,6 +285,10 @@ describe('ContextResponseSchema', () => {
     const result = ContextResponseSchema.safeParse({
       options: [],
       active: null,
+      organisationOptions: [],
+      activeOrganisation: null,
+      facilityOptions: [],
+      activeFacility: null,
     });
     expect(result.success).toBe(true);
   });
@@ -307,8 +311,98 @@ describe('ContextResponseSchema', () => {
         tenantDisplayName: 'Tenant Alpha',
         roles: VALID_ROLES_SINGLE,
       },
+      organisationOptions: [],
+      activeOrganisation: null,
+      facilityOptions: [],
+      activeFacility: null,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('accepts a response with active organisation and facility contexts (ADR-015)', () => {
+    const result = ContextResponseSchema.safeParse({
+      options: [],
+      active: {
+        membershipId: VALID_MEMBERSHIP_ID,
+        tenantId: VALID_TENANT_ID,
+        tenantSlug: 'tenant-alpha.invalid',
+        tenantDisplayName: 'Tenant Alpha',
+        roles: VALID_ROLES_SINGLE,
+      },
+      organisationOptions: [
+        {
+          organisationId: '55555555-5555-5555-5555-555555555555',
+          code: 'ORG-1',
+          displayName: 'Organisation Alpha',
+          status: 'active',
+        },
+      ],
+      activeOrganisation: {
+        organisationId: '55555555-5555-5555-5555-555555555555',
+        code: 'ORG-1',
+        displayName: 'Organisation Alpha',
+      },
+      facilityOptions: [
+        {
+          facilityId: '66666666-6666-6666-6666-666666666666',
+          organisationId: '55555555-5555-5555-5555-555555555555',
+          code: 'FAC-1',
+          displayName: 'Facility Alpha',
+          status: 'active',
+        },
+      ],
+      activeFacility: {
+        facilityId: '66666666-6666-6666-6666-666666666666',
+        organisationId: '55555555-5555-5555-5555-555555555555',
+        code: 'FAC-1',
+        displayName: 'Facility Alpha',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a missing organisationOptions field (ADR-015)', () => {
+    const result = ContextResponseSchema.safeParse({
+      options: [],
+      active: null,
+      activeOrganisation: null,
+      facilityOptions: [],
+      activeFacility: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing activeOrganisation field (ADR-015)', () => {
+    const result = ContextResponseSchema.safeParse({
+      options: [],
+      active: null,
+      organisationOptions: [],
+      facilityOptions: [],
+      activeFacility: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing facilityOptions field (ADR-015)', () => {
+    const result = ContextResponseSchema.safeParse({
+      options: [],
+      active: null,
+      organisationOptions: [],
+      activeOrganisation: null,
+      activeFacility: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing activeFacility field (ADR-015)', () => {
+    const result = ContextResponseSchema.safeParse({
+      options: [],
+      active: null,
+      organisationOptions: [],
+      activeOrganisation: null,
+      facilityOptions: [],
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects a missing options field', () => {
@@ -412,6 +506,8 @@ describe('ClearTenantContextResponseSchema', () => {
     const result = ClearTenantContextResponseSchema.safeParse({
       ok: true,
       active: null,
+      activeOrganisation: null,
+      activeFacility: null,
     });
     expect(result.success).toBe(true);
   });
@@ -420,6 +516,8 @@ describe('ClearTenantContextResponseSchema', () => {
     const result = ClearTenantContextResponseSchema.safeParse({
       ok: false,
       active: null,
+      activeOrganisation: null,
+      activeFacility: null,
     });
     expect(result.success).toBe(false);
   });
@@ -427,6 +525,8 @@ describe('ClearTenantContextResponseSchema', () => {
   it('rejects a missing ok field', () => {
     const result = ClearTenantContextResponseSchema.safeParse({
       active: null,
+      activeOrganisation: null,
+      activeFacility: null,
     });
     expect(result.success).toBe(false);
   });
@@ -434,6 +534,26 @@ describe('ClearTenantContextResponseSchema', () => {
   it('rejects a missing active field', () => {
     const result = ClearTenantContextResponseSchema.safeParse({
       ok: true,
+      activeOrganisation: null,
+      activeFacility: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing activeOrganisation field (ADR-015)', () => {
+    const result = ClearTenantContextResponseSchema.safeParse({
+      ok: true,
+      active: null,
+      activeFacility: null,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a missing activeFacility field (ADR-015)', () => {
+    const result = ClearTenantContextResponseSchema.safeParse({
+      ok: true,
+      active: null,
+      activeOrganisation: null,
     });
     expect(result.success).toBe(false);
   });
@@ -449,6 +569,8 @@ describe('ClearTenantContextResponseSchema', () => {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
       },
+      activeOrganisation: null,
+      activeFacility: null,
     });
     expect(result.success).toBe(false);
   });
@@ -457,6 +579,8 @@ describe('ClearTenantContextResponseSchema', () => {
     const result = ClearTenantContextResponseSchema.safeParse({
       ok: true,
       active: null,
+      activeOrganisation: null,
+      activeFacility: null,
       clearedAt: '2026-01-01T12:00:00.000Z',
     });
     expect(result.success).toBe(false);

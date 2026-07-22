@@ -1,8 +1,12 @@
 import {
   ContextResponseSchema,
   ClearTenantContextResponseSchema,
+  ClearOrganisationContextResponseSchema,
+  ClearFacilityContextResponseSchema,
   type ContextResponse,
   type ClearTenantContextResponse,
+  type ClearOrganisationContextResponse,
+  type ClearFacilityContextResponse,
 } from '@ibn-hayan/contracts';
 import {
   contractInvalidError,
@@ -198,6 +202,210 @@ export async function clearTenantContext(
   }
 
   const result = ClearTenantContextResponseSchema.safeParse(body);
+  if (!result.success) {
+    return { ok: false, error: contractInvalidError(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+// -------------------------------------------------------------------------
+// ADR-015: organisation and facility context clients
+// -------------------------------------------------------------------------
+
+/**
+ * Select an Organisation as the active organisation context.
+ *
+ * Sends `PUT /api/v1/context/organisation` with `credentials: 'include'`,
+ * the `X-CSRF-Token` header, and a JSON body containing the
+ * `organisationId` to select.
+ *
+ * Per ADR-015, selecting a new organisation clears the active
+ * facility when the facility does not belong to the newly selected
+ * organisation. The server performs the cascade; the client receives
+ * the updated `ContextResponse` reflecting the cascade.
+ *
+ * Returns the updated `ContextResponse` on success.
+ *
+ * Returns `{ ok: false, error: { statusCode: 401 } }` if the session
+ * is missing, expired, or revoked.
+ * Returns `{ ok: false, error: { statusCode: 403 } }` if the Origin
+ * is disallowed, the CSRF token is missing/invalid, no active Tenant
+ * context is set, or the selection is forbidden.
+ */
+export async function selectOrganisationContext(
+  organisationId: string,
+  csrfToken: string,
+): Promise<ContextClientResult<ContextResponse>> {
+  const url = joinUrl(getApiBaseUrl(), '/context/organisation');
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      credentials: 'include',
+      body: JSON.stringify({ organisationId }),
+    });
+  } catch (error) {
+    return { ok: false, error: networkError(error) };
+  }
+
+  if (!response.ok) {
+    return { ok: false, error: httpError(response.status) };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    return { ok: false, error: invalidJsonError(error) };
+  }
+
+  const result = ContextResponseSchema.safeParse(body);
+  if (!result.success) {
+    return { ok: false, error: contractInvalidError(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Clear the active organisation context.
+ *
+ * Per ADR-015, clearing the organisation also clears the active
+ * facility (cascade). The server performs the cascade; the client
+ * receives the strict clear response.
+ */
+export async function clearOrganisationContext(
+  csrfToken: string,
+): Promise<ContextClientResult<ClearOrganisationContextResponse>> {
+  const url = joinUrl(getApiBaseUrl(), '/context/organisation');
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      credentials: 'include',
+    });
+  } catch (error) {
+    return { ok: false, error: networkError(error) };
+  }
+
+  if (!response.ok) {
+    return { ok: false, error: httpError(response.status) };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    return { ok: false, error: invalidJsonError(error) };
+  }
+
+  const result = ClearOrganisationContextResponseSchema.safeParse(body);
+  if (!result.success) {
+    return { ok: false, error: contractInvalidError(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Select a Facility as the active facility context.
+ *
+ * Sends `PUT /api/v1/context/facility` with `credentials: 'include'`,
+ * the `X-CSRF-Token` header, and a JSON body containing the
+ * `facilityId` to select.
+ *
+ * Returns the updated `ContextResponse` on success.
+ */
+export async function selectFacilityContext(
+  facilityId: string,
+  csrfToken: string,
+): Promise<ContextClientResult<ContextResponse>> {
+  const url = joinUrl(getApiBaseUrl(), '/context/facility');
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      credentials: 'include',
+      body: JSON.stringify({ facilityId }),
+    });
+  } catch (error) {
+    return { ok: false, error: networkError(error) };
+  }
+
+  if (!response.ok) {
+    return { ok: false, error: httpError(response.status) };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    return { ok: false, error: invalidJsonError(error) };
+  }
+
+  const result = ContextResponseSchema.safeParse(body);
+  if (!result.success) {
+    return { ok: false, error: contractInvalidError(result.error) };
+  }
+
+  return { ok: true, data: result.data };
+}
+
+/**
+ * Clear the active facility context.
+ *
+ * Clearing the facility does NOT clear the active organisation or
+ * the active tenant.
+ */
+export async function clearFacilityContext(
+  csrfToken: string,
+): Promise<ContextClientResult<ClearFacilityContextResponse>> {
+  const url = joinUrl(getApiBaseUrl(), '/context/facility');
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken,
+      },
+      credentials: 'include',
+    });
+  } catch (error) {
+    return { ok: false, error: networkError(error) };
+  }
+
+  if (!response.ok) {
+    return { ok: false, error: httpError(response.status) };
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    return { ok: false, error: invalidJsonError(error) };
+  }
+
+  const result = ClearFacilityContextResponseSchema.safeParse(body);
   if (!result.success) {
     return { ok: false, error: contractInvalidError(result.error) };
   }

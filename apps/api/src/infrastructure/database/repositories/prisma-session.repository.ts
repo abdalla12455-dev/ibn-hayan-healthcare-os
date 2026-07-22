@@ -8,6 +8,8 @@ import type {
   CreateSessionInput,
   SessionRepository,
 } from '@ibn-hayan/domain';
+import type { OrganisationId } from '@ibn-hayan/domain';
+import type { FacilityId } from '@ibn-hayan/domain';
 import { PrismaService } from '../prisma.service.js';
 import { sessionFromPrisma } from '../mappers/session.mapper.js';
 
@@ -234,6 +236,12 @@ export class PrismaSessionRepository implements SessionRepository {
     // for deterministic testability. The persistence layer does not
     // persist a separate `clearedAt` timestamp in this batch; the
     // session's `updatedAt` column records the modification time.
+    //
+    // Per ADR-015, clearing the active tenant does NOT automatically
+    // clear the active organisation and the active facility at the
+    // persistence layer. The caller (the session-context service)
+    // is responsible for performing the cascade in the same Prisma
+    // transaction. This port clears only the tenant context.
     try {
       const row = await this.prisma.authSession.update({
         where: { id: sessionId },
@@ -244,6 +252,119 @@ export class PrismaSessionRepository implements SessionRepository {
       // The session does not exist or has been deleted. Return null
       // so the application layer can return a 401 (session required)
       // to the caller.
+      return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // ADR-015: active organisation and facility context
+  // -------------------------------------------------------------------------
+
+  async setActiveOrganisation(
+    sessionId: SessionId,
+    organisationId: OrganisationId,
+    _selectedAt: Date,
+  ): Promise<Session | null> {
+    // The `selectedAt` parameter is part of the domain port contract
+    // for deterministic testability. The persistence layer does not
+    // persist a separate `selectedAt` timestamp; the session's
+    // `updatedAt` column records the modification time.
+    //
+    // The single-column foreign key `active_organisation_id` →
+    // `organisations.id` enforces that the organisation exists. The
+    // application layer is responsible for verifying that the
+    // organisation belongs to the active tenant and that the
+    // principal holds an applicable scoped role assignment before
+    // calling this port.
+    //
+    // This port does NOT cascade-clear the active facility. The
+    // caller (the session-context service) is responsible for
+    // performing the cascade in the same Prisma transaction when
+    // the newly selected organisation does not own the currently
+    // active facility. The CHECK constraint on `auth_sessions`
+    // (`active_facility_id IS NULL OR active_organisation_id IS
+    // NOT NULL`) is the database-level backstop that catches any
+    // application-layer bug that leaves a facility active without
+    // an organisation.
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeOrganisationId: organisationId },
+      });
+      return sessionFromPrisma(row);
+    } catch {
+      // Prisma throws P2003 (foreign key violation) if the
+      // organisation does not exist. The application layer
+      // interprets this as a forbidden selection.
+      return null;
+    }
+  }
+
+  async clearActiveOrganisation(
+    sessionId: SessionId,
+    _clearedAt: Date,
+  ): Promise<Session | null> {
+    // Per ADR-015, clearing the active organisation does NOT
+    // automatically clear the active facility at the persistence
+    // layer. The caller (the session-context service) is
+    // responsible for performing the cascade in the same Prisma
+    // transaction. The CHECK constraint on `auth_sessions` would
+    // reject a clear that left a facility active without an
+    // organisation; the application-layer cascade prevents the
+    // constraint from firing.
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeOrganisationId: null },
+      });
+      return sessionFromPrisma(row);
+    } catch {
+      return null;
+    }
+  }
+
+  async setActiveFacility(
+    sessionId: SessionId,
+    facilityId: FacilityId,
+    _selectedAt: Date,
+  ): Promise<Session | null> {
+    // The composite foreign key
+    // `auth_sessions(active_facility_id, active_organisation_id)` →
+    // `facilities(id, organisation_id)` enforces at the database
+    // level that the active facility belongs to the active
+    // organisation. The application layer is responsible for
+    // verifying that the facility belongs to the active tenant and
+    // that the principal holds an applicable scoped role
+    // assignment before calling this port.
+    //
+    // The CHECK constraint `active_facility_id IS NULL OR
+    // active_organisation_id IS NOT NULL` enforces at the database
+    // level that a facility cannot be set without an active
+    // organisation. The application layer must ensure the active
+    // organisation is set before calling this port; if it is not,
+    // the CHECK constraint rejects the update.
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeFacilityId: facilityId },
+      });
+      return sessionFromPrisma(row);
+    } catch {
+      return null;
+    }
+  }
+
+  async clearActiveFacility(
+    sessionId: SessionId,
+    _clearedAt: Date,
+  ): Promise<Session | null> {
+    try {
+      const row = await this.prisma.authSession.update({
+        where: { id: sessionId },
+        data: { activeFacilityId: null },
+      });
+      return sessionFromPrisma(row);
+    } catch {
       return null;
     }
   }

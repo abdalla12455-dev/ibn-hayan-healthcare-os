@@ -26,6 +26,8 @@
 
 import type { UserId } from './user.js';
 import type { TenantMembershipId } from './membership.js';
+import type { OrganisationId } from '../tenancy/organisation.js';
+import type { FacilityId } from '../tenancy/facility.js';
 
 /**
  * Stable identifier for a Session. Branded so it cannot be confused
@@ -93,9 +95,28 @@ export interface CreateSessionInput {
  *   enforced at the database level to reference a membership that
  *   belongs to this session's user. A `null` value means "no active
  *   context"; the session remains valid. Per ADR-013 §1.3, the
- *   session record carries active Tenant context; the fifth batch
- *   introduces active Tenant context only (no active Organisation or
- *   Facility context, no role or permission context).
+ *   session record carries active Tenant context.
+ * - `activeOrganisationId`: the Organisation this session has
+ *   selected as its active organisation context, or `null` when no
+ *   organisation context is selected. Per ADR-015 (Scoped
+ *   Organisation and Facility Context), the active organisation
+ *   belongs to the active tenant (enforced at the application layer
+ *   and backed by a single-column foreign key). Selecting a new
+ *   tenant clears the active organisation and the active facility.
+ *   Clearing the active organisation clears the active facility.
+ *   A `null` value means "no active organisation context"; the
+ *   session remains valid.
+ * - `activeFacilityId`: the Facility this session has selected as
+ *   its active facility context, or `null` when no facility context
+ *   is selected. Per ADR-015, the active facility belongs to the
+ *   active organisation and the active tenant (enforced at the
+ *   application layer and backed by a composite foreign key from
+ *   `auth_sessions(active_facility_id, active_organisation_id)` to
+ *   `facilities(id, organisation_id)`). A CHECK constraint enforces
+ *   that `active_facility_id IS NULL OR active_organisation_id IS
+ *   NOT NULL` — a facility cannot remain active without an active
+ *   organisation. A `null` value means "no active facility context";
+ *   the session remains valid.
  * - `expiresAt`: absolute expiry timestamp. Once `now >= expiresAt`,
  *   the session is no longer active.
  * - `lastSeenAt`: timestamp of the most recent session-validation
@@ -114,6 +135,8 @@ export interface Session {
   readonly userId: UserId;
   readonly tokenHash: SessionTokenHash;
   readonly activeTenantMembershipId: TenantMembershipId | null;
+  readonly activeOrganisationId: OrganisationId | null;
+  readonly activeFacilityId: FacilityId | null;
   readonly expiresAt: Date;
   readonly lastSeenAt: Date;
   readonly rotatedAt: Date | null;

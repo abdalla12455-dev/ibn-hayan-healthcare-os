@@ -3,8 +3,11 @@ import type {
   TenantRoleAssignmentId,
   PlatformRoleCode,
   TenantMembershipId,
+  RoleAssignmentScopeLevel,
 } from '@ibn-hayan/domain';
 import { isPlatformRoleCode } from '@ibn-hayan/domain';
+import type { OrganisationId } from '@ibn-hayan/domain';
+import type { FacilityId } from '@ibn-hayan/domain';
 import type { TenantRoleAssignment as PrismaTenantRoleAssignment } from '../../../../generated/prisma/client.js';
 
 /**
@@ -28,6 +31,15 @@ import type { TenantRoleAssignment as PrismaTenantRoleAssignment } from '../../.
  * silently coerce unknown codes to a default value. An unknown code
  * is a data-integrity defect and is surfaced as a thrown error so
  * the operator can investigate.
+ *
+ * Per ADR-015 (Scoped Organisation and Facility Context), the
+ * mapper also maps the `scope_level`, `scope_organisation_id`, and
+ * `scope_facility_id` columns. The `scope_level` column is
+ * `VarChar(20)` in the database; the domain's
+ * `RoleAssignmentScopeLevel` is a closed union of 'tenant',
+ * 'organisation', 'facility'. The mapper validates that the
+ * persisted value is in the ratified catalogue; an unknown scope
+ * level is rejected as a data-integrity defect.
  */
 
 /**
@@ -56,6 +68,35 @@ function prismaRoleCodeToDomain(code: string): PlatformRoleCode {
 }
 
 /**
+ * Validate that a persisted `scope_level` value is in the ratified
+ * ADR-015 catalogue. Returns the value typed as
+ * `RoleAssignmentScopeLevel` if valid; throws if the scope level
+ * is unknown.
+ *
+ * The throw is intentional: an unknown persisted scope level is a
+ * data-integrity defect. The CHECK constraint on the column should
+ * prevent this from ever happening at the database level, but the
+ * mapper is the defensive backstop.
+ */
+function prismaScopeLevelToDomain(
+  scopeLevel: string,
+): RoleAssignmentScopeLevel {
+  if (
+    scopeLevel !== 'tenant' &&
+    scopeLevel !== 'organisation' &&
+    scopeLevel !== 'facility'
+  ) {
+    throw new Error(
+      `Unknown scope level persisted in tenant_role_assignments: '${scopeLevel}'. ` +
+        'This is a data-integrity defect. The ratified ADR-015 scope ' +
+        "levels are 'tenant', 'organisation', 'facility'. Investigate " +
+        'how the non-canonical scope level was inserted.',
+    );
+  }
+  return scopeLevel;
+}
+
+/**
  * Map a Prisma-generated `TenantRoleAssignment` row to a
  * framework-independent `TenantRoleAssignment` domain value.
  * Returns a readonly snapshot.
@@ -64,6 +105,10 @@ function prismaRoleCodeToDomain(code: string): PlatformRoleCode {
  * created by casting the UUID strings. The brands are
  * compile-time-only type intersections; at runtime the values are
  * just strings.
+ *
+ * Per ADR-015, the mapper also maps the `scope_organisation_id` and
+ * `scope_facility_id` columns to their branded domain types when
+ * non-null. A null value is preserved as null.
  */
 export function tenantRoleAssignmentFromPrisma(
   row: PrismaTenantRoleAssignment,
@@ -72,6 +117,13 @@ export function tenantRoleAssignmentFromPrisma(
     id: row.id as TenantRoleAssignmentId,
     tenantMembershipId: row.tenantMembershipId as TenantMembershipId,
     roleCode: prismaRoleCodeToDomain(row.roleCode),
+    scopeLevel: prismaScopeLevelToDomain(row.scopeLevel),
+    scopeOrganisationId:
+      row.scopeOrganisationId === null
+        ? null
+        : (row.scopeOrganisationId as OrganisationId),
+    scopeFacilityId:
+      row.scopeFacilityId === null ? null : (row.scopeFacilityId as FacilityId),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

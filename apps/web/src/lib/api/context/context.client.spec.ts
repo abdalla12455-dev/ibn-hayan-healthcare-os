@@ -3,6 +3,10 @@ import {
   getContext,
   selectTenantContext,
   clearTenantContext,
+  selectOrganisationContext,
+  clearOrganisationContext,
+  selectFacilityContext,
+  clearFacilityContext,
 } from './context.client';
 
 /**
@@ -15,8 +19,13 @@ import {
  *   contract-invalid responses.
  * - Sends the `X-CSRF-Token` header on PUT and DELETE.
  * - Sends `membershipId` (not `tenantId`) in the PUT body.
+ * - Sends `organisationId` in the PUT body for organisation selection.
+ * - Sends `facilityId` in the PUT body for facility selection.
  * - Does not expose raw server errors.
  * - Does not use Axios (uses platform fetch).
+ *
+ * Per ADR-015, the client also covers the organisation and facility
+ * context endpoints.
  */
 
 const validContextResponse = {
@@ -32,11 +41,52 @@ const validContextResponse = {
     },
   ],
   active: null,
+  organisationOptions: [],
+  activeOrganisation: null,
+  facilityOptions: [],
+  activeFacility: null,
 };
 
 const validClearResponse = {
   ok: true,
   active: null,
+  activeOrganisation: null,
+  activeFacility: null,
+};
+
+// ADR-015: fixtures for the new organisation and facility clear
+// responses. Used by the selectOrganisationContext,
+// clearOrganisationContext, selectFacilityContext, and
+// clearFacilityContext tests below.
+const validClearOrganisationResponse = {
+  ok: true as const,
+  activeOrganisation: null,
+  activeFacility: null,
+};
+
+const validClearFacilityResponse = {
+  ok: true as const,
+  activeFacility: null,
+};
+
+const validOrganisationContextResponse = {
+  options: [],
+  active: null,
+  organisationOptions: [
+    {
+      organisationId: '55555555-5555-5555-5555-555555555555',
+      code: 'ORG-1',
+      displayName: 'Organisation Alpha',
+      status: 'active' as const,
+    },
+  ],
+  activeOrganisation: {
+    organisationId: '55555555-5555-5555-5555-555555555555',
+    code: 'ORG-1',
+    displayName: 'Organisation Alpha',
+  },
+  facilityOptions: [],
+  activeFacility: null,
 };
 
 describe('context.client', () => {
@@ -201,6 +251,10 @@ describe('context.client', () => {
               { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
             ],
           },
+          organisationOptions: [],
+          activeOrganisation: null,
+          facilityOptions: [],
+          activeFacility: null,
         }),
       } as unknown as Response);
       globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -438,6 +492,199 @@ describe('context.client', () => {
       if (!result.ok) {
         expect(result.error.category).toBe('CONTRACT_INVALID');
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // ADR-015: organisation and facility context client tests
+  // -------------------------------------------------------------------------
+
+  describe('selectOrganisationContext', () => {
+    const organisationId = '55555555-5555-5555-5555-555555555555';
+    const csrfToken = 'csrf-token-value';
+
+    it('returns ok with parsed context on a 200 response', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await selectOrganisationContext(
+        organisationId,
+        csrfToken,
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.activeOrganisation).not.toBeNull();
+      }
+    });
+
+    it('sends the X-CSRF-Token header', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await selectOrganisationContext(organisationId, csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers['X-CSRF-Token']).toBe(csrfToken);
+    });
+
+    it('sends organisationId in the JSON body', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await selectOrganisationContext(organisationId, csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(init.body as string)).toEqual({ organisationId });
+    });
+
+    it('uses PUT method', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await selectOrganisationContext(organisationId, csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(init.method).toBe('PUT');
+    });
+
+    it('returns HTTP_ERROR on 403 (forbidden selection)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({}),
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await selectOrganisationContext(
+        organisationId,
+        csrfToken,
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.statusCode).toBe(403);
+      }
+    });
+  });
+
+  describe('clearOrganisationContext', () => {
+    const csrfToken = 'csrf-token-value';
+
+    it('returns ok with parsed response on a 200', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validClearOrganisationResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await clearOrganisationContext(csrfToken);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.activeOrganisation).toBeNull();
+        expect(result.data.activeFacility).toBeNull();
+      }
+    });
+
+    it('uses DELETE method', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validClearOrganisationResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await clearOrganisationContext(csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(init.method).toBe('DELETE');
+    });
+  });
+
+  describe('selectFacilityContext', () => {
+    const facilityId = '66666666-6666-6666-6666-666666666666';
+    const csrfToken = 'csrf-token-value';
+
+    it('returns ok with parsed context on a 200 response', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await selectFacilityContext(facilityId, csrfToken);
+      expect(result.ok).toBe(true);
+    });
+
+    it('sends facilityId in the JSON body', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await selectFacilityContext(facilityId, csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(JSON.parse(init.body as string)).toEqual({ facilityId });
+    });
+
+    it('uses PUT method', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validOrganisationContextResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await selectFacilityContext(facilityId, csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(init.method).toBe('PUT');
+    });
+  });
+
+  describe('clearFacilityContext', () => {
+    const csrfToken = 'csrf-token-value';
+
+    it('returns ok with parsed response on a 200', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validClearFacilityResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const result = await clearFacilityContext(csrfToken);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data.activeFacility).toBeNull();
+      }
+    });
+
+    it('uses DELETE method', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => validClearFacilityResponse,
+      } as unknown as Response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      await clearFacilityContext(csrfToken);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(init.method).toBe('DELETE');
     });
   });
 });

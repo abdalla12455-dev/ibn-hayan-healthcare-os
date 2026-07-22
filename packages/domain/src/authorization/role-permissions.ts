@@ -59,6 +59,23 @@ import {
  * (PRODUCT_BIBLE.md Section 20.5) are not implemented in this batch;
  * when they are added, they will compose existing permissions rather
  * than introducing new ones.
+ *
+ * Per ADR-015 (Scoped Organisation and Facility Context), the
+ * context permissions are split into per-level codes. The matrix
+ * grants all seven context permissions to R01 through R13 (human
+ * roles). R14 Integration Account is denied all seven context
+ * permissions: R14 is non-interactive and receives no browser
+ * context-selection capability.
+ *
+ * Granting all seven context permissions to a human role does NOT
+ * grant automatic access to every organisation or facility. The
+ * authorization guard additionally verifies, at every protected
+ * operation, that the principal holds an applicable scoped role
+ * assignment for the selected organisation or facility. A principal
+ * with R09 at tenant scope and no organisation-scoped or
+ * facility-scoped assignment cannot select an organisation or
+ * facility context; the guard rejects the selection before the
+ * permission check is reached.
  */
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>

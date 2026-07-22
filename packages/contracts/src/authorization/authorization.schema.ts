@@ -137,11 +137,22 @@ export type RoleSummary = z.infer<typeof RoleSummarySchema>;
  * when the principal lacks the relevant permission). The frontend
  * MUST NOT treat the presence or absence of a permission as a
  * security control; the API remains authoritative.
+ *
+ * Per ADR-015 (Scoped Organisation and Facility Context), the
+ * context permissions are split into per-level codes. The split is
+ * structural: each context-selection endpoint declares its specific
+ * permission. The `context:view` permission remains a single code
+ * because viewing the available context options is a single read
+ * operation.
  */
 export const PermissionCodeSchema = z.enum([
   'context:view',
   'context:select',
   'context:clear',
+  'context:select_organisation',
+  'context:clear_organisation',
+  'context:select_facility',
+  'context:clear_facility',
 ]);
 
 export type PermissionCode = z.infer<typeof PermissionCodeSchema>;

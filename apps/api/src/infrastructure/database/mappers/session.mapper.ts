@@ -5,6 +5,8 @@ import type {
   UserId,
   TenantMembershipId,
 } from '@ibn-hayan/domain';
+import type { OrganisationId } from '@ibn-hayan/domain';
+import type { FacilityId } from '@ibn-hayan/domain';
 import type { AuthSession as PrismaAuthSession } from '../../../../generated/prisma/client.js';
 
 /**
@@ -28,6 +30,16 @@ import type { AuthSession as PrismaAuthSession } from '../../../../generated/pri
  * session row, never in a separate context table, and is referenced
  * by TenantMembership ID (never by an arbitrary Tenant ID).
  *
+ * Per ADR-015 (Scoped Organisation and Facility Context), the
+ * mapper also maps the `active_organisation_id` and
+ * `active_facility_id` columns to their branded domain types when
+ * non-null. A null value is preserved as null. The composite
+ * foreign key on
+ * `auth_sessions(active_facility_id, active_organisation_id)` →
+ * `facilities(id, organisation_id)` enforces at the database level
+ * that the active facility belongs to the active organisation; the
+ * mapper does not re-validate this constraint.
+ *
  * The Prisma `AuthSession.user` relation field is dropped by the
  * mapper. The domain `Session` type does not carry the user relation;
  * the user is read separately through `UserRepository.findById` when
@@ -47,6 +59,14 @@ export function sessionFromPrisma(row: PrismaAuthSession): Session {
       row.activeTenantMembershipId === null
         ? null
         : (row.activeTenantMembershipId as TenantMembershipId),
+    activeOrganisationId:
+      row.activeOrganisationId === null
+        ? null
+        : (row.activeOrganisationId as OrganisationId),
+    activeFacilityId:
+      row.activeFacilityId === null
+        ? null
+        : (row.activeFacilityId as FacilityId),
     expiresAt: row.expiresAt,
     lastSeenAt: row.lastSeenAt,
     rotatedAt: row.rotatedAt,

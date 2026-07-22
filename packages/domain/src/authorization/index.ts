@@ -52,6 +52,7 @@ export type {
   TenantRoleAssignment,
   TenantRoleAssignmentId,
   CreateTenantRoleAssignmentInput,
+  RoleAssignmentScopeLevel,
 } from './role-assignment.js';
 
 export type { TenantRoleAssignmentRepository } from './repositories.js';

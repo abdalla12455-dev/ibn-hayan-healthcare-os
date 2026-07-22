@@ -101,6 +101,49 @@ export type TenantContextActionCode =
   (typeof TENANT_CONTEXT_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Organisation context (ADR-015)
+// ---------------------------------------------------------------------------
+
+/**
+ * Organisation-context action codes.
+ *
+ * Emitted by the session-context module for organisation-context
+ * selection and clearing. Per ADR-015 (Scoped Organisation and
+ * Facility Context), these events are emitted through the
+ * transactional outbox in the same Prisma transaction as the
+ * context mutation. The audit metadata includes the endpoint name
+ * and the scope level; it does not include the organisation display
+ * name, the facility display name, any PHI, or any secret.
+ */
+export const ORGANISATION_CONTEXT_ACTION_CODES = [
+  'organisation_context.selected',
+  'organisation_context.cleared',
+] as const;
+
+export type OrganisationContextActionCode =
+  (typeof ORGANISATION_CONTEXT_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
+// Facility context (ADR-015)
+// ---------------------------------------------------------------------------
+
+/**
+ * Facility-context action codes.
+ *
+ * Emitted by the session-context module for facility-context
+ * selection and clearing. Per ADR-015, these events are emitted
+ * through the transactional outbox in the same Prisma transaction
+ * as the context mutation.
+ */
+export const FACILITY_CONTEXT_ACTION_CODES = [
+  'facility_context.selected',
+  'facility_context.cleared',
+] as const;
+
+export type FacilityContextActionCode =
+  (typeof FACILITY_CONTEXT_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // RBAC
 // ---------------------------------------------------------------------------
 
@@ -144,14 +187,17 @@ export type AuditSystemActionCode =
 
 /**
  * The complete audit action-code catalogue for the ninth canonical
- * batch. Used by the metadata validator and the audit-emission API
- * to reject unknown action codes at the boundary.
+ * batch and the ADR-015 scoped-context extension. Used by the
+ * metadata validator and the audit-emission API to reject unknown
+ * action codes at the boundary.
  */
 export const AUDIT_ACTION_CODES = [
   ...AUTHENTICATION_ACTION_CODES,
   ...SECURITY_ACTION_CODES,
   ...AUTHORIZATION_ACTION_CODES,
   ...TENANT_CONTEXT_ACTION_CODES,
+  ...ORGANISATION_CONTEXT_ACTION_CODES,
+  ...FACILITY_CONTEXT_ACTION_CODES,
   ...RBAC_ACTION_CODES,
   ...AUDIT_SYSTEM_ACTION_CODES,
 ] as const;
@@ -197,6 +243,12 @@ export function inferCategoryFromAction(
   }
   if (action.startsWith('tenant_context.')) {
     return 'tenant_context';
+  }
+  if (action.startsWith('organisation_context.')) {
+    return 'organisation_context';
+  }
+  if (action.startsWith('facility_context.')) {
+    return 'facility_context';
   }
   if (action.startsWith('rbac.')) {
     return 'rbac';

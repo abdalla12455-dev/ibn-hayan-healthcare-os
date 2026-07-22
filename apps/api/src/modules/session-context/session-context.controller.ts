@@ -22,9 +22,21 @@ import type {
   ContextResponse,
   SelectTenantContextRequest,
   ClearTenantContextResponse,
+  SelectOrganisationContextRequest,
+  SelectFacilityContextRequest,
+  ClearOrganisationContextResponse,
+  ClearFacilityContextResponse,
 } from '@ibn-hayan/contracts';
-import { SelectTenantContextRequestSchema } from '@ibn-hayan/contracts';
-import type { TenantMembershipId } from '@ibn-hayan/domain';
+import {
+  SelectTenantContextRequestSchema,
+  SelectOrganisationContextRequestSchema,
+  SelectFacilityContextRequestSchema,
+} from '@ibn-hayan/contracts';
+import type {
+  TenantMembershipId,
+  OrganisationId,
+  FacilityId,
+} from '@ibn-hayan/domain';
 import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import type { AuditRequestContext } from '../auth/auth.service.js';
 import type { RequestWithIdentifiers } from '../audit/request-id.middleware.js';
@@ -366,6 +378,296 @@ export class SessionContextController {
     // membership).
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
     const result = await this.contextService.clearContext(
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // ADR-015: organisation and facility context endpoints
+  // -------------------------------------------------------------------------
+
+  /**
+   * PUT /api/v1/context/organisation
+   *
+   * Select an Organisation as the active organisation context for
+   * the current session.
+   *
+   * Requires:
+   * - a valid authenticated session (cookie);
+   * - an exact allowed Origin;
+   * - a valid `X-CSRF-Token` header;
+   * - an active Tenant context (the active TenantMembership must be
+   *   set before an organisation can be selected).
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for missing/disallowed Origin, missing/invalid CSRF,
+   * no active Tenant context, or a forbidden selection (the
+   * organisation does not exist, belongs to a different Tenant, is
+   * inactive, or the principal holds no applicable scoped role
+   * assignment). All forbidden-selection cases return the same
+   * generic 403.
+   *
+   * Per ADR-015, selecting a new organisation clears the active
+   * facility when the facility does not belong to the newly
+   * selected organisation. The cascade is performed in the same
+   * Prisma transaction as the selection.
+   */
+  @Put('organisation')
+  @RequirePermission('context:select_organisation', {
+    mode: 'for-active-membership',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'Select an Organisation as the active organisation context',
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    description: 'CSRF token issued by GET /api/v1/auth/csrf.',
+    required: true,
+  })
+  @ApiBody({
+    description: 'The organisation to select.',
+    schema: {
+      type: 'object',
+      required: ['organisationId'],
+      properties: {
+        organisationId: { type: 'string', format: 'uuid' },
+      },
+      additionalProperties: false,
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The updated context response.',
+    schema: { type: 'object' },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Origin is disallowed, CSRF is missing/invalid, no active Tenant, or the selection is forbidden.',
+  })
+  async selectOrganisationContext(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ): Promise<ContextResponse> {
+    const parsed = SelectOrganisationContextRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw contextRequestInvalid();
+    }
+    const request: SelectOrganisationContextRequest = parsed.data;
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const acceptLanguage = readHeader(req, 'accept-language');
+    const result = await this.contextService.selectOrganisationContext(
+      cookieValue,
+      request.organisationId as OrganisationId,
+      acceptLanguage,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * DELETE /api/v1/context/organisation
+   *
+   * Clear the active organisation context for the current session.
+   *
+   * Per ADR-015, clearing the active organisation also clears the
+   * active facility (cascade — a facility cannot remain active
+   * without an active organisation).
+   *
+   * Returns 200 with `{ ok: true, activeOrganisation: null,
+   * activeFacility: null }` on success.
+   */
+  @Delete('organisation')
+  @RequirePermission('context:clear_organisation', {
+    mode: 'for-active-membership',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'Clear the active organisation context for the current session',
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    description: 'CSRF token issued by GET /api/v1/auth/csrf.',
+    required: true,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The clear response.',
+    schema: {
+      type: 'object',
+      required: ['ok', 'activeOrganisation', 'activeFacility'],
+      properties: {
+        ok: { type: 'boolean', enum: [true] },
+        activeOrganisation: { type: 'null' },
+        activeFacility: { type: 'null' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Origin is disallowed or CSRF is missing/invalid.',
+  })
+  async clearOrganisationContext(
+    @Req() req: Request,
+  ): Promise<ClearOrganisationContextResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const result = await this.contextService.clearOrganisationContext(
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * PUT /api/v1/context/facility
+   *
+   * Select a Facility as the active facility context for the
+   * current session.
+   *
+   * Requires:
+   * - a valid authenticated session (cookie);
+   * - an exact allowed Origin;
+   * - a valid `X-CSRF-Token` header;
+   * - an active Tenant context and an active Organisation context
+   *   (both must be set before a facility can be selected).
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for missing/disallowed Origin, missing/invalid
+   * CSRF, no active Tenant, no active Organisation, or a forbidden
+   * selection.
+   */
+  @Put('facility')
+  @RequirePermission('context:select_facility', {
+    mode: 'for-active-membership',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'Select a Facility as the active facility context',
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    description: 'CSRF token issued by GET /api/v1/auth/csrf.',
+    required: true,
+  })
+  @ApiBody({
+    description: 'The facility to select.',
+    schema: {
+      type: 'object',
+      required: ['facilityId'],
+      properties: {
+        facilityId: { type: 'string', format: 'uuid' },
+      },
+      additionalProperties: false,
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The updated context response.',
+    schema: { type: 'object' },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Origin is disallowed, CSRF is missing/invalid, no active Tenant, no active Organisation, or the selection is forbidden.',
+  })
+  async selectFacilityContext(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ): Promise<ContextResponse> {
+    const parsed = SelectFacilityContextRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw contextRequestInvalid();
+    }
+    const request: SelectFacilityContextRequest = parsed.data;
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const acceptLanguage = readHeader(req, 'accept-language');
+    const result = await this.contextService.selectFacilityContext(
+      cookieValue,
+      request.facilityId as FacilityId,
+      acceptLanguage,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * DELETE /api/v1/context/facility
+   *
+   * Clear the active facility context for the current session.
+   * Clearing the facility does NOT clear the active organisation or
+   * the active tenant.
+   *
+   * Returns 200 with `{ ok: true, activeFacility: null }` on success.
+   */
+  @Delete('facility')
+  @RequirePermission('context:clear_facility', {
+    mode: 'for-active-membership',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'Clear the active facility context for the current session',
+  })
+  @ApiHeader({
+    name: 'X-CSRF-Token',
+    description: 'CSRF token issued by GET /api/v1/auth/csrf.',
+    required: true,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'The clear response.',
+    schema: {
+      type: 'object',
+      required: ['ok', 'activeFacility'],
+      properties: {
+        ok: { type: 'boolean', enum: [true] },
+        activeFacility: { type: 'null' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Origin is disallowed or CSRF is missing/invalid.',
+  })
+  async clearFacilityContext(
+    @Req() req: Request,
+  ): Promise<ClearFacilityContextResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const result = await this.contextService.clearFacilityContext(
       cookieValue,
       buildAuditContext(req),
     );

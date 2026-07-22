@@ -290,20 +290,29 @@ async function main(): Promise<void> {
     //    R13 System Administrator is the canonical platform role
     //    for tenant configuration, integration management, and
     //    operational administration (per PRODUCT_BIBLE.md Section
-    //    20.2). It grants the three current context permissions
-    //    (context:view, context:select, context:clear) per the
+    //    20.2). It grants the seven current context permissions
+    //    (context:view, context:select, context:clear,
+    //    context:select_organisation, context:clear_organisation,
+    //    context:select_facility, context:clear_facility) per the
     //    role-permission matrix.
     //
     //    The assignment is idempotent: if the assignment already
-    //    exists, the bootstrap does not duplicate it. The unique
-    //    constraint on (tenant_membership_id, role_code) is the
-    //    structural enforcement.
-    const existingAssignment = await prisma.tenantRoleAssignment.findUnique({
+    //    exists, the bootstrap does not duplicate it. Per ADR-015,
+    //    the original (tenant_membership_id, role_code) unique
+    //    constraint was replaced by three partial unique indexes
+    //    (one per scope level). Prisma 7 cannot represent partial
+    //    unique indexes as compound `where` clauses; the bootstrap
+    //    therefore uses `findFirst` with an explicit filter instead
+    //    of `findUnique`. The bootstrap assigns R13 at tenant scope
+    //    (no scope-target), so the filter includes scopeLevel and
+    //    null scope-target identifiers.
+    const existingAssignment = await prisma.tenantRoleAssignment.findFirst({
       where: {
-        tenantMembershipId_roleCode: {
-          tenantMembershipId: membershipId,
-          roleCode: 'R13_SYSTEM_ADMINISTRATOR',
-        },
+        tenantMembershipId: membershipId,
+        roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+        scopeLevel: 'tenant',
+        scopeOrganisationId: null,
+        scopeFacilityId: null,
       },
     });
     if (existingAssignment === null) {

@@ -120,6 +120,10 @@ const contextWithNoActive = {
       },
     ],
     active: null,
+    organisationOptions: [],
+    activeOrganisation: null,
+    facilityOptions: [],
+    activeFacility: null,
   },
 };
 
@@ -156,6 +160,10 @@ const contextWithActiveA = {
         { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
       ],
     },
+    organisationOptions: [],
+    activeOrganisation: null,
+    facilityOptions: [],
+    activeFacility: null,
   },
 };
 
@@ -696,6 +704,268 @@ describe('DashboardPage', () => {
       const accountSection = accountHeading.closest('section');
       expect(accountSection?.textContent).toContain('طبيب');
       expect(accountSection?.textContent).toContain('مسؤول النظام');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-015: dashboard organisation and facility selector tests
+// ---------------------------------------------------------------------------
+
+const ORG_ID = '55555555-5555-5555-5555-555555555555';
+const FACILITY_ID = '66666666-6666-6666-6666-666666666666';
+
+const mockSelectOrganisationContext = vi.fn();
+const mockClearOrganisationContext = vi.fn();
+const mockSelectFacilityContext = vi.fn();
+const mockClearFacilityContext = vi.fn();
+
+// Re-mock the context module to include the new ADR-015 functions.
+vi.mock('@/lib/api/context', () => ({
+  getContext: (...args: unknown[]) => mockGetContext(...args),
+  selectTenantContext: (...args: unknown[]) => mockSelectTenantContext(...args),
+  clearTenantContext: (...args: unknown[]) => mockClearTenantContext(...args),
+  selectOrganisationContext: (...args: unknown[]) =>
+    mockSelectOrganisationContext(...args),
+  clearOrganisationContext: (...args: unknown[]) =>
+    mockClearOrganisationContext(...args),
+  selectFacilityContext: (...args: unknown[]) =>
+    mockSelectFacilityContext(...args),
+  clearFacilityContext: (...args: unknown[]) =>
+    mockClearFacilityContext(...args),
+}));
+
+const contextWithOrgOptions = {
+  ok: true,
+  data: {
+    options: [
+      {
+        membershipId: MEMBERSHIP_ID_A,
+        tenantId: TENANT_ID_A,
+        tenantSlug: 'tenant-alpha.invalid',
+        tenantDisplayName: 'Tenant Alpha',
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
+      },
+    ],
+    active: {
+      membershipId: MEMBERSHIP_ID_A,
+      tenantId: TENANT_ID_A,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+      ],
+    },
+    organisationOptions: [
+      {
+        organisationId: ORG_ID,
+        code: 'ORG-1',
+        displayName: 'Organisation Alpha',
+        status: 'active' as const,
+      },
+    ],
+    activeOrganisation: null,
+    facilityOptions: [],
+    activeFacility: null,
+  },
+};
+
+const contextWithActiveOrgAndFacilityOptions = {
+  ok: true,
+  data: {
+    options: [
+      {
+        membershipId: MEMBERSHIP_ID_A,
+        tenantId: TENANT_ID_A,
+        tenantSlug: 'tenant-alpha.invalid',
+        tenantDisplayName: 'Tenant Alpha',
+        roles: [
+          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        ],
+      },
+    ],
+    active: {
+      membershipId: MEMBERSHIP_ID_A,
+      tenantId: TENANT_ID_A,
+      tenantSlug: 'tenant-alpha.invalid',
+      tenantDisplayName: 'Tenant Alpha',
+      roles: [
+        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+      ],
+    },
+    organisationOptions: [
+      {
+        organisationId: ORG_ID,
+        code: 'ORG-1',
+        displayName: 'Organisation Alpha',
+        status: 'active' as const,
+      },
+    ],
+    activeOrganisation: {
+      organisationId: ORG_ID,
+      code: 'ORG-1',
+      displayName: 'Organisation Alpha',
+    },
+    facilityOptions: [
+      {
+        facilityId: FACILITY_ID,
+        organisationId: ORG_ID,
+        code: 'FAC-1',
+        displayName: 'Facility Alpha',
+        status: 'active' as const,
+      },
+    ],
+    activeFacility: null,
+  },
+};
+
+describe('DashboardPage ADR-015 organisation and facility selectors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetContext.mockResolvedValue(contextWithOrgOptions);
+    mockGetCsrfToken.mockResolvedValue({
+      ok: true,
+      data: { token: 'csrf-token-value' },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders the organisation selector when a tenant is active', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithOrgOptions);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The Arabic label "اختر مؤسسة" is the organisation select legend.
+      expect(screen.getByText('اختر مؤسسة')).toBeInTheDocument();
+      // The organisation option should be visible.
+      expect(screen.getByText('Organisation Alpha')).toBeInTheDocument();
+    });
+  });
+
+  it('does not render the organisation selector when no tenant is active', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithNoActive);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('اختر مؤسسة')).not.toBeInTheDocument();
+    });
+  });
+
+  it('renders the facility selector when both tenant and organisation are active', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The Arabic label "اختر منشأة" is the facility select legend.
+      expect(screen.getByText('اختر منشأة')).toBeInTheDocument();
+      expect(screen.getByText('Facility Alpha')).toBeInTheDocument();
+    });
+  });
+
+  it('shows a hint to select an organisation before selecting a facility when no organisation is active', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithOrgOptions);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The Arabic hint "يجب اختيار مؤسسة قبل اختيار منشأة." appears
+      // when the tenant is active but no organisation is active.
+      expect(
+        screen.getByText('يجب اختيار مؤسسة قبل اختيار منشأة.'),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('calls selectOrganisationContext with the selected organisationId and CSRF token', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithOrgOptions);
+    mockSelectOrganisationContext.mockResolvedValue(contextWithOrgOptions);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Organisation Alpha')).toBeInTheDocument();
+    });
+
+    const selectButton = screen.getByRole('button', {
+      name: 'اختيار المؤسسة',
+    });
+    await act(async () => {
+      await userEvent.click(selectButton);
+    });
+
+    await waitFor(() => {
+      expect(mockSelectOrganisationContext).toHaveBeenCalledWith(
+        ORG_ID,
+        'csrf-token-value',
+      );
+    });
+  });
+
+  it('calls selectFacilityContext with the selected facilityId and CSRF token', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
+    mockSelectFacilityContext.mockResolvedValue(
+      contextWithActiveOrgAndFacilityOptions,
+    );
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Facility Alpha')).toBeInTheDocument();
+    });
+
+    const selectButton = screen.getByRole('button', {
+      name: 'اختيار المنشأة',
+    });
+    await act(async () => {
+      await userEvent.click(selectButton);
+    });
+
+    await waitFor(() => {
+      expect(mockSelectFacilityContext).toHaveBeenCalledWith(
+        FACILITY_ID,
+        'csrf-token-value',
+      );
+    });
+  });
+
+  it('renders the active organisation indicator in the header when set', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+    mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The active organisation display name appears in the header.
+      const headerContext = document.querySelector('.ih-app__header-context');
+      expect(headerContext?.textContent).toContain('Organisation Alpha');
     });
   });
 });

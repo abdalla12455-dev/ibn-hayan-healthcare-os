@@ -19,7 +19,7 @@
 
 /**
  * The audit event categories implemented in the ninth canonical
- * batch.
+ * batch and the ADR-015 scoped-context extension.
  *
  * The values are stable machine-readable strings. They are stored in
  * the `category` column of the `audit_events` table in the dedicated
@@ -31,6 +31,8 @@ export type AuditEventCategory =
   | 'security'
   | 'authorization'
   | 'tenant_context'
+  | 'organisation_context'
+  | 'facility_context'
   | 'rbac'
   | 'audit';
 
@@ -43,6 +45,8 @@ export const AUDIT_EVENT_CATEGORIES: readonly AuditEventCategory[] = [
   'security',
   'authorization',
   'tenant_context',
+  'organisation_context',
+  'facility_context',
   'rbac',
   'audit',
 ] as const;

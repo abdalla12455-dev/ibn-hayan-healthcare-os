@@ -9,5 +9,9 @@ export {
   getContext,
   selectTenantContext,
   clearTenantContext,
+  selectOrganisationContext,
+  clearOrganisationContext,
+  selectFacilityContext,
+  clearFacilityContext,
   type ContextClientResult,
 } from './context.client';

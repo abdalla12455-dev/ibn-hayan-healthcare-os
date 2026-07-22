@@ -98,6 +98,41 @@
 //   Care-Team) is deferred. The first slice is Tenant-scoped because
 //   the current application only has an active Tenant context.
 //
+// Per ADR-015 (Scoped Organisation and Facility Context):
+// - The `TenantRoleAssignment` model gains three new columns:
+//   `scope_level` (NOT NULL, default 'tenant'), `scope_organisation_id`
+//   (nullable UUID), and `scope_facility_id` (nullable UUID). The
+//   scope level is one of 'tenant', 'organisation', 'facility'.
+// - The original unique constraint on `(tenantMembershipId, roleCode)`
+//   is replaced by three partial unique indexes (one per scope level)
+//   because PostgreSQL treats NULL as distinct in a unique index,
+//   which would defeat the constraint for tenant-scoped rows. The
+//   partial indexes are added by the reviewed raw SQL migration
+//   `20260722100000_scoped_organisation_facility_context` because
+//   Prisma 7 cannot express partial unique indexes with NULL
+//   predicates in the schema language. The original `@@unique`
+//   declaration is removed from this schema and replaced with a
+//   plain `@@index` for read-path performance; the partial unique
+//   indexes are the structural enforcement of "no duplicate
+//   assignments at the same scope".
+// - Three CHECK constraints (added by the migration) enforce the
+//   scope-target implications:
+//   1. `scope_level = 'tenant'` IMPLIES `scope_organisation_id IS NULL
+//      AND scope_facility_id IS NULL`.
+//   2. `scope_level = 'organisation'` IMPLIES `scope_organisation_id
+//      IS NOT NULL AND scope_facility_id IS NULL`.
+//   3. `scope_level = 'facility'` IMPLIES `scope_organisation_id IS
+//      NOT NULL AND scope_facility_id IS NOT NULL`.
+// - Single-column foreign keys `scope_organisation_id` →
+//   `organisations.id` and `scope_facility_id` → `facilities.id`
+//   are added with `ON DELETE RESTRICT`. The application layer
+//   additionally validates that the scope target belongs to the
+//   membership's tenant (and, for facility scope, to the supplied
+//   organisation).
+// - Existing rows are migrated to explicit `tenant` scope with no
+//   scope-target by the migration's UPDATE statement. Their behaviour
+//   is unchanged.
+//
 // Per ADR-012 §1.4 safeguard 4 (PostgreSQL-first design): when Prisma's
 // schema language cannot express a PostgreSQL concept that the design
 // requires, the design is PostgreSQL-correct first and the Prisma
@@ -179,8 +214,10 @@ model Organisation {
   createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  facilities Facility[]
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facilities          Facility[]
+  roleAssignments     TenantRoleAssignment[]  @relation("TenantRoleAssignmentScopeOrganisation")
+  activeSessions      AuthSession[]           @relation("AuthSessionActiveOrganisation")
 
   @@unique([tenantId, code], map: "organisations_tenant_id_code_key")
   @@unique([tenantId, id], map: "organisations_tenant_id_id_key")
@@ -227,9 +264,12 @@ model Facility {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  organisation     Organisation            @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roleAssignments  TenantRoleAssignment[]  @relation("TenantRoleAssignmentScopeFacility")
+  activeSessions   AuthSession[]           @relation("AuthSessionActiveFacility")
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
+  @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
   @@index([tenantId], map: "facilities_tenant_id_idx")
   @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
   @@map("facilities")
@@ -440,17 +480,24 @@ model TenantMembership {
 /// explicitly assign R13 System Administrator to the development
 /// membership.
 model TenantRoleAssignment {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantMembershipId String   @map("tenant_membership_id") @db.Uuid
-  roleCode           String   @map("role_code") @db.VarChar(40)
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantMembershipId   String   @map("tenant_membership_id") @db.Uuid
+  roleCode             String   @map("role_code") @db.VarChar(40)
+  scopeLevel           String   @default("tenant") @map("scope_level") @db.VarChar(20)
+  scopeOrganisationId  String?  @map("scope_organisation_id") @db.Uuid
+  scopeFacilityId      String?  @map("scope_facility_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenantMembership TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  tenantMembership   TenantMembership @relation(fields: [tenantMembershipId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeOrganisation  Organisation?    @relation("TenantRoleAssignmentScopeOrganisation", fields: [scopeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  scopeFacility      Facility?        @relation("TenantRoleAssignmentScopeFacility", fields: [scopeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@unique([tenantMembershipId, roleCode], map: "tenant_role_assignments_membership_role_key")
   @@index([tenantMembershipId], map: "tenant_role_assignments_tenant_membership_id_idx")
   @@index([roleCode], map: "tenant_role_assignments_role_code_idx")
+  @@index([scopeOrganisationId], map: "tenant_role_assignments_scope_organisation_id_idx")
+  @@index([scopeFacilityId], map: "tenant_role_assignments_scope_facility_id_idx")
+  @@index([tenantMembershipId, roleCode, scopeLevel], map: "tenant_role_assignments_membership_role_scope_idx")
   @@map("tenant_role_assignments")
 }
 
@@ -512,22 +559,57 @@ model TenantRoleAssignment {
 /// `ON DELETE RESTRICT` on the user foreign key means a User with
 /// sessions cannot be deleted until the sessions are revoked or
 /// deleted first.
+///
+/// Per ADR-015 (Scoped Organisation and Facility Context):
+/// - The AuthSession model gains two nullable UUID columns:
+///   `active_organisation_id` and `active_facility_id`. Both are
+///   nullable: `null` means "no active context at this level"; the
+///   session remains valid.
+/// - Single-column foreign keys `active_organisation_id` →
+///   `organisations.id` and `active_facility_id` → `facilities.id`
+///   are added with `ON DELETE RESTRICT`. The application layer
+///   additionally validates that the active organisation belongs to
+///   the active tenant and that the active facility belongs to the
+///   active organisation and active tenant.
+/// - A composite foreign key
+///   `auth_sessions(active_facility_id, active_organisation_id)` →
+///   `facilities(id, organisation_id)` is added by the reviewed raw
+///   SQL migration `20260722100000_scoped_organisation_facility_context`
+///   because Prisma 7 cannot express composite foreign keys in the
+///   schema language. The composite FK enforces at the database level
+///   that the active facility belongs to the active organisation.
+/// - A CHECK constraint (added by the migration) enforces that
+///   `active_facility_id IS NULL OR active_organisation_id IS NOT NULL`
+///   — a facility cannot remain active without an active organisation.
+/// - The cascade-clearing invariants (selecting a new tenant clears
+///   the active organisation and facility; selecting a new
+///   organisation clears the active facility when the facility does
+///   not belong to it; clearing the tenant clears the organisation
+///   and the facility; clearing the organisation clears the facility)
+///   are enforced at the application layer in the same Prisma
+///   transaction as the selection or clearing.
 model AuthSession {
   id                       String   @id @default(uuid()) @db.Uuid
   userId                   String   @map("user_id") @db.Uuid
   tokenHash                String   @unique @map("token_hash") @db.Char(64)
   activeTenantMembershipId String?  @map("active_tenant_membership_id") @db.Uuid
+  activeOrganisationId     String?  @map("active_organisation_id") @db.Uuid
+  activeFacilityId         String?  @map("active_facility_id") @db.Uuid
   expiresAt                DateTime @map("expires_at") @db.Timestamptz
   lastSeenAt               DateTime @map("last_seen_at") @db.Timestamptz
   rotatedAt                DateTime? @map("rotated_at") @db.Timestamptz
   revokedAt                DateTime? @map("revoked_at") @db.Timestamptz
   createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  user               User           @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activeOrganisation Organisation?  @relation("AuthSessionActiveOrganisation", fields: [activeOrganisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  activeFacility     Facility?      @relation("AuthSessionActiveFacility", fields: [activeFacilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([userId], map: "auth_sessions_user_id_idx")
   @@index([expiresAt], map: "auth_sessions_expires_at_idx")
   @@index([activeTenantMembershipId], map: "auth_sessions_active_tenant_membership_id_idx")
+  @@index([activeOrganisationId], map: "auth_sessions_active_organisation_id_idx")
+  @@index([activeFacilityId], map: "auth_sessions_active_facility_id_idx")
   @@map("auth_sessions")
 }
 

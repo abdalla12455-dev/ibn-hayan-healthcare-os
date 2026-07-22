@@ -62,6 +62,8 @@ import type {
   SessionTokenHash,
   CreateSessionInput,
 } from './session.js';
+import type { OrganisationId } from '../tenancy/organisation.js';
+import type { FacilityId } from '../tenancy/facility.js';
 
 /**
  * Repository port for the User bounded context.
@@ -265,6 +267,14 @@ export interface SessionRepository {
    * deletion is blocked by `ON DELETE RESTRICT` while the session
    * references it).
    *
+   * Per ADR-015, clearing the active tenant also clears the active
+   * organisation and the active facility. The caller (the
+   * session-context service) is responsible for performing the
+   * cascade in the same Prisma transaction. This port clears only
+   * the tenant context; the service calls
+   * `clearActiveOrganisation` and `clearActiveFacility` in the
+   * same transaction.
+   *
    * The caller passes `clearedAt` (typically `new Date()`) for
    * deterministic test behaviour.
    *
@@ -272,6 +282,111 @@ export interface SessionRepository {
    * exist or has been revoked.
    */
   clearActiveTenantMembership(
+    sessionId: SessionId,
+    clearedAt: Date,
+  ): Promise<Session | null>;
+
+  /**
+   * Set the active Organisation for a session.
+   *
+   * Per ADR-015 (Scoped Organisation and Facility Context), the
+   * active organisation is session-specific. The caller passes the
+   * `organisationId` to select; the persistence layer is
+   * responsible for enforcing that the organisation exists (via the
+   * single-column foreign key). The application layer performs an
+   * additional defensive check before calling this port, verifying
+   * that the organisation belongs to the active tenant and that the
+   * authenticated principal holds an applicable scoped role
+   * assignment for the selected organisation.
+   *
+   * The caller passes `selectedAt` (typically `new Date()`) so the
+   * operation is deterministic and testable per
+   * CODING_STANDARDS.md §11.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked. The session's `expiresAt` is NOT
+   * extended by context selection; selection is not a re-login.
+   *
+   * This port does NOT cascade-clear the active facility. The
+   * caller (the session-context service) is responsible for
+   * performing the cascade in the same Prisma transaction when the
+   * newly selected organisation does not own the currently active
+   * facility.
+   */
+  setActiveOrganisation(
+    sessionId: SessionId,
+    organisationId: OrganisationId,
+    selectedAt: Date,
+  ): Promise<Session | null>;
+
+  /**
+   * Clear the active Organisation for a session.
+   *
+   * Per ADR-015, clearing the active organisation also clears the
+   * active facility (a facility cannot remain active without an
+   * active organisation). The caller (the session-context service)
+   * is responsible for performing the cascade in the same Prisma
+   * transaction. This port clears only the organisation context;
+   * the service calls `clearActiveFacility` in the same
+   * transaction.
+   *
+   * Sets `activeOrganisationId` to `null`. The session remains
+   * valid; only its active organisation context is removed.
+   *
+   * The caller passes `clearedAt` (typically `new Date()`) for
+   * deterministic test behaviour.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked.
+   */
+  clearActiveOrganisation(
+    sessionId: SessionId,
+    clearedAt: Date,
+  ): Promise<Session | null>;
+
+  /**
+   * Set the active Facility for a session.
+   *
+   * Per ADR-015, the active facility is session-specific. The
+   * caller passes the `facilityId` to select; the persistence
+   * layer is responsible for enforcing that the facility exists
+   * (via the single-column foreign key) and that the facility
+   * belongs to the active organisation (via the composite foreign
+   * key from `auth_sessions(active_facility_id,
+   * active_organisation_id)` to `facilities(id, organisation_id)`).
+   * The application layer performs an additional defensive check
+   * before calling this port, verifying that the facility belongs
+   * to the active tenant and that the authenticated principal holds
+   * an applicable scoped role assignment for the selected facility.
+   *
+   * The caller passes `selectedAt` (typically `new Date()`) so the
+   * operation is deterministic and testable per
+   * CODING_STANDARDS.md §11.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked. The session's `expiresAt` is NOT
+   * extended by context selection; selection is not a re-login.
+   */
+  setActiveFacility(
+    sessionId: SessionId,
+    facilityId: FacilityId,
+    selectedAt: Date,
+  ): Promise<Session | null>;
+
+  /**
+   * Clear the active Facility for a session.
+   *
+   * Sets `activeFacilityId` to `null`. The session remains valid;
+   * only its active facility context is removed. The active
+   * organisation context, if any, is preserved.
+   *
+   * The caller passes `clearedAt` (typically `new Date()`) for
+   * deterministic test behaviour.
+   *
+   * Returns the updated Session, or `null` if the session does not
+   * exist or has been revoked.
+   */
+  clearActiveFacility(
     sessionId: SessionId,
     clearedAt: Date,
   ): Promise<Session | null>;

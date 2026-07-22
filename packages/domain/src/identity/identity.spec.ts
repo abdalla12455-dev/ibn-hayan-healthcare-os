@@ -113,6 +113,8 @@ describe('identity domain exports', () => {
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
       activeTenantMembershipId: null,
+      activeOrganisationId: null,
+      activeFacilityId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
@@ -123,6 +125,8 @@ describe('identity domain exports', () => {
     expect(session.userId).toBe('user-1');
     expect(session.tokenHash).toBe('a'.repeat(64));
     expect(session.activeTenantMembershipId).toBeNull();
+    expect(session.activeOrganisationId).toBeNull();
+    expect(session.activeFacilityId).toBeNull();
     expect(session.rotatedAt).toBeNull();
     expect(session.revokedAt).toBeNull();
   });
@@ -133,6 +137,8 @@ describe('identity domain exports', () => {
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
       activeTenantMembershipId: null,
+      activeOrganisationId: null,
+      activeFacilityId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
@@ -157,6 +163,8 @@ describe('identity domain exports', () => {
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
       activeTenantMembershipId: membershipId,
+      activeOrganisationId: null,
+      activeFacilityId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
@@ -167,25 +175,32 @@ describe('identity domain exports', () => {
     expect(session.activeTenantMembershipId).toBe('membership-1');
   });
 
-  it('Session type does not carry active Organisation or Facility context', () => {
-    // The fifth canonical batch introduces ONLY active Tenant context.
-    // Active Organisation and Facility context remain deferred. This
-    // test is the structural enforcement of that boundary at the
-    // domain type level.
+  it('Session type carries active Organisation and Facility context per ADR-015', () => {
+    // Per ADR-015 (Scoped Organisation and Facility Context), the
+    // Session type now carries activeOrganisationId and
+    // activeFacilityId, both nullable. This test is the structural
+    // enforcement of that the ADR-015 extension at the domain type
+    // level.
     const session: Session = {
       id: 'session-1' as SessionId,
       userId: 'user-1' as UserId,
       tokenHash: 'a'.repeat(64) as SessionTokenHash,
       activeTenantMembershipId: null,
+      activeOrganisationId: null,
+      activeFacilityId: null,
       expiresAt: new Date('2026-01-01T12:00:00Z'),
       lastSeenAt: new Date('2026-01-01T00:00:00Z'),
       rotatedAt: null,
       revokedAt: null,
       createdAt: new Date('2026-01-01T00:00:00Z'),
     };
-    expect(session).not.toHaveProperty('activeOrganisationId');
-    expect(session).not.toHaveProperty('activeOrganisationMembershipId');
-    expect(session).not.toHaveProperty('activeFacilityId');
+    expect(session).toHaveProperty('activeOrganisationId');
+    expect(session).toHaveProperty('activeFacilityId');
+    expect(session.activeOrganisationId).toBeNull();
+    expect(session.activeFacilityId).toBeNull();
+    // The session must NOT carry a denormalised activeTenantId;
+    // the tenant is referenced transitively through the selected
+    // TenantMembership.
     expect(session).not.toHaveProperty('activeTenantId');
     expect(session).not.toHaveProperty('activeTenantSlug');
     expect(session).not.toHaveProperty('activeTenantDisplayName');
@@ -387,6 +402,18 @@ describe('identity repository ports', () => {
       ): Promise<Session | null> {
         return null;
       },
+      async setActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveFacility(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveFacility(): Promise<Session | null> {
+        return null;
+      },
     };
     expect(stub).toBeDefined();
     expect(typeof stub.create).toBe('function');
@@ -397,6 +424,10 @@ describe('identity repository ports', () => {
     expect(typeof stub.revokeAllForUser).toBe('function');
     expect(typeof stub.setActiveTenantMembership).toBe('function');
     expect(typeof stub.clearActiveTenantMembership).toBe('function');
+    expect(typeof stub.setActiveOrganisation).toBe('function');
+    expect(typeof stub.clearActiveOrganisation).toBe('function');
+    expect(typeof stub.setActiveFacility).toBe('function');
+    expect(typeof stub.clearActiveFacility).toBe('function');
   });
 
   it('SessionRepository.findActiveByTokenHash takes (tokenHash, now) — no raw-token lookup exists', () => {
@@ -432,6 +463,18 @@ describe('identity repository ports', () => {
         return null;
       },
       async clearActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveFacility(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveFacility(): Promise<Session | null> {
         return null;
       },
     };
@@ -474,6 +517,18 @@ describe('identity repository ports', () => {
         return null;
       },
       async clearActiveTenantMembership(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveFacility(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveFacility(): Promise<Session | null> {
         return null;
       },
     };
@@ -519,6 +574,18 @@ describe('identity repository ports', () => {
       async clearActiveTenantMembership(): Promise<Session | null> {
         return null;
       },
+      async setActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveFacility(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveFacility(): Promise<Session | null> {
+        return null;
+      },
     };
     expect(stub.setActiveTenantMembership).toBeDefined();
   });
@@ -552,6 +619,18 @@ describe('identity repository ports', () => {
       ): Promise<Session | null> {
         expect(typeof sessionId).toBe('string');
         expect(clearedAt).toBeInstanceOf(Date);
+        return null;
+      },
+      async setActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveOrganisation(): Promise<Session | null> {
+        return null;
+      },
+      async setActiveFacility(): Promise<Session | null> {
+        return null;
+      },
+      async clearActiveFacility(): Promise<Session | null> {
         return null;
       },
     };

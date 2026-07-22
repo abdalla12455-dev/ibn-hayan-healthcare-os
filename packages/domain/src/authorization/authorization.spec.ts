@@ -172,11 +172,19 @@ describe('authorization role catalogue', () => {
 });
 
 describe('authorization permission catalogue', () => {
-  it('exposes the three current context permissions', () => {
+  it('exposes the seven current context permissions (ADR-015)', () => {
+    // Per ADR-015, the context permissions are split into per-level
+    // codes: context:view, context:select, context:clear,
+    // context:select_organisation, context:clear_organisation,
+    // context:select_facility, context:clear_facility.
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
       'context:clear',
+      'context:select_organisation',
+      'context:clear_organisation',
+      'context:select_facility',
+      'context:clear_facility',
     ]);
   });
 
@@ -184,6 +192,10 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('context:view')).toBe(true);
     expect(isPermissionCode('context:select')).toBe(true);
     expect(isPermissionCode('context:clear')).toBe(true);
+    expect(isPermissionCode('context:select_organisation')).toBe(true);
+    expect(isPermissionCode('context:clear_organisation')).toBe(true);
+    expect(isPermissionCode('context:select_facility')).toBe(true);
+    expect(isPermissionCode('context:clear_facility')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -230,16 +242,24 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('permissionsForRoles accumulates permissions across multiple roles (union)', () => {
-    // Two roles that both grant all three context permissions produce
-    // a union of three permissions.
+    // Two roles that both grant all seven context permissions produce
+    // a union of seven permissions. Per ADR-015, the context
+    // permissions are split into per-level codes: context:view,
+    // context:select, context:clear, context:select_organisation,
+    // context:clear_organisation, context:select_facility,
+    // context:clear_facility.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
     ]);
-    expect(union.size).toBe(3);
+    expect(union.size).toBe(7);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
+    expect(union.has('context:select_organisation')).toBe(true);
+    expect(union.has('context:clear_organisation')).toBe(true);
+    expect(union.has('context:select_facility')).toBe(true);
+    expect(union.has('context:clear_facility')).toBe(true);
   });
 
   it('permissionsForRoles returns an empty set for a roleless membership', () => {
@@ -257,7 +277,7 @@ describe('authorization role-permission matrix', () => {
       'R01_PHYSICIAN',
       'owner',
     ]);
-    expect(union.size).toBe(3);
+    expect(union.size).toBe(7);
   });
 
   it('R14 combined with a human role yields the union (R14 does not revoke)', () => {
@@ -265,10 +285,14 @@ describe('authorization role-permission matrix', () => {
       'R14_INTEGRATION_ACCOUNT',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(3);
+    expect(union.size).toBe(7);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
+    expect(union.has('context:select_organisation')).toBe(true);
+    expect(union.has('context:clear_organisation')).toBe(true);
+    expect(union.has('context:select_facility')).toBe(true);
+    expect(union.has('context:clear_facility')).toBe(true);
   });
 
   it('R14 alone yields no context permissions', () => {
@@ -351,6 +375,9 @@ describe('TenantRoleAssignment domain type', () => {
       id: 'assignment-1' as TenantRoleAssignmentId,
       tenantMembershipId: 'membership-1' as TenantMembershipId,
       roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+      scopeLevel: 'tenant',
+      scopeOrganisationId: null,
+      scopeFacilityId: null,
       createdAt: new Date('2026-07-19T00:00:00Z'),
       updatedAt: new Date('2026-07-19T00:00:00Z'),
     };
@@ -400,7 +427,7 @@ describe('TenantRoleAssignment domain type', () => {
       'R01_PHYSICIAN',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(3);
+    expect(union.size).toBe(7);
   });
 
   it('a catalogue entry is a readonly snapshot', () => {

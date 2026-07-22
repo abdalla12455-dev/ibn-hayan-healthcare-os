@@ -209,19 +209,32 @@ async function seedTestData(): Promise<void> {
     },
   });
 
-  await seedPrisma.tenantRoleAssignment.upsert({
+  // Per ADR-015, the original (tenant_membership_id, role_code)
+  // unique constraint was replaced by three partial unique indexes
+  // (one per scope level). Prisma 7 cannot represent partial unique
+  // indexes as compound `where` clauses; the test seed therefore
+  // uses `findFirst` with an explicit filter and a conditional
+  // create.
+  const existingAssignment = await seedPrisma.tenantRoleAssignment.findFirst({
     where: {
-      tenantMembershipId_roleCode: {
-        tenantMembershipId: membership.id,
-        roleCode: 'R13_SYSTEM_ADMINISTRATOR',
-      },
-    },
-    update: {},
-    create: {
       tenantMembershipId: membership.id,
       roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+      scopeLevel: 'tenant',
+      scopeOrganisationId: null,
+      scopeFacilityId: null,
     },
   });
+  if (existingAssignment === null) {
+    await seedPrisma.tenantRoleAssignment.create({
+      data: {
+        tenantMembershipId: membership.id,
+        roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+        scopeLevel: 'tenant',
+        scopeOrganisationId: null,
+        scopeFacilityId: null,
+      },
+    });
+  }
 }
 
 describe('Audit atomicity rollback', () => {
