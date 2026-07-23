@@ -1,5 +1,5 @@
 name: ADR-015 PostgreSQL 17 Validation
-
+# Manual retrigger after missed push event
 on:
   push:
     branches:
