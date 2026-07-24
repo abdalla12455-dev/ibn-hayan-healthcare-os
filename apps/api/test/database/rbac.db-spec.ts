@@ -279,34 +279,138 @@ describe('RBAC migration behaviour', () => {
     //   - `tenant_role_assignments_facility_scope_uniq`
     //       (facility-scope rows)
     // The tenant-scope partial index is the structural successor
-    // of the dropped index for the default (tenant) scope, which
-    // is the scope exercised by the RBAC foundation tests. We
-    // assert the new index name and verify it is a partial unique
-    // index with the expected predicate so the test does not
-    // silently accept an unrelated index of the same name.
-    const result = await prisma.$queryRaw`
+    // of the dropped index for the default (tenant) scope.
+    //
+    // We verify the index via the PostgreSQL catalogue
+    // (pg_index, pg_class, pg_attribute) rather than matching the
+    // textual `pg_get_indexdef` output, because PostgreSQL
+    // canonicalizes the predicate with explicit `::text` casts and
+    // redundant parentheses — e.g.
+    // `((scope_level)::text = 'tenant'::text) AND ...`. The
+    // catalogue approach verifies structural properties (unique,
+    // partial, key columns) directly from system columns, and
+    // normalizes only the predicate expression text (stripping
+    // `::text` casts, parentheses, and extra whitespace) so an
+    // incorrect predicate cannot pass.
+
+    // Structural properties: existence (one row), uniqueness,
+    // partial-ness, and the predicate expression text.
+    const structuralRaw = await prisma.$queryRaw`
       SELECT
-        i.indexname AS indexname,
-        i.indexdef AS indexdef
-      FROM pg_indexes i
-      WHERE i.indexname = 'tenant_role_assignments_tenant_scope_uniq'
-        AND i.tablename = 'tenant_role_assignments'
+        i.indisunique AS indisunique,
+        (i.indpred IS NOT NULL) AS is_partial,
+        pg_get_expr(i.indpred, i.indrelid) AS indpred
+      FROM pg_index AS i
+      JOIN pg_class AS c ON c.oid = i.indexrelid
+      JOIN pg_class AS t ON t.oid = i.indrelid
+      WHERE t.relname = 'tenant_role_assignments'
+        AND c.relname = 'tenant_role_assignments_tenant_scope_uniq'
     `;
-    const rows = result as readonly { indexname: string; indexdef: string }[];
-    expect(rows).toHaveLength(1);
-    const def = rows[0]!.indexdef;
-    // The index definition must be UNIQUE and partial (WHERE clause
-    // references the tenant-scope predicate).
-    expect(def).toMatch(/UNIQUE INDEX/i);
-    expect(def).toMatch(/scope_level = 'tenant'/i);
-    expect(def).toMatch(/scope_organisation_id IS NULL/i);
-    expect(def).toMatch(/scope_facility_id IS NULL/i);
-    // The index must cover (tenant_membership_id, role_code) so the
-    // duplicate-assignment invariant is structurally enforced at
-    // tenant scope.
-    expect(def).toMatch(
-      /tenant_membership_id.*role_code|role_code.*tenant_membership_id/i,
+    const structural = structuralRaw as ReadonlyArray<{
+      indisunique: boolean;
+      is_partial: boolean;
+      indpred: string | null;
+    }>;
+    expect(structural).toHaveLength(1);
+    const s = structural[0]!;
+
+    // 1. The index exists (verified by the query returning one row).
+    // 2. PostgreSQL reports it as unique.
+    expect(s.indisunique).toBe(true);
+    // 4. It is a partial index (has a non-null predicate).
+    expect(s.is_partial).toBe(true);
+    expect(s.indpred).not.toBeNull();
+
+    // 3. Its indexed key columns are exactly tenant_membership_id
+    //    and role_code, in that order. We read the key column
+    //    names from pg_attribute via the indkey int2vector.
+    const keyColumnsRaw = await prisma.$queryRaw`
+      SELECT att.attname AS attname
+      FROM pg_index AS i
+      JOIN pg_class AS c ON c.oid = i.indexrelid
+      JOIN pg_class AS t ON t.oid = i.indrelid
+      JOIN unnest(string_to_array(i.indkey::text, ' ')::int[])
+        WITH ORDINALITY AS k(attnum, ord) ON true
+      JOIN pg_attribute AS att
+        ON att.attrelid = i.indrelid AND att.attnum = k.attnum
+      WHERE t.relname = 'tenant_role_assignments'
+        AND c.relname = 'tenant_role_assignments_tenant_scope_uniq'
+      ORDER BY k.ord
+    `;
+    const keyColumns = keyColumnsRaw as ReadonlyArray<{
+      attname: string;
+    }>;
+    expect(keyColumns.map((r) => r.attname)).toEqual([
+      'tenant_membership_id',
+      'role_code',
+    ]);
+
+    // 5. Its predicate semantically requires:
+    //      scope_level = 'tenant'
+    //      scope_organisation_id IS NULL
+    //      scope_facility_id IS NULL
+    //    Normalize only PostgreSQL formatting artifacts (::text
+    //    casts, parentheses, repeated whitespace) so a different
+    //    predicate cannot pass. After normalization, split on AND
+    //    and compare the sorted clause set to the expected set.
+    const normalizedPred = (s.indpred as string)
+      .replace(/::\w+/g, '') // strip ::text and other type casts
+      .replace(/[()]/g, ' ') // replace parens with spaces
+      .replace(/\s+/g, ' ') // collapse whitespace
+      .trim()
+      .toLowerCase();
+    const clauses = normalizedPred
+      .split(/\s+and\s+/)
+      .map((c) => c.trim())
+      .sort();
+    expect(clauses).toEqual(
+      [
+        'scope_facility_id is null',
+        "scope_level = 'tenant'",
+        'scope_organisation_id is null',
+      ].sort(),
     );
+  });
+
+  it('migration applied: tenant-scope uniqueness rejects duplicates with SQLSTATE 23505', async () => {
+    // Behavioural regression coverage for the tenant-scope partial
+    // unique index `tenant_role_assignments_tenant_scope_uniq`.
+    // Two tenant-scoped assignments with the same
+    // (tenant_membership_id, role_code) must be rejected with
+    // SQLSTATE 23505 (unique_violation). This is the behavioural
+    // backstop for the structural index assertion above and
+    // complements the application-layer duplicate-assignment test
+    // in the `TenantRoleAssignment database model` suite (which
+    // asserts the repository throws, but does not surface the
+    // underlying SQLSTATE).
+    const tenant = await tenants.create({
+      slug: 'tenant-uniq-23505',
+      displayName: 'Uniqueness 23505 Tenant',
+    });
+    const user = await users.create({
+      email: 'uniq-23505@example.invalid',
+      displayName: 'Uniqueness 23505 User',
+    });
+    const membership = await memberships.create({
+      tenantId: tenant.id,
+      userId: user.id,
+    });
+
+    // Insert the first tenant-scoped assignment via raw SQL.
+    await prisma.$executeRaw`
+      INSERT INTO tenant_role_assignments (id, tenant_membership_id, tenant_id, role_code, scope_level, created_at, updated_at)
+      VALUES (gen_random_uuid(), ${membership.id}::uuid, ${tenant.id}::uuid, 'R01_PHYSICIAN', 'tenant', now(), now())
+    `;
+
+    // Insert a second tenant-scoped assignment with the same
+    // (tenant_membership_id, role_code). The partial unique index
+    // must reject this with SQLSTATE 23505 (unique_violation).
+    await expect(
+      prisma.$executeRaw`
+        INSERT INTO tenant_role_assignments (id, tenant_membership_id, tenant_id, role_code, scope_level, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${membership.id}::uuid, ${tenant.id}::uuid, 'R01_PHYSICIAN', 'tenant', now(), now())
+      `,
+    ).rejects.toThrow(/unique constraint|23505|duplicate key/);
   });
 
   it('migration applied: foreign key to tenant_memberships exists', async () => {
