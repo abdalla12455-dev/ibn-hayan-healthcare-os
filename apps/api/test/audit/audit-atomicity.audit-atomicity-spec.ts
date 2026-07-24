@@ -565,6 +565,17 @@ describe('ADR-015 Organisation and Facility Context atomicity rollback', () => {
     const { organisationId } = await seedOrgAndFacility();
     const { cookie, csrf } = await loginAndSelectTenant();
 
+    // The setup above (login + tenant-context selection) legitimately
+    // emits audit events through the outbox with the failure flag
+    // disabled. Those rows are pre-existing legitimate outbox rows and
+    // MUST remain untouched by the failed organisation-context
+    // selection below. The correct invariant is therefore NOT "the
+    // outbox is empty" but "the failed operation did not add or remove
+    // any outbox row, and no outbox row for the failed operation's
+    // action code exists." Capture the baseline count immediately
+    // before invoking the failing operation.
+    const outboxBaseline = await prisma.auditOutboxEvent.count();
+
     outboxInsertShouldFail = true;
 
     const selectRes = await request(server)
@@ -587,9 +598,42 @@ describe('ADR-015 Organisation and Facility Context atomicity rollback', () => {
     expect(sessions.length).toBe(1);
     expect(sessions[0]!.activeOrganisationId).toBeNull();
 
-    // Verify no outbox row was persisted.
-    const outboxRows = await prisma.auditOutboxEvent.count();
-    expect(outboxRows).toBe(0);
+    // Verify the failed operation did not change the outbox row count.
+    // The transactional outbox guarantee (ADR-014) requires that when
+    // the outbox insertion fails, the surrounding transaction —
+    // including the session update — rolls back. No outbox row for
+    // the failed operation can be persisted, and no pre-existing
+    // legitimate outbox row may be removed.
+    const outboxAfter = await prisma.auditOutboxEvent.count();
+    expect(outboxAfter).toBe(outboxBaseline);
+
+    // Additionally verify no outbox row for the failed
+    // organisation-context selection action exists. The outbox stores
+    // the canonical event draft as a JSONB column; we filter by the
+    // `action` field. This scoped assertion is the decisive
+    // evidence that the failed operation's audit event did not
+    // persist, independent of how many legitimate setup rows exist.
+    // We use the same JSON-path filter pattern as the audit-integration
+    // suite, with a JavaScript fallback for Prisma versions that do
+    // not support the path filter.
+    const orgSelectedByPath = await prisma.auditOutboxEvent.count({
+      where: {
+        canonicalEventDraft: {
+          path: ['action'],
+          equals: 'organisation_context.selected',
+        },
+      },
+    });
+    expect(orgSelectedByPath).toBe(0);
+    // JavaScript fallback: inspect every outbox row's draft action.
+    const allOutboxRows = await prisma.auditOutboxEvent.findMany({
+      select: { canonicalEventDraft: true },
+    });
+    const orgSelectedByJs = allOutboxRows.filter((row) => {
+      const draft = row.canonicalEventDraft as { action?: string };
+      return draft.action === 'organisation_context.selected';
+    });
+    expect(orgSelectedByJs).toHaveLength(0);
   });
 
   it('organisation-context clearing rolls back when outbox insertion fails', async () => {

@@ -703,9 +703,7 @@ describe('18. Active facility must belong to active organisation (composite FK)'
     const sql = `INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, last_seen_at, rotated_at, active_tenant_membership_id, active_organisation_id, active_facility_id) VALUES ('11111111-1111-1111-1111-111111111118', '${user.id}', '${'b'.repeat(64)}', NOW() + INTERVAL '12 hours', NOW(), NOW(), '${membership.id}', '${orgA.id}', '${facB.id}');`;
     const err = runSqlExpectError(sql);
     expect(err).not.toBeNull();
-    expect(err).toContain(
-      'auth_sessions_active_facility_id_active_organisation_id_fkey',
-    );
+    expect(err).toContain('auth_sessions_active_facility_organisation_fkey');
   });
 });
 
@@ -1063,16 +1061,47 @@ describe('31-34. Migration backfill verification', () => {
     expect(result.trim()).toBe(tenant.id);
   });
 
-  it('32. existing assignments have scope_level = tenant (smoke check)', () => {
+  it('32. existing assignments have scope_level = tenant (smoke check)', async () => {
+    // Each smoke check is self-contained because the file-level
+    // beforeEach truncates all tables before every it(). The
+    // original design shared a row inserted by test 31 across
+    // tests 32 and 33, but the truncate wiped the row between
+    // tests, causing tests 32 and 33 to query an empty result.
+    // Each test now inserts its own row before querying.
+    const user = await createUser('chk32@example.invalid', 'User 32');
+    const tenant = await createTenant('tenant-32.invalid', 'Tenant 32');
+    const membership = await createMembership(tenant.id, user.id);
+    insertRoleAssignmentRowDirectly({
+      id: '11111111-1111-1111-1111-111111111132',
+      tenantMembershipId: membership.id,
+      tenantId: tenant.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+      scopeLevel: 'tenant',
+      scopeOrganisationId: null,
+      scopeFacilityId: null,
+    });
     const result = runSql(
-      `SELECT scope_level FROM tenant_role_assignments WHERE id = '11111111-1111-1111-1111-111111111131';`,
+      `SELECT scope_level FROM tenant_role_assignments WHERE id = '11111111-1111-1111-1111-111111111132';`,
     );
     expect(result.trim()).toBe('tenant');
   });
 
-  it('33. existing role codes survive migration (smoke check)', () => {
+  it('33. existing role codes survive migration (smoke check)', async () => {
+    // Self-contained: see test 32 comment for the rationale.
+    const user = await createUser('chk33@example.invalid', 'User 33');
+    const tenant = await createTenant('tenant-33.invalid', 'Tenant 33');
+    const membership = await createMembership(tenant.id, user.id);
+    insertRoleAssignmentRowDirectly({
+      id: '11111111-1111-1111-1111-111111111133',
+      tenantMembershipId: membership.id,
+      tenantId: tenant.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+      scopeLevel: 'tenant',
+      scopeOrganisationId: null,
+      scopeFacilityId: null,
+    });
     const result = runSql(
-      `SELECT role_code FROM tenant_role_assignments WHERE id = '11111111-1111-1111-1111-111111111131';`,
+      `SELECT role_code FROM tenant_role_assignments WHERE id = '11111111-1111-1111-1111-111111111133';`,
     );
     expect(result.trim()).toBe('R13_SYSTEM_ADMINISTRATOR');
   });
