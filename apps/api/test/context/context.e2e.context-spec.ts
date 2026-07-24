@@ -1085,6 +1085,7 @@ async function bootstrapAdr015(options: {
   readonly assignSecondTenant?: boolean;
 }): Promise<{
   userId: string;
+  userEmail: string;
   tenantId: string;
   membershipId: string;
   organisationId: string;
@@ -1215,6 +1216,7 @@ async function bootstrapAdr015(options: {
 
   return {
     userId: user.id,
+    userEmail,
     tenantId: tenant.id,
     membershipId: membership.id,
     organisationId: organisation.id,
@@ -1251,24 +1253,16 @@ describe('25. ADR-015 — Organisation and Facility Context E2E', () => {
   it('25.1 authorises organisation selection for an R09 organisation-scoped principal', async () => {
     const ctx = await bootstrapAdr015({ assignment: 'R09-org' });
     const { cookie, csrf } = await loginSelectTenantAndReturnCookie(
-      `adr015-R09-org-${ctx.membershipId.slice(0, 8)}@example.invalid`,
+      ctx.userEmail,
       ctx.membershipId,
     );
-    // Re-login because bootstrapAdr015 generated a random email.
-    // The simpler path: log in via the email we know.
-    // Actually we need to track the email — let's re-bootstrap with a known email.
-    // To keep the helper simple, we re-login with the email we generated.
-    // (The helper returns userId but not email; we instead use the
-    //  lookup-by-membershipId pattern that the controller exposes via
-    //  the context response.)
-
-    // Simpler: skip the indirection and use the email pattern we control.
-    // We did not store the email in ctx. Re-derive it from the membership.
-    // For test simplicity, replace with a fresh bootstrap that uses a
-    // deterministic email.
+    // The cookie + CSRF pair is exercised further in 25.1-restart and
+    // subsequent tests. This test asserts that the helper completes
+    // without throwing — i.e. login (200), CSRF fetch (200), and
+    // tenant selection (200) all succeed for an organisation-scoped
+    // R09 principal.
     void cookie;
     void csrf;
-    // The actual assertion is performed in 25.1-restart below.
   });
 
   it('25.1-restart authorises organisation selection for an R09 organisation-scoped principal', async () => {
