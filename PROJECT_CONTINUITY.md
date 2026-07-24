@@ -224,6 +224,182 @@ This is the primary feature under development. It adds multi-tenant scoping to t
 
 **Validation strategy:** A Docker-based GitHub Actions workflow runs the full test suite against PostgreSQL 17 (the production target), since the development environment only has PostgreSQL 15/16 available locally.
 
+## Standard Main CI Workflow (branch `ci/main-standard-workflow-v1`)
+
+This branch was created on 2026-07-24 to prepare an official standard CI workflow for the canonical `main` branch. It exists only locally and has NOT been pushed.
+
+- **Purpose:** Provide continuous validation on every push to `main` and every pull request targeting `main`. The existing `.github/workflows/adr015-postgresql17-validation.yml` remains unchanged and scoped to `adr-015-validation`; the new workflow is additive.
+- **Branch start point:** `c7929c0360874b596ae1a62a80511cc78598da3e` (current `main` tip, fully synchronized with `origin/main`)
+- **New workflow path:** `.github/workflows/main-ci.yml`
+- **Triggers:** `push` to `main`, `pull_request` targeting `main`, `workflow_dispatch`
+- **Permissions:** `contents: read` (least privilege)
+- **Concurrency:** `group: main-ci-${{ github.ref }}`, `cancel-in-progress: true` (cancels obsolete runs on the same ref)
+
+### Gate inventory — Job 1: `static-and-build`
+
+Runs on `ubuntu-latest` directly (no Docker, no PostgreSQL needed). Timeout: 30 minutes.
+
+1. Checkout (actions/checkout@v4)
+2. Setup Node.js 24 (actions/setup-node@v4)
+3. Install pnpm 11.14.0 (npm install --global pnpm@11.14.0)
+4. `pnpm install --frozen-lockfile`
+5. `pnpm --dir apps/api exec prisma validate --schema prisma/schema.prisma`
+6. `pnpm --dir apps/api exec prisma generate --schema prisma/schema.prisma`
+7. `pnpm --dir apps/api exec prisma generate --schema prisma-audit/schema.prisma`
+8. `pnpm run build:shared` (builds @ibn-hayan/contracts and @ibn-hayan/domain)
+9. `pnpm --filter @ibn-hayan/observability... build`
+10. `pnpm run typecheck`
+11. `pnpm run lint`
+12. `pnpm run test` (unit tests across all workspace packages)
+13. `pnpm --filter @ibn-hayan/api audit:test:configuration` (pure unit suite — see placement decision below)
+14. `pnpm run build`
+
+### Gate inventory — Job 2: `postgresql17-validation`
+
+Runs inside a composite `node:24-bookworm` + `postgres:17-bookworm` Docker image (identical pattern to the ADR-015 workflow, so PG 17 results on `main` are directly comparable to results on `adr-015-validation`). Timeout: 60 minutes.
+
+1. Checkout
+2. Build composite Docker image (node:24 binaries layered onto postgres:17-bookworm, pnpm 11.14.0, `PG_BINDIR=/usr/lib/postgresql/17/bin`, `PATH` includes PG_BINDIR)
+3. Verify execution environment (explicit PostgreSQL 17 major-version check: `postgres --version | grep "PostgreSQL) 17."`)
+4. Run complete monorepo static and build gates inside container (prisma validate/generate, build:shared, observability build, typecheck, lint, test, build — same as Job 1, to ensure container self-consistency)
+5. Run PostgreSQL 17 test suites (inside container, `cd apps/api`):
+   - `pnpm test:context`
+   - `pnpm test:database`
+   - `pnpm audit:test:atomicity`
+   - `pnpm audit:test:integration`
+   - `pnpm audit:test:database`
+   - `pnpm audit:test:concurrency`
+   - `pnpm audit:test:verify`
+
+### PostgreSQL 17 suite inventory (10 test files, 229 tests per operator-verified `c05fc323` run)
+
+| Suite | Config | Test files | Tests | PG-dependent |
+|---|---|---|---|---|
+| `test:context` | `vitest.context.config.ts` | 1 | (part of 229) | Yes |
+| `test:database` | `vitest.database.config.ts` | 4 | (part of 229) | Yes |
+| `audit:test:atomicity` | `vitest.audit-atomicity.config.ts` | 1 | (part of 229) | Yes |
+| `audit:test:integration` | `vitest.audit-integration.config.ts` | 1 | (part of 229) | Yes |
+| `audit:test:database` | `vitest.audit-database.config.ts` | 1 | (part of 229) | Yes |
+| `audit:test:concurrency` | `vitest.audit-concurrency.config.ts` | 1 | (part of 229) | Yes |
+| `audit:test:verify` | `vitest.audit-verify.config.ts` | 1 | (part of 229) | Yes |
+| **Total PG suites** | | **10** | **229** | |
+
+### `audit:test:configuration` placement decision
+
+**Decision:** Placed in Job 1 (`static-and-build`), NOT in Job 2 (`postgresql17-validation`).
+
+**Reason:** The `vitest.audit-configuration.config.ts` docstring explicitly states: "These tests verify that `AuditConfigurationService` and the `validateAuditKey` / `validateAuditKeyPair` helpers enforce the production fail-closed posture required by the ninth canonical batch specification. **They run without a database (pure unit tests)**, so the default Vitest configuration is sufficient."
+
+**Source verification:** The test file `apps/api/test/audit/audit-configuration.spec.ts` has no `setupDatabaseTests` import (unlike all PG-dependent suites, e.g. `audit-atomicity` imports `setupDatabaseTests` from `../database/_pg-bootstrap.js`), no `PG_BINDIR` reference, no `PrismaClient` instantiation. It only manipulates environment variables (`AUDIT_DATABASE_URL`, `AUDIT_INTEGRITY_HMAC_KEY`, etc.) as strings and asserts `AuditConfigurationService` behaviour. It is therefore database-independent.
+
+**Consequence:** Placing it in the PG job would needlessly couple a fast (9ms, 28-test) unit suite to a 60-minute Docker+PostgreSQL job. Placing it in the static job gives it a 30-second turnaround on every push/PR.
+
+**Test count:** 28 tests in 1 file. Verified locally: `pnpm --filter @ibn-hayan/api audit:test:configuration` → 28 passed in 9ms.
+
+### Files created and modified
+
+**Created (1):**
+- `.github/workflows/main-ci.yml` (new standard CI workflow for `main`)
+
+**Modified (1):**
+- `PROJECT_CONTINUITY.md` (this section)
+
+**Deleted (0).**
+
+**Unchanged (verified):**
+- `.github/workflows/adr015-postgresql17-validation.yml` — preserved exactly as-is
+- No production source files (`apps/*/src`, `packages/*/src`) changed
+- No Prisma schema or migration changed
+- No dependency manifest or lockfile changed
+- `AGENTS.md` unchanged (no new durable safety rule required — the workflow follows existing invariants)
+- `docs/AI_AGENT_SAFETY_SKILL.md` unchanged
+- `worklog.md` unchanged (per task constraint)
+
+### Local validation results (run inside the isolated worktree)
+
+All gates were run locally to confirm the workflow's commands are correct and the codebase passes:
+
+| Gate | Result | Details |
+|---|---|---|
+| `git diff --check` | PASS | No whitespace errors |
+| YAML syntax | PASS | Parsed by PyYAML |
+| GitHub Actions event syntax | PASS | push:main, pull_request:main, workflow_dispatch |
+| Workflow permissions | PASS | `contents: read` (least privilege) |
+| Concurrency rules | PASS | `main-ci-${{ github.ref }}`, cancel-in-progress |
+| Timeout values | PASS | 30min (static), 60min (PG) |
+| Node version | PASS | 24 (matches `engines` in root package.json) |
+| pnpm version | PASS | 11.14.0 (matches `packageManager` in root package.json) |
+| Prisma command paths | PASS | All use `pnpm --dir apps/api exec prisma ... --schema ...` |
+| PostgreSQL PATH handling | PASS | `PG_BINDIR=/usr/lib/postgresql/17/bin`, PATH includes PG_BINDIR |
+| No production secrets | PASS | No hardcoded secrets, no `secrets.` context usage |
+| No deployment command | PASS | No deploy/kubectl/helm/ssh/scp/docker push |
+| No destructive DB command | PASS | No migrate reset/dev, no db push, no DROP/TRUNCATE/DELETE |
+| Prisma validate | PASS | "The schema at prisma/schema.prisma is valid" |
+| Prisma generate (transactional) | PASS | Generated Prisma Client 7.8.0 to ./generated/prisma |
+| Prisma generate (audit-store) | PASS | Generated Prisma Client 7.8.0 to ./generated/prisma-audit |
+| `pnpm run build:shared` | PASS | contracts + domain built |
+| `pnpm --filter @ibn-hayan/observability... build` | PASS | observability built |
+| `pnpm run typecheck` | PASS | All packages (api, web, contracts, domain, observability, testing, configuration) |
+| `pnpm run lint` | PASS | All packages |
+| `pnpm run test` (unit) | PASS | **20 test files, 443 tests passed** (api: 1 file/5 tests, web: 7 files/138 tests, contracts: 4 files/123 tests, domain: 3 files/94 tests, observability: 5 files/83 tests) |
+| `pnpm --filter @ibn-hayan/api audit:test:configuration` | PASS | **1 test file, 28 tests passed** (9ms) |
+| `pnpm run build` | PASS | All packages built (api via SWC, web via Next.js static generation) |
+
+**PostgreSQL 17 suites:** NOT run locally (no PostgreSQL 17 in this environment). The workflow's PG job reuses the exact Docker image and commands proven on `c05fc323` in the ADR-015 workflow. The operator-verified green run on `c05fc323` (229 tests across 7 suites) is the best available predictor, but the new main workflow itself has NOT yet executed on GitHub Actions.
+
+### Known limitation: GitHub runtime validation pending
+
+This preparation task created and locally validated the workflow file, but did NOT push the branch and did NOT trigger the workflow on GitHub Actions. The workflow's correctness on GitHub Actions (Docker image build, container execution, PG cluster bootstrap, all suite runs) is inferred from the ADR-015 workflow's proven success with the same image pattern — but not yet directly verified for `main-ci.yml`. The operator should push `ci/main-standard-workflow-v1` to a remote branch (or merge to `main`) and inspect the resulting GitHub Actions run to confirm.
+
+### Test discovery totals (authoritative)
+
+| Category | Test files | Tests | Where run |
+|---|---|---|---|
+| Unit tests (`pnpm run test`) | 20 | 443 | Job 1 (static-and-build) |
+| `audit:test:configuration` | 1 | 28 | Job 1 (static-and-build) |
+| PostgreSQL 17 suites | 10 | 229 | Job 2 (postgresql17-validation) |
+| **Total** | **31** | **700** | |
+
+### Cross-reference: existing branches, tags, and quarantine (unchanged by this task)
+
+- **`main` (local + remote):** `c7929c0360874b596ae1a62a80511cc78598da3e` — unchanged
+- **`adr-015-validation` (local + remote):** `c05fc323c086603942d6c9ed264367cf450745e9` — unchanged
+- **`integration/adr-015-validated` (local-only):** `c7929c0360874b596ae1a62a80511cc78598da3e` — unchanged
+- **Recovery tag `adr-015-validated-pre-main-v1` (local + remote):** target `c7929c0360874b596ae1a62a80511cc78598da3e` — unchanged
+- **`quarantine/auto-commit-8d5e167` (local-only):** `8d5e167490824d1489a56efbda9574d882356176` — unchanged
+- **`quarantine/accidental-main-amend-271006f` (local-only):** `271006f59eac656cd03bd313a1d5aa5d30de8623` — unchanged
+
+### v13 deploy key
+
+A v13 Ed25519 deploy key was generated for the eventual push of this branch to `origin`:
+- **Private key:** `/home/z/.ssh/ibn_hayan_main_ci_deploy_key_v13` (permissions 600, outside the repository)
+- **Public key:** `/home/z/.ssh/ibn_hayan_main_ci_deploy_key_v13.pub` (permissions 644)
+- **Comment:** `ibn-hayan-main-ci-v13`
+- **Status:** Local-only. NOT registered on github.com yet. NOT used for any push in this task. The operator must register the public key on github.com before using it to push `ci/main-standard-workflow-v1`.
+- **Lifecycle:** Per AGENTS.md invariant 5, this key must be deleted from the local filesystem immediately after the push is verified, and removed from github.com after the resulting CI run is inspected.
+
+### Immediate next step
+
+The operator should:
+1. Review the `ci/main-standard-workflow-v1` branch (checkout in a fresh worktree: `git worktree add /tmp/main-ci-review ci/main-standard-workflow-v1`).
+2. Review `.github/workflows/main-ci.yml` for correctness.
+3. Register the v13 public key on github.com as a repository deploy key (with write access).
+4. Push `ci/main-standard-workflow-v1` to `origin` as a new branch (fast-forward only, using the v13 key). Do NOT push directly to `main` — open a pull request instead so the new `main-ci.yml` workflow's `pull_request` trigger fires on the PR itself, giving a test run before merge.
+5. After the PR's `main-ci` workflow run is green, merge the PR into `main` (fast-forward or squash per operator preference). The `push` trigger will then fire `main-ci` on `main` itself.
+6. After verifying the `main` push's `main-ci` run is green, remove the v13 deploy key from github.com and `shred -u` the local private key.
+
+### Recovery information
+
+If the CI branch needs to be discarded:
+- `git worktree remove /home/z/main-ci-workflow-v1` (already done in this session — worktree is removed after commit, branch remains reachable from the primary worktree)
+- `git branch -D ci/main-standard-workflow-v1` (deletes the branch — only do this if you are sure you no longer need the workflow file)
+- `shred -u /home/z/.ssh/ibn_hayan_main_ci_deploy_key_v13` (deletes the v13 private key)
+- `rm -f /home/z/.ssh/ibn_hayan_main_ci_deploy_key_v13.pub` (deletes the v13 public key)
+
+If the CI branch needs to be re-examined:
+- `git worktree add /tmp/main-ci-review ci/main-standard-workflow-v1`
+- `cat /tmp/main-ci-review/.github/workflows/main-ci.yml`
+
 ## Recovery Checkpoints
 
 If the repository enters an unknown or corrupted state, use these checkpoints:
@@ -239,6 +415,7 @@ If the repository enters an unknown or corrupted state, use these checkpoints:
 | Quarantine (accidental commit) | `8d5e167490824d1489a56efbda9574d882356176` | `git checkout quarantine/auto-commit-8d5e167` |
 | Quarantine (accidental amend) | `271006f59eac656cd03bd313a1d5aa5d30de8623` | `git checkout quarantine/accidental-main-amend-271006f` |
 | Safety skill tag | `project-safety-skill-v1` | `git checkout project-safety-skill-v1` |
+| Standard main CI branch | `ci/main-standard-workflow-v1` (local-only) | `git worktree add /tmp/main-ci-review ci/main-standard-workflow-v1` |
 
 ## Update Protocol
 

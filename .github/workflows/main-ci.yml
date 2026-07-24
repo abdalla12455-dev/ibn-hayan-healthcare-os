@@ -1,0 +1,287 @@
+name: Main CI
+
+# Official standard CI workflow for the canonical main branch.
+#
+# Triggers:
+#   - push to main
+#   - pull_request targeting main
+#   - manual workflow_dispatch
+#
+# This workflow coexists with .github/workflows/adr015-postgresql17-validation.yml
+# (which remains scoped to the adr-015-validation branch). The two workflows
+# share the same proven Docker image pattern (node:24-bookworm + postgres:17-bookworm
+# composite) so that the PostgreSQL 17 validation results on main are directly
+# comparable to the ADR-015 validation results on adr-015-validation.
+#
+# Gates (two jobs, both must pass):
+#
+#   1. static-and-build
+#      Runs on the runner directly (no PostgreSQL needed). Executes:
+#        - pnpm install --frozen-lockfile
+#        - prisma validate (transactional schema)
+#        - prisma generate (transactional + audit schemas)
+#        - pnpm run build:shared
+#        - pnpm --filter @ibn-hayan/observability... build
+#        - pnpm run typecheck
+#        - pnpm run lint
+#        - pnpm run test (unit tests across all workspace packages)
+#        - pnpm --filter @ibn-hayan/api audit:test:configuration
+#          (pure unit suite, database-independent — see placement note below)
+#        - pnpm run build
+#
+#   2. postgresql17-validation
+#      Runs inside the composite node:24 + postgres:17 Docker image (same as
+#      the ADR-015 workflow). Executes the same static/build gates inside the
+#      container (to ensure the container environment is self-consistent),
+#      then runs the seven PostgreSQL-17-dependent test suites:
+#        - pnpm test:context
+#        - pnpm test:database
+#        - pnpm audit:test:atomicity
+#        - pnpm audit:test:integration
+#        - pnpm audit:test:database
+#        - pnpm audit:test:concurrency
+#        - pnpm audit:test:verify
+#
+# Placement decision for audit:test:configuration:
+#   The vitest.audit-configuration.config.ts docstring explicitly states:
+#     "These tests verify that AuditConfigurationService and the
+#      validateAuditKey / validateAuditKeyPair helpers enforce the production
+#      fail-closed posture required by the ninth canonical batch specification.
+#      They run without a database (pure unit tests), so the default Vitest
+#      configuration is sufficient."
+#   Source inspection confirms: no setupDatabaseTests() import, no PG_BINDIR
+#   reference, no PrismaClient instantiation — only environment-variable
+#   string manipulation. The suite is therefore database-independent and
+#   belongs in the static-and-build job, NOT in the postgresql17-validation
+#   job. Placing it in the PG job would needlessly couple a fast unit suite
+#   to a 60-minute Docker+PostgreSQL job.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cancel obsolete runs on the same ref. For push events, github.ref is
+  # refs/heads/main; for pull_request events, github.ref is refs/pull/<n>/merge.
+  # The group key keeps push and PR runs independent of each other.
+  group: main-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-build:
+    name: Static analysis, lint, unit tests, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pnpm 11.14.0
+        # Install pnpm at the exact version pinned in the root package.json
+        # packageManager field. Using corepack would also work, but a direct
+        # npm install ensures deterministic pnpm versioning across runner
+        # images (matching the ADR-015 workflow's approach).
+        run: |
+          npm install --global pnpm@11.14.0
+          pnpm --version
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma transactional schema
+        run: pnpm --dir apps/api exec prisma validate --schema prisma/schema.prisma
+
+      - name: Generate Prisma transactional client
+        run: pnpm --dir apps/api exec prisma generate --schema prisma/schema.prisma
+
+      - name: Generate Prisma audit-store client
+        # The audit-store schema is generated separately (ADR-014 dedicated
+        # audit database). The generated client is required by the prebuild /
+        # pretypecheck / prelint / pretest hooks in apps/api/package.json.
+        run: pnpm --dir apps/api exec prisma generate --schema prisma-audit/schema.prisma
+
+      - name: Build shared workspace packages
+        # Builds @ibn-hayan/contracts and @ibn-hayan/domain first, because
+        # the API and web packages import from their dist/ outputs.
+        run: pnpm run build:shared
+
+      - name: Build observability package (and its workspace dependencies)
+        # The API typecheck imports from @ibn-hayan/observability, which must
+        # be built before tsc can resolve its type declarations.
+        run: pnpm --filter @ibn-hayan/observability... build
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Run unit tests (all workspace packages)
+        # `pnpm run test` at the root invokes `pnpm -r test`, which runs
+        # `vitest run` in every workspace package. This covers unit tests
+        # in apps/api/src, apps/web/src, and packages/{contracts,domain,
+        # observability}/src. Database-dependent suites are excluded (they
+        # use separate vitest configs invoked in the postgresql17-validation
+        # job below).
+        run: pnpm run test
+
+      - name: Run audit configuration unit tests
+        # Pure unit suite (database-independent). Placed here, not in the
+        # PostgreSQL job, per the vitest.audit-configuration.config.ts
+        # docstring: "They run without a database (pure unit tests)".
+        # Source-verified: no setupDatabaseTests import, no PG_BINDIR
+        # reference, only environment-variable string manipulation.
+        run: pnpm --filter @ibn-hayan/api audit:test:configuration
+
+      - name: Build all packages
+        run: pnpm run build
+
+  postgresql17-validation:
+    name: PostgreSQL 17 validation suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Run the PostgreSQL job in parallel with the static job. Both must
+    # pass for the workflow to be green. If either fails, the pull request
+    # status check will reflect the failure.
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create isolated Node and PostgreSQL 17 test image
+        # Same composite Docker image as the ADR-015 workflow: node:24-bookworm
+        # binaries layered onto a postgres:17-bookworm base. This ensures the
+        # PostgreSQL 17 validation results on main are directly comparable
+        # to the ADR-015 validation results on adr-015-validation.
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/Dockerfile.main-ci" <<'DOCKERFILE'
+          FROM node:24-bookworm AS node_runtime
+
+          FROM postgres:17-bookworm
+
+          USER root
+
+          COPY --from=node_runtime /usr/local/ /usr/local/
+
+          RUN apt-get update \
+              && apt-get install -y --no-install-recommends \
+                 ca-certificates \
+                 git \
+                 python3 \
+                 make \
+                 g++ \
+              && rm -rf /var/lib/apt/lists/*
+
+          RUN rm -f \
+                /usr/local/bin/pnpm \
+                /usr/local/bin/pnpx \
+                /usr/local/bin/yarn \
+                /usr/local/bin/yarnpkg \
+              && npm install --global "pnpm@11.14.0" \
+              && pnpm --version
+
+          ENV CI=true
+          ENV PG_BINDIR=/usr/lib/postgresql/17/bin
+          ENV PATH=/usr/lib/postgresql/17/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+
+          RUN install -d -o postgres -g postgres /workspace
+
+          WORKDIR /workspace
+
+          COPY --chown=postgres:postgres . /workspace
+
+          USER postgres
+
+          RUN pnpm install --frozen-lockfile
+          DOCKERFILE
+
+      - name: Build validation image
+        shell: bash
+        run: |
+          docker build \
+            --file "${RUNNER_TEMP}/Dockerfile.main-ci" \
+            --tag ibn-hayan-main-ci-pg17 \
+            .
+
+      - name: Verify execution environment
+        # Explicit PostgreSQL 17 version checks. Fails fast if the image is
+        # misconfigured (wrong PG version, missing binaries) before any test
+        # suite runs.
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-main-ci-pg17 bash -c '
+            set -euo pipefail
+            node --version
+            pnpm --version
+            test -x "$PG_BINDIR/postgres"
+            test -x "$PG_BINDIR/initdb"
+            test -x "$PG_BINDIR/pg_ctl"
+            test -x "$PG_BINDIR/psql"
+            "$PG_BINDIR/postgres" --version
+            "$PG_BINDIR/initdb" --version
+            "$PG_BINDIR/pg_ctl" --version
+            "$PG_BINDIR/psql" --version
+            printf "PG_BINDIR=%s\n" "$PG_BINDIR"
+            printf "PATH=%s\n" "$PATH"
+            # Fail if the major version is not 17.
+            "$PG_BINDIR/postgres" --version | grep -q "postgres (PostgreSQL) 17." \
+              || { echo "ERROR: PostgreSQL major version is not 17"; exit 1; }
+          '
+
+      - name: Run complete monorepo static and build gates
+        # Run the same static/build gates inside the container to ensure the
+        # container environment is self-consistent before running the PG
+        # suites. This mirrors the ADR-015 workflow's "Run complete monorepo
+        # gates" step. Failure propagation: any non-zero exit code from a
+        # command in the chain causes the step (and thus the job) to fail.
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-main-ci-pg17 bash -c '
+            set -euo pipefail
+            pnpm --dir apps/api exec prisma validate --schema prisma/schema.prisma
+            pnpm --dir apps/api exec prisma generate --schema prisma/schema.prisma
+            pnpm run build:shared
+            pnpm --filter @ibn-hayan/observability... build
+            pnpm run typecheck
+            pnpm run lint
+            pnpm run test
+            pnpm run build
+          '
+
+      - name: Run PostgreSQL 17 test suites
+        # Seven PostgreSQL-17-dependent suites. Each suite boots a disposable
+        # PG 17 cluster via apps/api/test/database/_pg-bootstrap.ts. The
+        # pool:forks + singleFork:true vitest configuration ensures the
+        # cluster is shared across all test files within a single suite run.
+        # Failure propagation: set -euo pipefail causes the step to fail on
+        # the first suite that returns a non-zero exit code.
+        shell: bash
+        run: |
+          docker run --rm ibn-hayan-main-ci-pg17 bash -c '
+            set -euo pipefail
+            pnpm run build:shared
+            pnpm --filter @ibn-hayan/observability... build
+            cd apps/api
+            pnpm test:context
+            pnpm test:database
+            pnpm audit:test:atomicity
+            pnpm audit:test:integration
+            pnpm audit:test:database
+            pnpm audit:test:concurrency
+            pnpm audit:test:verify
+          '
