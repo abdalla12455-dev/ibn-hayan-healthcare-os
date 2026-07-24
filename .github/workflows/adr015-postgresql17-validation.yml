@@ -101,6 +101,7 @@ jobs:
             pnpm --dir apps/api exec prisma validate --schema prisma/schema.prisma
             pnpm --dir apps/api exec prisma generate --schema prisma/schema.prisma
             pnpm run build:shared
+            pnpm --filter @ibn-hayan/observability... build
             pnpm run typecheck
             pnpm run lint
             pnpm run test
@@ -113,6 +114,7 @@ jobs:
           docker run --rm ibn-hayan-adr015-pg17 bash -c '
             set -euo pipefail
             pnpm run build:shared
+            pnpm --filter @ibn-hayan/observability... build
             cd apps/api
             pnpm test:context
             pnpm test:database
