@@ -969,3 +969,210 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1)
+// ---------------------------------------------------------------------------
+
+const R09_MEMBERSHIP_ID = '77777777-7777-7777-7777-777777777777';
+const R09_TENANT_ID = '88888888-8888-8888-8888-888888888888';
+const R09_ORG_ID = '99999999-9999-9999-9999-999999999999';
+const R09_FACILITY_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+
+const r09Session = {
+  ok: true,
+  data: {
+    user: {
+      id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      email: 'clinic-admin@example.invalid',
+      displayName: 'Clinic Admin Operator',
+      status: 'active' as const,
+    },
+    memberships: [
+      {
+        id: R09_MEMBERSHIP_ID,
+        tenantId: R09_TENANT_ID,
+        tenantSlug: 'tenant-r09.invalid',
+        tenantDisplayName: 'Tenant R09',
+        status: 'active' as const,
+        roles: [
+          { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+        ],
+      },
+    ],
+    activeTenantContext: null,
+    expiresAt: '2026-01-01T12:00:00.000Z',
+  },
+};
+
+const r09FullContext = {
+  ok: true,
+  data: {
+    options: [
+      {
+        membershipId: R09_MEMBERSHIP_ID,
+        tenantId: R09_TENANT_ID,
+        tenantSlug: 'tenant-r09.invalid',
+        tenantDisplayName: 'Tenant R09',
+        roles: [
+          { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+        ],
+      },
+    ],
+    active: {
+      membershipId: R09_MEMBERSHIP_ID,
+      tenantId: R09_TENANT_ID,
+      tenantSlug: 'tenant-r09.invalid',
+      tenantDisplayName: 'Tenant R09',
+      roles: [
+        { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+      ],
+    },
+    organisationOptions: [],
+    activeOrganisation: {
+      organisationId: R09_ORG_ID,
+      code: 'R09-ORG',
+      displayName: 'R09 Organisation',
+    },
+    facilityOptions: [],
+    activeFacility: {
+      facilityId: R09_FACILITY_ID,
+      organisationId: R09_ORG_ID,
+      code: 'R09-FAC',
+      displayName: 'R09 Facility',
+    },
+  },
+};
+
+describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetContext.mockResolvedValue(r09FullContext);
+    mockGetCsrfToken.mockResolvedValue({
+      ok: true,
+      data: { token: 'csrf-token-value' },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Clinic Admin entry card when R09 has full context', async () => {
+    mockGetSession.mockResolvedValue(r09Session);
+    mockGetContext.mockResolvedValue(r09FullContext);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      // The Arabic entry button label "الدخول إلى إدارة المنشأة".
+      expect(
+        screen.getByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+      ).toBeInTheDocument();
+    });
+
+    // The entry card section is identifiable by its labelled heading.
+    const entryTitle = screen.getByText('إدارة المنشأة');
+    const entrySection = entryTitle.closest('section');
+    expect(entrySection).not.toBeNull();
+    // The eyebrow carries the canonical role label.
+    expect(entrySection?.textContent).toContain('مدير المنشأة');
+  });
+
+  it('navigates to /clinic-admin when the entry button is clicked', async () => {
+    mockGetSession.mockResolvedValue(r09Session);
+    mockGetContext.mockResolvedValue(r09FullContext);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+      ).toBeInTheDocument();
+    });
+
+    const button = screen.getByRole('button', {
+      name: 'الدخول إلى إدارة المنشأة',
+    });
+    await act(async () => {
+      await userEvent.click(button);
+    });
+
+    expect(mockReplace).toHaveBeenCalledWith('/clinic-admin');
+  });
+
+  it('does not render the entry card when the principal lacks R09', async () => {
+    const nonR09Session = {
+      ...r09Session,
+      data: {
+        ...r09Session.data,
+        memberships: [
+          {
+            ...r09Session.data.memberships[0]!,
+            roles: [
+              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+            ],
+          },
+        ],
+      },
+    };
+    const nonR09Context = {
+      ...r09FullContext,
+      data: {
+        ...r09FullContext.data,
+        active: {
+          ...r09FullContext.data.active!,
+          roles: [
+            { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          ],
+        },
+        options: [
+          {
+            ...r09FullContext.data.options[0]!,
+            roles: [
+              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+            ],
+          },
+        ],
+      },
+    };
+    mockGetSession.mockResolvedValue(nonR09Session);
+    mockGetContext.mockResolvedValue(nonR09Context);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not render the entry card when facility context is missing', async () => {
+    const partialContext = {
+      ...r09FullContext,
+      data: {
+        ...r09FullContext.data,
+        activeFacility: null,
+      },
+    };
+    mockGetSession.mockResolvedValue(r09Session);
+    mockGetContext.mockResolvedValue(partialContext);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+      ).not.toBeInTheDocument();
+    });
+  });
+});

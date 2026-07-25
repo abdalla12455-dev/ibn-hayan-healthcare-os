@@ -538,3 +538,121 @@ When updating, always:
 - Append to the history; never rewrite prior entries
 - Include the full 40-character SHA
 - Note the disposition of any temporary resources (keys, shims, branches)
+
+## Clinic Admin Shell v1 Implementation (2026-07-25)
+
+This section records the implementation of the Clinic Admin application shell v1 — the first real Clinic Admin frontend implementation task. It is appended per the Update Protocol; no prior entries are rewritten.
+
+### Repository and branch
+
+- **Repository:** `/home/z/my-project` (primary worktree, on `main`)
+- **Implementation branch:** `feat/clinic-admin-shell-v1` (local-only as of this writing)
+- **Isolated worktree:** `/home/z/clinic-admin-shell-v1` (on `feat/clinic-admin-shell-v1`)
+- **Branch start point (parent):** `d9c10d7d65f7a113c830aa0e88ecbeee5b2c749b` (the `main` tip at the time the branch was created — verified baseline before the branch was cut)
+- **Authority note:** The start point SHA above is the **last verified `main` baseline when the branch was created** (2026-07-25). It is NOT a live claim about the current `main` tip. Before merging this branch, run `git fetch origin && git rev-parse main origin/main` and trust Git, not this section.
+
+### Completed shell work
+
+The Clinic Admin application shell v1 is implemented at the canonical route `/clinic-admin` for the R09 Clinic Administrator role. The implementation ratifies and follows the canonical decisions recorded in `download/docs/05_UI_UX/DESIGN_BIBLE.md` §17 (newly added in this task).
+
+**Authentication and context protection.** The shell requires a valid authenticated session, an active tenant context, an active organisation context, and an active facility context. The active scope is read from the canonical session-context module (ADR-015) via the existing `getContext` client; the shell never accepts tenant, organisation, or facility scope from untrusted URL parameters. When the required context is missing, the shell redirects safely to `/dashboard` so the user can establish the missing context. The shell never exposes cross-tenant or cross-facility information.
+
+**Application layout.** A fixed compact header, a fixed sidebar on the start edge (right in Arabic RTL, left in English LTR), and a vertically scrollable main-content region. Edge protection of 20–24px is applied on every content region. The header contains the breadcrumb, the active context chips, the language control, the notification bell, the sign-out action, and the user display name. The sidebar contains exactly eleven ratified navigation items in the binding order recorded in DESIGN_BIBLE.md §17.2.
+
+**Notification bell.** Implemented in the header as a bell control with an empty/unavailable state. The bell does NOT hardcode an unread count, does NOT invent notification records, and does NOT create a temporary notification API. The panel is keyboard-operable; Escape and click-outside close it. The structure is reusable by the future Notification vertical slice.
+
+**Responsive behaviour.** Desktop shows the full sidebar; tablet collapses it to a compact icon rail; mobile converts it to a drawer triggered by a button in the fixed header. The breakpoint is resolved via `useSyncExternalStore` (no cascading `setState` inside `useEffect`). Direction switching uses CSS logical properties throughout — no per-direction CSS.
+
+**Page state.** The `/clinic-admin` page renders an honest Overview foundation. The page does NOT implement fake business dashboard cards, fake appointments, fake financial figures, fake doctors, fake inventory alerts, fake waiting-room data, fake attendance, or fake notifications. Where the approved business regions are not yet implemented, the page uses clearly structured neutral empty states without invented data.
+
+**Dashboard transition.** The `/dashboard` route remains the workspace-context selector. When an R09 principal has selected a valid tenant, organisation, and facility, the dashboard surfaces a clear "Enter Clinic Admin" affordance that pushes the user to `/clinic-admin`. The affordance is R09-gated; principals without `R09_ADMINISTRATOR` in their active membership's roles do not see the affordance. The dashboard's existing context-selection functionality and tests are preserved unchanged.
+
+### Files created
+
+- `apps/web/src/app/clinic-admin/layout.tsx` — thin pass-through layout for the `/clinic-admin` route segment.
+- `apps/web/src/app/clinic-admin/page.tsx` — Clinic Admin Overview page (renders the shell + honest foundation).
+- `apps/web/src/app/clinic-admin/page.test.tsx` — 29 tests covering the 22 mandatory shell v1 test categories plus canonical-data and accessibility assertions.
+- `apps/web/src/components/clinic-admin/clinic-admin-copy.ts` — bilingual copy + canonical eleven-item sidebar data (single source of truth).
+- `apps/web/src/components/clinic-admin/clinic-admin-shell.tsx` — shell with auth/context protection, layout composition, responsive breakpoint.
+- `apps/web/src/components/clinic-admin/clinic-admin-sidebar.tsx` — fixed eleven-item sidebar with active/planned states.
+- `apps/web/src/components/clinic-admin/clinic-admin-header.tsx` — fixed header with breadcrumb, context chips, language control, notification bell, sign-out.
+- `apps/web/src/components/clinic-admin/notification-bell.tsx` — notification bell control with empty state, Escape/click-outside close, keyboard-operable panel.
+
+### Files modified
+
+- `apps/web/src/app/dashboard/page.tsx` — added four `clinicAdminEntry*` copy fields (Arabic + English) and the R09-gated `ClinicAdminEntryCard` component rendered when the principal holds `R09_ADMINISTRATOR` and has full context.
+- `apps/web/src/app/dashboard/page.test.tsx` — added 4 new tests for the R09 entry affordance (renders when R09 + full context; navigates on click; hidden when not R09; hidden when facility missing).
+- `apps/web/src/app/globals.css` — appended the Clinic Admin shell v1 CSS section (shell layout, header, sidebar, notification bell, overview page, loading state, dashboard entry affordance). All existing styles preserved unchanged.
+- `download/docs/05_UI_UX/DESIGN_BIBLE.md` — added §17 "Clinic Admin Application Shell — Canonical Decisions v1" (108 new lines) ratifying: route ownership, the eleven-item sidebar, notification bell placement, application layout, responsive behaviour, typography and design tokens, page state, and implementation status. The Table of Contents is updated; §17 "Related Documents" is renumbered to §18. No prior approved sections are rewritten.
+
+### Files deleted
+
+- None.
+
+### Validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run build:shared` | PASS | contracts + domain built |
+| `pnpm --filter @ibn-hayan/observability... build` | PASS | observability built |
+| `pnpm run typecheck` | PASS | All packages (api, web, contracts, domain, observability, testing, configuration) |
+| `pnpm run lint` | PASS | All packages |
+| `pnpm run test` (unit) | PASS | api 5 tests, web 171 tests = 176 total. 29 new Clinic Admin shell tests + 4 new dashboard entry affordance tests; 0 regressions. |
+| `pnpm run build` | PASS | All packages built (api via SWC, web via Next.js static generation). `/clinic-admin` route compiled as static. |
+| `git diff --check` | PASS | No whitespace errors |
+
+PostgreSQL 17 suites were NOT run locally (no PostgreSQL 17 in this environment). The Clinic Admin shell v1 is a frontend-only change; no Prisma schema, migration, backend service, repository, or test was modified. The PostgreSQL 17 suite inventory is unchanged by this task.
+
+### Important decisions
+
+1. **R09 presentation labels.** The canonical Arabic label `مدير المنشأة` and English label `Clinic Administrator` are used throughout the Clinic Admin shell v1 (sidebar brand, header context, dashboard entry affordance eyebrow). The domain catalogue's `displayNameAr` (`مدير`) and `displayNameEn` (`Administrator`) are not altered; the Clinic Admin shell v1 uses the canonical presentation labels ratified in DESIGN_BIBLE.md §17.1. The role code `R09_ADMINISTRATOR` and its authorization semantics are unchanged.
+
+2. **Eleven-item sidebar with planned state.** Only `overview` is routable in shell v1. The remaining ten modules are rendered as honest disabled "planned" items with `aria-disabled="true"` and a `plannedLabel` chip. No fake business routes are created to make the navigation look complete.
+
+3. **Notification bell in header, not sidebar.** Per DESIGN_BIBLE.md §17.3, the notification control lives in the fixed application header. The bell shows an honest empty/unavailable state until the Notification vertical slice is implemented. The shell does NOT invent notification records, does NOT hardcode an unread count, and does NOT create a temporary notification API.
+
+4. **Responsive breakpoint via `useSyncExternalStore`.** The breakpoint is resolved with `useSyncExternalStore` (window resize event) to avoid the cascading-`setState`-inside-`useEffect` antipattern flagged by the React hooks ESLint rule. The server snapshot returns `'desktop'` so SSR and the first client paint agree.
+
+5. **R09-gated entry affordance on `/dashboard`.** The dashboard surfaces the "Enter Clinic Admin" affordance only when the active membership's roles include `R09_ADMINISTRATOR` AND the principal has selected a valid tenant, organisation, and facility. The affordance is a convenience, not a security boundary — the shell at `/clinic-admin` enforces its own authentication and context protection regardless of how the user arrived.
+
+6. **No backend changes.** Per the task constraint, no database models, schemas, migrations, seed data, backend APIs, business services, repositories, appointment logic, patient logic, billing logic, inventory logic, notification APIs, or audit contracts were modified. The shell v1 is a frontend-only implementation.
+
+7. **No font dependency changes.** The shell uses the existing project-owned font stack in `globals.css` (`--font-arabic` and `--font-sans` tokens). No new font dependencies were added to `package.json` or `pnpm-lock.yaml`. A future typography vertical slice may add IBM Plex Sans Arabic and Inter as self-hosted webfonts per ADR-003; that decision is deferred to the typography slice.
+
+### Known limitations
+
+1. **Business regions are not implemented.** The approved Clinic Admin Overview regions (Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary, Quick Actions) are not implemented. The `/clinic-admin` page renders an honest Overview foundation with neutral empty copy; no fake business data is shown.
+
+2. **Notification backend is not implemented.** The notification bell shows an empty/unavailable state. No notification API, no unread-count source, and no notification records exist.
+
+3. **Sidebar `overview` is the only routable item.** The other ten items are rendered as planned/disabled. Future vertical slices will progressively enable them.
+
+4. **No automated RTL/LTR visual regression test.** The unit tests verify direction attributes (`dir="rtl"` / `dir="ltr"`) and bilingual label correctness, but no automated visual regression test was added for the rendered layout in each direction. Manual inspection of the rendered shell in both directions is required (per Phase 7 of the task specification).
+
+5. **No mobile/tablet integration test.** The responsive breakpoint is resolved at runtime via `useSyncExternalStore`; the unit tests verify the structural rendering and the compact prop. A full mobile/tablet integration test (e.g., via Playwright) is deferred to a future test-infrastructure slice.
+
+6. **Branch is local-only.** The branch `feat/clinic-admin-shell-v1` has NOT been pushed to `origin` because no authenticated temporary deploy key is currently available (per AGENTS.md invariant 5). A fresh v17 (or later) deploy key will be required for the controlled push task.
+
+### Immediate next vertical slice
+
+**Notification backend integration.** Implement the notification module's backend (NestJS module, Prisma model for notifications, tenant-scoped + facility-scoped + permission-aware query endpoints, audit events) and wire the existing `NotificationBell` component to fetch real unread counts and notification records. This slice is the smallest end-to-end vertical that populates a currently-empty shell region with real data and validates the shell's data-fetching pattern for subsequent slices.
+
+The slice must:
+- Add a new `Notification` Prisma model with `tenantId`, `organisationId`, `facilityId`, `recipientUserId`, `unreadAt`, `createdAt`, `payload` fields.
+- Add a new `notifications` NestJS module with a `GET /api/v1/notifications` endpoint (returns the principal's unread notifications for the active facility, scoped per ADR-015) and a `POST /api/v1/notifications/:id/read` endpoint.
+- Add a `notifications.client.ts` web client analogous to the existing `context.client.ts`.
+- Update `NotificationBell` to call the new client and render real notifications (replacing the empty state when notifications exist).
+- Add PostgreSQL 17 tests for the new module (per the existing pattern in `apps/api/test/`).
+- Add web tests for the connected bell.
+
+Subsequent vertical slices (in dependency order): Overview KPIs (financial snapshot + today's appointments); Doctors on Duty; Waiting Room; Staff Attendance Summary; Inventory Alerts; Services & Procedures; Billing & Payments; Reports & Analytics; Settings. Each slice follows the same pattern: backend module → API contract → web client → shell region connection → tests → documentation.
+
+### Recovery information
+
+- **Implementation branch:** `feat/clinic-admin-shell-v1` (local-only)
+- **Implementation worktree:** `/home/z/clinic-admin-shell-v1`
+- **Branch parent:** `d9c10d7d65f7a113c830aa0e88ecbeee5b2c749b` (the `main` baseline when the branch was cut)
+- **To inspect the shell without checking out the branch:** `git worktree add /tmp/clinic-admin-review feat/clinic-admin-shell-v1` (the local branch is reachable from the primary worktree)
+- **To discard the branch and start over:** `git worktree remove /home/z/clinic-admin-shell-v1` then `git branch -D feat/clinic-admin-shell-v1` (only with explicit operator authorisation; the work is local-only and has not been pushed, so this would lose the implementation)
+- **To re-run validation in the worktree:** `cd /home/z/clinic-admin-shell-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+

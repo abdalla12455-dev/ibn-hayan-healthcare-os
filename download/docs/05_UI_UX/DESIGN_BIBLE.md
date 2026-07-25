@@ -30,7 +30,8 @@
 14. Superseded Screen Experiments
 15. Approved Screen — Platform Super Admin Overview (Arabic RTL, Refined Desktop State)
 16. Approved Screen — Platform Super Admin Overview (English LTR, Refined Desktop State)
-17. Related Documents
+17. Clinic Admin Application Shell — Canonical Decisions v1
+18. Related Documents
 
 ---
 
@@ -435,7 +436,110 @@ This approval registers the design as a canonical visual reference; it does not 
 
 ---
 
-## 17. Related Documents
+## 17. Clinic Admin Application Shell — Canonical Decisions v1
+
+This section records the ratified canonical decisions for the Clinic Admin application shell v1. It is the binding specification for the production application shell into which the approved Clinic Admin Overview designs in §12 (Arabic RTL) and §13 (English LTR) will be implemented. The shell is the production foundation for the approved Overview; the approved content regions (Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary, Quick Actions) remain unconnected until their respective vertical slices are implemented in subsequent tasks.
+
+This section ratifies the shell only. It does not supersede §12 or §13; the approved visual references and their implementation rules remain canonical. It does not authorise implementation of any business module (appointments, patients, doctors, billing, inventory, waiting room, attendance, notifications, reports, or settings); those modules remain unimplemented until their respective vertical slices are formally opened.
+
+### 17.1 Role and Route Ownership
+
+| Field | Value |
+|---|---|
+| Role code | `R09_ADMINISTRATOR` (stable machine code from `packages/domain/src/authorization/role-catalogue.ts`) |
+| Canonical Arabic presentation label | `مدير المنشأة` |
+| Canonical English presentation label | `Clinic Administrator` |
+| Canonical application route | `/clinic-admin` |
+| Context selector route | `/dashboard` (preserved unchanged as the workspace-context selector) |
+
+The role code `R09_ADMINISTRATOR` and its authorization semantics are not altered by this section. The presentation labels above are the canonical display labels for the Clinic Admin surface; they supersede any conflicting presentation label that may appear elsewhere in the catalogue display names when the label is rendered inside the Clinic Admin application shell. The catalogue's `displayNameAr` and `displayNameEn` fields remain unchanged as the cross-surface role catalogue; only the Clinic Admin shell's presentation layer uses the canonical labels ratified here.
+
+The Clinic Admin application route `/clinic-admin` must not render until the required active context is valid: an authenticated session, an active tenant context, an active organisation context, and an active facility context. The shell must never accept tenant, organisation, or facility scope from untrusted URL parameters; the canonical session-context module (ADR-015) is the sole source of active scope. When the required context is missing, the shell must redirect or return the user safely to `/dashboard` so the user can establish the missing context. The shell must never expose cross-tenant or cross-facility information; this is the structural continuation of the data-scoping rules in §12.2 and §13.2.
+
+The `/dashboard` route remains the authenticated workspace-context selector. It is used to select the active tenant, organisation, and facility per ADR-015. After a valid tenant, organisation, and facility are selected, the dashboard surfaces a clear action to enter `/clinic-admin` for principals holding `R09_ADMINISTRATOR`. The shell does not replace the existing context-selection workflow with mock context; the context always reflects a real, server-validated session-context selection.
+
+### 17.2 Canonical Sidebar Navigation — Eleven Items
+
+The Clinic Admin sidebar must contain exactly eleven items, in this binding order, with these canonical bilingual labels:
+
+| # | English label (LTR) | Arabic label (RTL) |
+|---|---|---|
+| 1 | Overview | نظرة عامة |
+| 2 | Appointments | المواعيد |
+| 3 | Patients | المرضى |
+| 4 | Doctors | الأطباء |
+| 5 | Staff & Attendance | الموظفون والحضور |
+| 6 | Waiting Room | قاعة الانتظار |
+| 7 | Services & Procedures | الخدمات والإجراءات |
+| 8 | Billing & Payments | الفوترة والمدفوعات |
+| 9 | Inventory | المخزون |
+| 10 | Reports & Analytics | التقارير والتحليلات |
+| 11 | Settings | الإعدادات |
+
+Notifications must NOT appear as a sidebar item. The notification control belongs in the fixed application header (see §17.3).
+
+The sidebar is fixed: on desktop, the full sidebar is anchored to the start edge of the viewport (right in Arabic RTL per §12.2, left in English LTR per §13.2) and remains visible during vertical scrolling. On tablet it collapses to a compact icon rail with accessible labels; on mobile it becomes a drawer triggered by a button in the fixed header. The binding order above is preserved across all breakpoints and across both locales.
+
+The Overview item is the active item on `/clinic-admin`. Modules that are not yet implemented must not link to fake pages or placeholder business routes; they must be represented as an honest disabled or "planned" state so the shell does not imply capabilities that do not exist. The sidebar must support active, hover, disabled, focused, and collapsed visual states, with visible focus rings (per `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §7.3) and accessible keyboard navigation.
+
+### 17.3 Notification Bell — Header Placement
+
+Notifications belong in the fixed application header as a bell control. They must not appear in the sidebar (per §17.2). The canonical behaviour is:
+
+- A bell icon in the fixed header, with accessible Arabic and English labels.
+- An unread-count badge rendered only when a real, positive unread count is supplied by a future tenant-scoped, facility-scoped, permission-aware notification backend. When the count is zero or unavailable, no badge is rendered.
+- Clicking the bell opens an accessible notifications panel.
+- On desktop, the panel behaves as a popover or side panel without leaving the Clinic Admin shell.
+- On mobile, the panel uses a responsive drawer.
+- The panel supports an empty state (the only state available until the notification backend is implemented).
+- The panel is keyboard-operable; Escape and click-outside close it.
+- The shell must not invent notification records, must not hardcode a notification count, and must not create a temporary notification API. Until the notification backend is implemented, the bell shows a genuine empty or unavailable state.
+
+The notification control is structured so that the future Notification vertical slice can populate it with real, tenant-scoped, facility-scoped, permission-aware notification data without restructuring the shell. The shell exposes only the affordance — the bell button, the badge slot, and the panel — and leaves the data contract to the notification module when that module is implemented.
+
+### 17.4 Application Layout — Compact Enterprise Density
+
+The shell layout composes a fixed compact application header, a fixed sidebar, and a vertically scrollable main-content region. The fixed header and fixed sidebar must remain visible at all scroll positions; only the main-content region scrolls (consistent with §12.2 and §13.2). The layout must apply balanced outer-edge protection between 20px and 24px on every content region so that no system name, profile control, bell, navigation item, or content region touches the viewport edge (per §12.2, §13.2, and `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §4.1). Content must not sit beneath the fixed header or sidebar.
+
+The visual density is the enterprise operational density ratified in §12.2 and §13.2: tight row heights, multi-region composition, restrained spacing. Marketing-style spacing, hero sections, oversized blank safe-area bands, gradients, glassmorphism, and decorative medical clichés are forbidden (per §13.2 and `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §9 Anti-Patterns). The shell must not introduce duplicate headers or duplicate sidebars; the shell is the single application surface for the Clinic Admin role.
+
+The fixed header contains, where appropriate: the Clinic Admin current-section title or breadcrumb; the active organisation/facility context (read from the canonical session-context module, never from URL parameters); the language control; the notification bell; the user/profile menu; and safe sign-out access. The header must not duplicate controls that are already correctly implemented in the existing authenticated dashboard header without first inspecting and reusing them.
+
+### 17.5 Responsive Behaviour
+
+The shell supports three responsive breakpoints with the following canonical behaviour:
+
+- **Desktop.** Fixed full sidebar on the start edge (right in RTL, left in LTR); fixed compact header; stable, scrollable main-content area. The shell renders the full eleven-item sidebar with bilingual labels.
+- **Tablet.** The sidebar collapses to a compact icon rail with accessible labels (tooltips or `aria-label`) so that no text is clipped and no control is off-screen. The header remains usable. The notification bell remains operable.
+- **Mobile.** The sidebar becomes a drawer triggered by a button in the fixed header. The header remains usable. The notification bell opens a responsive mobile drawer. Touch targets remain accessible (≥44×44px per `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §7.8). No horizontal overflow is permitted.
+
+Direction switching is true mirroring, not text alignment only: the sidebar anchor, the breadcrumb flow, the page header's primary action position, table column flow, modal close button position, directional icons, and padding/margin all flip with locale (per `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §3.3). The implementation uses CSS logical properties (`margin-inline-start`, `padding-inline-end`, `inset-inline-start`) throughout; per-direction CSS is forbidden.
+
+### 17.6 Typography, Palette, and Design Tokens
+
+The shell aligns with the approved Clinic Admin visual system ratified in §12.2 and §13.2:
+
+- **Institutional deep teal-blue Clinic Admin palette.** The implementation uses the design tokens defined in `download/docs/05_UI_UX/DESIGN_SYSTEM.md` and `download/docs/05_UI_UX/COLORS.md`, not hard-coded hex values. The existing project-owned tokens in `apps/web/src/app/globals.css` are preserved unless a shared-token change is intentional and validated.
+- **Accessibility contrast.** All text and interactive elements must meet the WCAG 2.2 AA contrast floor defined in `download/docs/05_UI_UX/ACCESSIBILITY.md`.
+- **Arabic typography.** IBM Plex Sans Arabic is the intended Arabic typeface. The implementation inspects the repository before adding font dependencies or assets; font loading uses a deterministic, licence-compliant method (per ADR-003 offline-first and supply-chain safety). No arbitrary font files are exposed, packaged, or redistributed. The lockfile is updated only if a legitimate font dependency is required.
+- **English typography.** Inter is the intended English typeface, with tabular figures for numeric runs (per `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` §2.10).
+- **No global visual regressions.** The existing landing, login, and dashboard styles are preserved unless a shared-token change is intentional and validated.
+
+### 17.7 Page State — Honest Overview Foundation
+
+The `/clinic-admin` page renders the approved shell and an honest Overview foundation. The page must not implement fake business dashboard cards, fake appointments, fake financial figures, fake doctors, fake inventory alerts, fake waiting-room data, fake attendance, or fake notifications. Where the approved business regions are not yet implemented, the page uses clearly structured neutral empty states without invented data. The page must make it technically clear that the shell exists while real vertical slices will populate the regions later. Developer notes or implementation-status language must not be exposed to normal users.
+
+This rule is the structural continuation of the approved content-region list in §12.2 and §13.2. The approved regions (Appointment Actions menu, Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary, Quick Actions) remain unimplemented until their respective vertical slices are formally opened; the shell does not pre-render them with mock data.
+
+### 17.8 Implementation Status
+
+The shell ratified in this section is implemented as the production foundation for the Clinic Admin Overview. The business regions remain unconnected until their respective vertical slices are implemented. The first vertical slice after the shell is the notification control's real backend integration; the order of subsequent vertical slices is recorded in `PROJECT_CONTINUITY.md` and `worklog.md`.
+
+The shell implementation must reference this section (§17) and the registry entries (§11, rows 1 and 2) in its worklog entry. Any deviation from the canonical decisions in §17.1 through §17.7 requires a new approval entry in §11 or an explicit amendment to this section through the Design Review Process (§7).
+
+---
+
+## 18. Related Documents
 
 - `download/docs/05_UI_UX/DESIGN_SYSTEM.md` — the canonical design-system reference (tokens, components, patterns, layout, color, typography, spacing, iconography, motion, theming).
 - `download/docs/05_UI_UX/ENTERPRISE_DESIGN_BRIEF.md` — the enterprise application-shell brief that governs the shell into which the approved screens in §12 (Clinic Admin Arabic RTL), §13 (Clinic Admin English LTR), §15 (Platform Super Admin Arabic RTL), and §16 (Platform Super Admin English LTR) will be implemented.

@@ -137,6 +137,12 @@ const DASHBOARD_COPY = {
       'يجب اختيار مؤسسة قبل اختيار منشأة.',
     activeOrganisationChip: 'المؤسسة الحالية',
     activeFacilityChip: 'المنشأة الحالية',
+    // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1).
+    clinicAdminEntryTitle: 'إدارة المنشأة',
+    clinicAdminEntryBody:
+      'لديك بيئة عمل ومؤسسة ومنشأة نشطة. ادخل إلى تطبيق إدارة المنشأة لإدارة منشأتك.',
+    clinicAdminEntryButton: 'الدخول إلى إدارة المنشأة',
+    clinicAdminEntryRoleHint: 'مدير المنشأة',
   },
   en: {
     pageTitle: 'Workspace',
@@ -195,6 +201,12 @@ const DASHBOARD_COPY = {
       'Select an organisation before selecting a facility.',
     activeOrganisationChip: 'Active organisation',
     activeFacilityChip: 'Active facility',
+    // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1).
+    clinicAdminEntryTitle: 'Clinic Admin',
+    clinicAdminEntryBody:
+      'You have an active workspace, organisation, and facility. Enter the Clinic Admin application to manage your facility.',
+    clinicAdminEntryButton: 'Enter Clinic Admin',
+    clinicAdminEntryRoleHint: 'Clinic Administrator',
   },
 } as const;
 
@@ -800,11 +812,92 @@ export default function DashboardPage() {
           noRoles={copy.noRoles}
         />
 
+        {active !== null && activeOrganisation !== null && activeFacility !== null && (
+          (() => {
+            const hasR09 = active.roles.some(
+              (role) => role.code === 'R09_ADMINISTRATOR',
+            );
+            if (!hasR09) return null;
+            return (
+              <ClinicAdminEntryCard
+                title={copy.clinicAdminEntryTitle}
+                body={copy.clinicAdminEntryBody}
+                buttonLabel={copy.clinicAdminEntryButton}
+                roleHint={copy.clinicAdminEntryRoleHint}
+                onEnter={() => router.push('/clinic-admin')}
+              />
+            );
+          })()
+        )}
+
         {error !== null && (
           <StatusMessage variant="error">{error}</StatusMessage>
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * Clinic Admin entry affordance card (DESIGN_BIBLE.md §17.1).
+ *
+ * Rendered on `/dashboard` only when the principal holds an active
+ * tenant, an active organisation, and an active facility. The card
+ * surfaces a clear action to enter `/clinic-admin`. It does not
+ * silently route unrelated roles to Clinic Admin; it does not
+ * confuse R09 with Platform Super Admin (R13) or any other role.
+ *
+ * The card is honest: it appears for any principal with valid full
+ * context, but the shell at `/clinic-admin` enforces its own
+ * authentication and context protection per §17.1. If a principal
+ * without R09 enters `/clinic-admin` directly, the shell still
+ * requires a valid authenticated session and a valid active
+ * context; the shell does not perform role-based routing decisions
+ * — it merely requires the canonical context. The dashboard's
+ * entry affordance is a convenience, not a security boundary.
+ *
+ * The R09 Clinic Administrator role code (`R09_ADMINISTRATOR`) is
+ * the canonical role code from
+ * `packages/domain/src/authorization/role-catalogue.ts`. The
+ * canonical Arabic label `مدير المنشأة` and English label
+ * `Clinic Administrator` are presentation labels ratified in
+ * DESIGN_BIBLE.md §17.1.
+ */
+interface ClinicAdminEntryCardProps {
+  readonly title: string;
+  readonly body: string;
+  readonly buttonLabel: string;
+  readonly roleHint: string;
+  readonly onEnter: () => void;
+}
+
+function ClinicAdminEntryCard({
+  title,
+  body,
+  buttonLabel,
+  roleHint,
+  onEnter,
+}: ClinicAdminEntryCardProps): ReactElement {
+  return (
+    <section
+      className="ih-card ih-card--elevated ih-clinic-admin-entry"
+      aria-labelledby="ih-clinic-admin-entry-title"
+    >
+      <header className="ih-card__header">
+        <div>
+          <p className="ih-card__eyebrow">{roleHint}</p>
+          <h2 id="ih-clinic-admin-entry-title" className="ih-card__title">
+            {title}
+          </h2>
+        </div>
+      </header>
+      <p className="ih-clinic-admin-entry__body">{body}</p>
+      <div className="ih-actions-row">
+        <Button type="button" variant="primary" onClick={onEnter}>
+          {buttonLabel}
+        </Button>
+      </div>
+    </section>
   );
 }
 
