@@ -115,13 +115,49 @@
   /* Typography                                                        */
   /* ----------------------------------------------------------------- */
 
-  /* Latin typography — Inter with strong system fallbacks */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, "Liberation Sans", sans-serif;
+  /*
+   * Latin typography — Inter (approved Clinic Admin Latin typeface
+   * per DESIGN_BIBLE.md §17.6 and ENTERPRISE_DESIGN_BRIEF.md §2.10).
+   *
+   * The `--font-inter` variable is populated by `next/font/google` in
+   * `apps/web/src/app/fonts.ts` and applied to the root `<html>`
+   * element in `apps/web/src/app/layout.tsx`. At build time Next.js
+   * fetches the Inter font files and bundles them into the
+   * application's own origin, so there is no runtime Google Fonts CDN
+   * request (per ADR-003 offline-first and supply-chain safety).
+   *
+   * The system fallbacks remain in the stack so the page never
+   * flashes invisible text: if the bundled font has not yet loaded
+   * (or in environments where the build could not bundle the font),
+   * the system stack takes over until `display: swap` swaps the
+   * bundled font in.
+   */
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Liberation Sans", sans-serif;
 
-  /* Arabic typography — Tajawal / Noto Sans Arabic with system fallbacks */
-  --font-arabic: "Tajawal", "IBM Plex Sans Arabic", "Noto Sans Arabic",
-    "Segoe UI", Tahoma, "Geeza Pro", sans-serif;
+  /*
+   * Arabic typography — IBM Plex Sans Arabic (approved Clinic Admin
+   * Arabic typeface per DESIGN_BIBLE.md §17.6 and
+   * ENTERPRISE_DESIGN_BRIEF.md §2.10).
+   *
+   * The `--font-ibm-plex-sans-arabic` variable is populated by
+   * `next/font/google` in `apps/web/src/app/fonts.ts` and applied to
+   * the root `<html>` element in `apps/web/src/app/layout.tsx`. At
+   * build time Next.js fetches the IBM Plex Sans Arabic font files
+   * and bundles them into the application's own origin, so there is
+   * no runtime Google Fonts CDN request (per ADR-003 offline-first
+   * and supply-chain safety).
+   *
+   * Tajawal and Noto Sans Arabic remain in the fallback stack so the
+   * page never flashes invisible text: if the bundled font has not
+   * yet loaded (or in environments where the build could not bundle
+   * the font), the existing fallback stack takes over until
+   * `display: swap` swaps the bundled font in.
+   */
+  --font-arabic: var(--font-ibm-plex-sans-arabic), "IBM Plex Sans Arabic",
+    "Tajawal", "Noto Sans Arabic", "Segoe UI", Tahoma, "Geeza Pro",
+    sans-serif;
 
   /* Editorial serif for hero headings (optional, used sparingly) */
   --font-serif: "Source Serif 4", "Source Serif Pro", Georgia, "Times New Roman",
@@ -1883,15 +1919,28 @@ body {
   }
 
   /*
-   * RTL drawer: anchored to the right edge (inset-inline-start: 0
-   * resolves to right in RTL because of logical-property mirroring).
-   * When closed (handled by parent not rendering the sidebar), the
-   * drawer is removed from the DOM.
+   * The single declaration `inset-inline-start: 0` above anchors the
+   * drawer correctly in BOTH language directions via CSS logical
+   * property mirroring:
+   *
+   * - LTR: inline-start resolves to `left`, so the drawer is anchored
+   *   to the left edge of the viewport (the design-intent LTR position
+   *   per DESIGN_BIBLE.md §13.2).
+   * - RTL: inline-start resolves to `right`, so the drawer is anchored
+   *   to the right edge of the viewport (the design-intent RTL
+   *   position per DESIGN_BIBLE.md §12.2).
+   *
+   * No `[dir='rtl']` override is needed: an explicit override that
+   * sets `inset-inline-start: auto; inset-inline-end: 0;` would push
+   * the drawer to the WRONG edge in RTL (it would resolve to
+   * `left: 0` in RTL, placing the drawer on the left instead of the
+   * right). The previous override was removed during the shell v1
+   * acceptance correction because it contradicted the comment above
+   * and the design-intent RTL position.
+   *
+   * When closed (handled by the parent not rendering the sidebar),
+   * the drawer is removed from the DOM.
    */
-  [dir='rtl'] .ih-clinic-admin-sidebar {
-    inset-inline-start: auto;
-    inset-inline-end: 0;
-  }
 }
 
 /* ----------------------------------------------------------------- */

@@ -656,3 +656,95 @@ Subsequent vertical slices (in dependency order): Overview KPIs (financial snaps
 - **To discard the branch and start over:** `git worktree remove /home/z/clinic-admin-shell-v1` then `git branch -D feat/clinic-admin-shell-v1` (only with explicit operator authorisation; the work is local-only and has not been pushed, so this would lose the implementation)
 - **To re-run validation in the worktree:** `cd /home/z/clinic-admin-shell-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
 
+
+## Clinic Admin Shell v1 — Acceptance Correction (2026-07-25)
+
+This section is appended per the Update Protocol; no prior entries are rewritten. It records the narrowly scoped acceptance correction applied on top of the Clinic Admin Shell v1 implementation recorded above. It supersedes two specific factual statements in the prior section; the prior section's text is preserved unchanged for history.
+
+### Superseded statements
+
+1. **R09 domain catalogue label.** The prior section's "Important decisions" item 1 stated: *"The domain catalogue's `displayNameAr` (`مدير`) and `displayNameEn` (`Administrator`) are not altered; the Clinic Admin shell v1 uses the canonical presentation labels ratified in DESIGN_BIBLE.md §17.1."* This statement is **superseded**. The acceptance correction updates the domain catalogue's `displayNameAr` for `R09_ADMINISTRATOR` from the bare word `مدير` to the canonical Arabic presentation label `مدير المنشأة`, aligning the catalogue with DESIGN_BIBLE.md §17.1 and with the bilingual presentation mappings already used by the Clinic Admin shell. The role code `R09_ADMINISTRATOR`, the `displayNameEn` (`Administrator`), the category (`operational`), the authorization semantics, the permission assignments, the tenant/organisation/facility scope, and the role ordering are all preserved. No second alias or competing label is introduced. The bare Arabic word `مدير` is preserved in unrelated uses (e.g., `مدير الموارد البشرية` for R11 HR Manager, `مدير النظام` for R13 System Administrator); only the R09 catalogue entry was changed.
+
+2. **Immediate next vertical slice.** The prior section's "Immediate next vertical slice" subsection named **Notification backend integration** as the immediate next slice. This is **superseded**. The user-approved immediate next vertical slice is **Today's Appointments**, implemented end-to-end using real tenant-scoped and facility-scoped data through database, business logic, API, permissions, frontend table, tests, RTL/LTR states, and manual validation. The Notification backend remains a **later** vertical slice; the notification bell in the fixed header continues to show an honest empty/unavailable state with no fake records and no fake unread count. Today's Appointments is NOT implemented during this correction task; it is recorded here only as the corrected immediate next slice.
+
+### Correction scope
+
+The correction is narrowly scoped. It does NOT rebuild the shell, does NOT create a competing implementation, does NOT introduce a duplicate route/sidebar/header/notification component, does NOT modify database schemas or migrations, does NOT implement any business module (Patient, Appointment, Billing, Inventory, Staff, Waiting Room, or Notification), does NOT introduce fake business data, does NOT introduce fake notifications, does NOT push anything, does NOT generate a deploy key, does NOT deploy, does NOT modify production data, does NOT force-push, rebase, reset, restore, clean, amend the existing Clinic Admin Shell commit, or delete any branch/tag/worktree/file group.
+
+### Repository and branch
+
+- **Repository:** `/home/z/my-project` (primary worktree, on `main`)
+- **Implementation branch:** `feat/clinic-admin-shell-v1` (still local-only and unpushed after the correction)
+- **Isolated worktree:** `/home/z/clinic-admin-shell-v1` (on `feat/clinic-admin-shell-v1`)
+- **Pre-correction implementation SHA:** `7a636a92896f9f3ca1dec48306e7627479704237` (the original Clinic Admin Shell v1 commit; parented at `d9c10d7d65f7a113c830aa0e88ecbeee5b2c749b`)
+- **Correction commit parent:** `7a636a92896f9f3ca1dec48306e7627479704237` (the correction is a new commit on top of the original; the original is NOT amended)
+- **Authority note:** The pre-correction SHA above is the **last verified implementation-branch tip when the correction was authored** (2026-07-25). It is NOT a live claim about the current branch tip. Before merging, run `git rev-parse feat/clinic-admin-shell-v1` and trust Git, not this section. The correction commit SHA is recorded in `worklog.md`.
+
+### Files created
+
+- `apps/web/src/app/fonts.ts` — deterministic, licence-compliant font-loading module using Next.js's built-in `next/font/google`. Exposes Inter via `--font-inter` and IBM Plex Sans Arabic via `--font-ibm-plex-sans-arabic`. The fonts are fetched at build time and bundled into the application's own origin; there is no runtime request to `fonts.googleapis.com` or `fonts.gstatic.com` (per ADR-003). No new runtime dependency added; the lockfile was not modified.
+
+### Files modified
+
+- `packages/domain/src/authorization/role-catalogue.ts` — corrected the `displayNameAr` for `R09_ADMINISTRATOR` from `مدير` to `مدير المنشأة` (one-line change; all other R09 catalogue fields and every other role entry preserved).
+- `packages/domain/src/authorization/authorization.spec.ts` — added three new tests: (a) "the catalogue includes R09 Administrator with the canonical Clinic Admin Arabic label" asserting `displayNameAr === 'مدير المنشأة'`; (b) "getRoleDisplayName returns the canonical Arabic label for R09 by default" asserting `getRoleDisplayName('R09_ADMINISTRATOR') === 'مدير المنشأة'`; (c) "getRoleDisplayName returns the English label for R09 when requested" asserting `getRoleDisplayName('R09_ADMINISTRATOR', 'en') === 'Administrator'`. The existing R13 and R14 catalogue tests are preserved unchanged.
+- `apps/web/src/app/layout.tsx` — applied the `inter.variable` and `ibmPlexSansArabic.variable` CSS-variable class names to the root `<html>` element so every route (landing, login, dashboard, clinic-admin) receives the approved typography. The root layout's existing structure, the `LanguageProvider` wrapper, the `lang="ar"` and `dir="rtl"` defaults, and the existing body className are preserved.
+- `apps/web/src/app/globals.css` — updated the `--font-sans` and `--font-arabic` design tokens to consume the new `--font-inter` and `--font-ibm-plex-sans-arabic` CSS variables as their first font family, with the existing fallback stacks preserved. Removed an incorrect RTL-specific override on the mobile sidebar drawer (`[dir='rtl'] .ih-clinic-admin-sidebar { inset-inline-start: auto; inset-inline-end: 0; }`) that pushed the drawer to the wrong edge in RTL; the single `inset-inline-start: 0` declaration now anchors the drawer correctly in both directions via CSS logical-property mirroring. All other Clinic Admin shell CSS rules are preserved unchanged.
+- `download/docs/05_UI_UX/DESIGN_BIBLE.md` — §17.6 updated to record that IBM Plex Sans Arabic and Inter are now actually loaded via `next/font/google` (previously the section said the implementation "inspects the repository before adding font dependencies"). §17.8 appended with an "Acceptance correction (2026-07-25)" note recording the R09 role-label correction and the typography implementation, explicitly noting that no canonical decision in §17.1 through §17.7 was altered. The next-vertical-slice ordering is left as the authoritative source in `PROJECT_CONTINUITY.md` and `worklog.md`.
+
+### Files deleted
+
+- None.
+
+### Validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run build:shared` | PASS | contracts + domain built |
+| `pnpm --filter @ibn-hayan/observability... build` | PASS | observability built |
+| `pnpm run typecheck` | PASS | All packages (api, web, contracts, domain, observability, testing, configuration) |
+| `pnpm run lint` | PASS | All packages |
+| `pnpm run test` (unit) | PASS | contracts 123 + domain 97 + observability 83 + api 5 + web 171 = 479 total. 3 new R09 catalogue tests pass (59 authorization tests, was 56). 0 regressions. |
+| `pnpm run build` | PASS | All packages built (api via SWC, web via Next.js static generation). `/clinic-admin` route compiled as static. Next.js fetched and bundled 23 woff2 font files (~496 KB) into `apps/web/.next/static/media/`. |
+| `git diff --check` | PASS | No whitespace errors |
+
+**Font-network verification (build-time).** Inspection of the build output confirms:
+
+- 23 woff2 files bundled into `apps/web/.next/static/media/` (~496 KB total).
+- All four prerendered HTML files (`index.html`, `login.html`, `dashboard.html`, `clinic-admin.html`) contain `<html lang="ar" dir="rtl" class="...inter_...__variable ibm_plex_sans_arabic_...__variable">` — the font CSS variables are applied to the root `<html>` element.
+- All four prerendered HTML files contain five `<link rel="preload" ... type="font/woff2">` tags pointing to `/_next/static/media/*.woff2` (same origin).
+- No `fonts.googleapis.com` or `fonts.gstatic.com` references in the actual served CSS (`apps/web/.next/static/chunks/*.css`). The only `fonts.gstatic.com` references in the build output are inside source-map files (`*.css.map`), which are debugging artifacts and do not trigger runtime fetches.
+
+**Browser-validation result.** Build-time HTML inspection verified the font preloads, the `dir="rtl"` attribute on `<html>`, the font CSS-variable class names on `<html>`, and the absence of runtime Google Fonts CDN references. Runtime browser validation was **not executed** for the authenticated shell view because (a) the headless Chrome instance available in this environment runs in a separate Kubernetes network namespace and could not reach the Next.js dev/start server on `localhost:3000`, and (b) no backend (API + PostgreSQL 17) and no valid development authentication credentials were available in this environment to establish a real R09 session. Operator visual review remains required for: Arabic RTL desktop, English LTR desktop, tablet width, mobile width, sidebar drawer, notification bell open/close, Escape close, click-outside close, focus states, keyboard navigation, safe viewport-edge spacing, horizontal overflow, content offset under header/sidebar, browser-console errors, failed network requests, and authentication/context request behaviour. The exact operator review steps are recorded in `worklog.md`.
+
+### Important decisions
+
+1. **R09 Arabic-label correction in the catalogue itself.** Rather than overriding the bare `مدير` only at the shell presentation layer (the prior approach), the correction updates the domain catalogue's `displayNameAr` directly so the API contract returns `مدير المنشأة` to every consumer. This closes the prior inconsistency between the catalogue and the frontend tests (which already expected `مدير المنشأة`). The English `displayNameEn` remains `Administrator` because the §17.1 canonical English presentation label `Clinic Administrator` is a shell-presentation concern; the catalogue's English value remains the cross-surface role label, and the Clinic Admin shell overrides it at the presentation layer (as before).
+
+2. **Font loading via `next/font/google`.** The approved Arabic (IBM Plex Sans Arabic) and English (Inter) typefaces are loaded with Next.js's built-in `next/font/google` module — the canonical Next.js font mechanism. No new runtime dependency was added (`next/font` is part of Next.js itself); the lockfile was not modified. The fonts are fetched at build time and bundled into the application's own origin, satisfying ADR-003's offline-first and supply-chain safety constraints (no runtime Google Fonts CDN request). IBM Plex Sans Arabic is loaded with weights 400, 500, 600, 700 (it is not exposed as a variable axis on Google Fonts); Inter is loaded as a variable font. Both use `display: swap` to avoid invisible-text flash and preserve accessibility contrast via the existing fallback stacks.
+
+3. **Root-layout font application.** The font CSS variables are applied to the root `<html>` element rather than a per-route layout, so every route (landing, login, dashboard, clinic-admin) automatically receives the approved typography without a per-route change. The existing project-owned token names `--font-sans` and `--font-arabic` are preserved; only their values changed (to consume the new `--font-inter` and `--font-ibm-plex-sans-arabic` variables as the first font family, with the existing fallback stacks preserved). Every component that already used `var(--font-sans)` or `var(--font-arabic)` automatically receives the approved fonts.
+
+4. **RTL mobile-drawer bug fix.** The prior CSS had an explicit `[dir='rtl'] .ih-clinic-admin-sidebar { inset-inline-start: auto; inset-inline-end: 0; }` override that pushed the mobile drawer to the wrong edge in RTL (it resolved to `left: 0` in RTL, placing the drawer on the left instead of the design-intent right). The override was removed; the single `inset-inline-start: 0` declaration now anchors the drawer correctly in both directions via CSS logical-property mirroring (left in LTR per §13.2, right in RTL per §12.2). A documentation comment was added explaining why no `[dir='rtl']` override is needed.
+
+5. **No backend, schema, or business-data changes.** Per the correction task constraints, no database models, schemas, migrations, seed data, backend APIs, business services, repositories, appointment logic, patient logic, billing logic, inventory logic, notification APIs, or audit contracts were modified. The correction is a frontend + domain-catalogue + documentation change only.
+
+6. **No dependency or lockfile changes.** `next/font/google` is part of Next.js itself; no new font-management package, no `@fontsource/*`, no `fontsource`, and no custom loader was added. `package.json` and `pnpm-lock.yaml` are unchanged.
+
+### Known limitations
+
+1. **Operator visual review remains required.** Build-time HTML inspection verified the font preloads and the root-element attributes, but runtime browser validation (Arabic RTL desktop, English LTR desktop, tablet, mobile, sidebar drawer, notification bell open/close, Escape close, click-outside close, focus states, keyboard nav, console errors, network requests) was not executed in this environment. See `worklog.md` for the exact operator review steps.
+2. **The §17.8 next-vertical-slice statement in DESIGN_BIBLE.md was not rewritten.** Per Phase 9 of the correction task, DESIGN_BIBLE.md updates were restricted to font or role-label implementation status. The §17.8 sentence "The first vertical slice after the shell is the notification control's real backend integration" remains as a historical statement of the prior plan; the corrected next-vertical-slice ordering lives in this section (above) and in `worklog.md`. The §17.8 acceptance-correction note explicitly cross-references the authoritative source.
+3. **Branch is still local-only.** The branch `feat/clinic-admin-shell-v1` (now with the correction commit on top of the original) has NOT been pushed to `origin`. A fresh deploy-key push task remains required to back up the branch to GitHub.
+4. **No PostgreSQL 17 suites were run.** The correction is a frontend + domain-catalogue change; no Prisma schema, migration, backend service, repository, or API test was modified. The PostgreSQL 17 suite inventory is unchanged.
+
+### Recovery information (updated)
+
+- **Implementation branch:** `feat/clinic-admin-shell-v1` (local-only, unpushed)
+- **Implementation worktree:** `/home/z/clinic-admin-shell-v1`
+- **Pre-correction commit:** `7a636a92896f9f3ca1dec48306e7627479704237` (subject: `feat: establish clinic admin shell and navigation v1`; parent: `d9c10d7d65f7a113c830aa0e88ecbeee5b2c749b`)
+- **Correction commit parent:** `7a636a92896f9f3ca1dec48306e7627479704237` (the correction is a new commit on top; the original is NOT amended)
+- **Correction commit subject:** `fix: align clinic admin shell v1 with canonical decisions`
+- **Correction commit SHA:** recorded in `worklog.md` (the durable Git-authority rule forbids describing a SHA as permanently current)
+- **To inspect the corrected shell without checking out the branch:** `git worktree add /tmp/clinic-admin-review feat/clinic-admin-shell-v1` (the local branch is reachable from the primary worktree)
+- **To re-run validation in the worktree:** `cd /home/z/clinic-admin-shell-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`

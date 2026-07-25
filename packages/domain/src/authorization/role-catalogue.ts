@@ -229,7 +229,7 @@ export const PLATFORM_ROLE_CATALOGUE: readonly PlatformRoleCatalogueEntry[] = [
     shortCode: 'R09',
     category: 'operational',
     displayNameEn: 'Administrator',
-    displayNameAr: 'مدير',
+    displayNameAr: 'مدير المنشأة',
   },
   {
     code: 'R10_COMPLIANCE_OFFICER',
