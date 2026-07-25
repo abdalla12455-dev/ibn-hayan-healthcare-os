@@ -36,6 +36,8 @@
     "build:generated": "swc generated --out-dir dist --sync",
     "auth:bootstrap-dev": "node --import tsx src/scripts/auth-bootstrap-dev.ts",
     "preauth:bootstrap-dev": "prisma generate",
+    "role-preview:seed": "node --import tsx src/scripts/role-preview-seed-dev.ts",
+    "prerole-preview:seed": "prisma generate",
     "prebuild": "prisma generate && prisma generate --schema prisma-audit/schema.prisma && rm -rf dist && pnpm build:generated",
     "pretypecheck": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
     "prelint": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",

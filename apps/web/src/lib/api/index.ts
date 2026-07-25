@@ -11,3 +11,10 @@ export {
   type ApiErrorCategory,
 } from './api-error';
 export { getApiBaseUrl, normaliseBaseUrl, joinUrl } from './api-url';
+export {
+  getRolePreviewAvailability,
+  getCurrentPreviewRole,
+  selectPreviewRole,
+  endPreviewRole,
+  type RolePreviewClientResult,
+} from './role-preview/index';

@@ -5,6 +5,7 @@ import { AuthModule } from './modules/auth/index.js';
 import { AuthorizationModule } from './modules/authorization/index.js';
 import { SessionContextModule } from './modules/session-context/index.js';
 import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
+import { RolePreviewModule } from './modules/dev/index.js';
 
 /**
  * Root application module.
@@ -60,6 +61,7 @@ import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
     AuthModule,
     AuthorizationModule,
     SessionContextModule,
+    RolePreviewModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -748,3 +748,260 @@ The correction is narrowly scoped. It does NOT rebuild the shell, does NOT creat
 - **Correction commit SHA:** recorded in `worklog.md` (the durable Git-authority rule forbids describing a SHA as permanently current)
 - **To inspect the corrected shell without checking out the branch:** `git worktree add /tmp/clinic-admin-review feat/clinic-admin-shell-v1` (the local branch is reachable from the primary worktree)
 - **To re-run validation in the worktree:** `cd /home/z/clinic-admin-shell-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+
+---
+
+## Demo Role Preview Mode v1 (2026-07-25)
+
+### Repository and branch
+
+- **Repository:** `https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os.git`
+- **Implementation branch:** `feat/demo-role-preview-v1` (local-only, unpushed as of this section's authoring)
+- **Implementation worktree:** `/home/z/demo-role-preview-v1`
+- **Branch parent:** `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (the merged PR #4 commit on `main`)
+- **Implementation commit subject:** `feat: add secure demo role preview mode v1`
+- **Implementation commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule, this section does NOT describe the SHA as permanently current — run `git rev-parse feat/demo-role-preview-v1` for the live tip)
+
+### Architecture
+
+Demo Role Preview Mode is a **development-only** feature that allows the operator to preview the system as every canonical role R01 through R14 without manually entering credentials. The feature uses real existing authentication, sessions, memberships, role assignments, tenant/organisation/facility context, and authorization semantics; it is **not** a visual-only role-name switch. It remains **completely unavailable in production**.
+
+The implementation introduces a new backend module (`apps/api/src/modules/dev/role-preview/`) and a new frontend route (`/role-preview`). The Clinic Admin header optionally renders a role switcher when preview mode is enabled and the current session belongs to the isolated preview workspace.
+
+### Environment gate
+
+One authoritative backend-controlled environment variable:
+
+- `IBN_HAYAN_ROLE_PREVIEW_ENABLED` (default `false`)
+- The gate is `RolePreviewFeatureConfig.isRolePreviewEnabled()` in `apps/api/src/modules/dev/role-preview/role-preview-feature.config.ts`.
+- Rules:
+  - default is **disabled**;
+  - enabled **only** when the value is the exact string `true`;
+  - enabled **only** when `NODE_ENV !== 'production'`;
+  - the **backend is authoritative** — a public frontend environment variable is never sufficient to enable the feature;
+  - when disabled, preview APIs return 404, `/role-preview` renders the safe unavailable result, the role-switcher control is absent, the preview seed refuses to run, and normal login, dashboard, session, and Clinic Admin behaviour remain unchanged;
+  - when `NODE_ENV === 'production'`, preview mode fails closed **even if the flag is accidentally `true`**.
+
+`.env.example` documents only the boolean feature flag with a safe default of `false`.
+
+### Production-disable guarantee
+
+Production fails closed **unconditionally**. The gate reads `process.env.NODE_ENV` directly (not via `ConfigService`) so that no caching layer can mask the production state. Every role-preview route consults the gate before delegating to the service. The 404 status for the availability and current-role endpoints does NOT advertise the route's existence in production; the select and end endpoints throw `rolePreviewDisabled()` (also 404) when the gate returns `false`. Ten unit tests in `role-preview-feature.config.spec.ts` verify the gate's behaviour across all flag/NODE_ENV combinations.
+
+### Isolated preview identity strategy
+
+A single development-only preview workspace contains:
+
+- one preview tenant (`slug=preview-role-tenant`, `displayName=Preview Role Tenant`);
+- one preview organisation (`code=PREVIEW_ORG`, `displayName=Preview Organisation`) under the preview tenant;
+- one preview facility (`code=PREVIEW_FACILITY`, `displayName=Preview Facility`) under the preview organisation;
+- one preview user identity for **every** canonical role R01 through R14;
+- one active `TenantMembership` for every preview identity under the preview tenant;
+- one `TenantRoleAssignment` for every preview identity at the canonical scope level for its role.
+
+The preview identity catalogue is defined in `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`. It is **derived from** `PLATFORM_ROLE_CATALOGUE` (the canonical role catalogue); no role is invented, removed, renamed, or relabelled. Sixteen unit tests in `preview-identity-catalogue.spec.ts` verify the catalogue's completeness, uniqueness, and scope assignment.
+
+### Canonical role coverage
+
+The implementation supports exactly the fourteen canonical roles found in the repository's role catalogue (`packages/domain/src/authorization/role-catalogue.ts`): R01 Physician, R02 Nurse, R03 Pharmacist, R04 Technician, R05 Allied Health Professional, R06 Receptionist, R07 Scheduler, R08 Biller, R09 Administrator, R10 Compliance Officer, R11 HR Manager, R12 Executive, R13 System Administrator, R14 Integration Account.
+
+### Role scope-assignment result
+
+Derived from ADR-015 §1.5 and the role-permission matrix:
+
+- **R01 through R12** (human tenant roles): role assignment at **facility scope** under the preview tenant → preview organisation → preview facility. This is the narrowest canonical scope and grants the preview identity the ability to select the preview tenant → preview organisation → preview facility context.
+- **R13 System Administrator**: role assignment at **tenant scope** (no scope-target). Per ADR-015 §1.5, R13 at tenant scope grants tenant-wide organisation and facility selection.
+- **R14 Integration Account**: role assignment at **tenant scope** (no scope-target). Per ADR-015 and the role-permission matrix, R14 is denied all interactive context permissions; the preview identity is created so the operator can confirm the role's honest "Interface not implemented yet" status.
+
+### Seed idempotency result
+
+The seed script (`apps/api/src/scripts/role-preview-seed-dev.ts`, registered as `pnpm --filter @ibn-hayan/api role-preview:seed`) is idempotent: existing rows are reused, missing rows are created, and existing credentials are updated to keep the password hash deterministic across seed runs. The seed refuses production, refuses an unverified database target (the `DATABASE_URL` must contain the substring `role_preview` or `preview_role`), refuses without the explicit `ALLOW_ROLE_PREVIEW_SEED=true` flag, refuses without `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`, applies migrations before any seed work, and creates **no** patient/appointment/invoice/payment/inventory/attendance/waiting-room/notification records.
+
+### Preview database-safety result
+
+The seed's defence-in-depth database-safety check refuses to run against any database whose URL does not contain the substring `role_preview` or `preview_role`. This prevents accidental seeding of a production database whose URL happens to be set in the environment. The preview database is expected to be a separate PostgreSQL 17 database (mirroring the audit database's isolation strategy); in development it may run on the same PostgreSQL cluster as the transactional store.
+
+### Backend module result
+
+The NestJS module `RolePreviewModule` (`apps/api/src/modules/dev/role-preview/role-preview.module.ts`) is registered in the root `AppModule` regardless of `NODE_ENV`. The feature-config gate is the authoritative entry point. The module imports `AuthModule`, `DatabaseModule`, and `AuditModule`; it reuses `AuthService`, `SessionTokenService`, `CsrfService`, and `AuditHelperService` via Nest DI. It does NOT duplicate authentication, CSRF, Origin, or audit logic.
+
+### Preview API routes
+
+Four routes under `/api/v1/dev/role-preview`:
+
+- `GET /api/v1/dev/role-preview` — query availability and list canonical preview role cards. Returns 404 when the feature is disabled.
+- `GET /api/v1/dev/role-preview/current` — return the current preview role metadata. Returns 404 when disabled, 401 when no session.
+- `POST /api/v1/dev/role-preview/select` — select a canonical role code, create a fresh preview session for the corresponding preview identity, establish the preview tenant/organisation/facility context, revoke the previous session atomically, and set the new HttpOnly cookie. Requires Origin + CSRF.
+- `POST /api/v1/dev/role-preview/end` — end the current preview session. Requires Origin + CSRF.
+
+### Authentication-path result
+
+The preview backend reuses the existing `AuthService.getSessionFromCookie` for session validation. The select endpoint revokes the previous session atomically (in the same Prisma transaction as the new session creation and the audit outbox insertion). The new session is created using the existing `SessionTokenService.generate()` and `SessionTokenService.hash()` helpers, exactly mirroring the auth service's `login` flow. The raw token lives only in the HttpOnly cookie; it is NEVER returned in a JSON response.
+
+### Session-creation result
+
+A new `auth_sessions` row is created for the preview identity's user with the new token hash, the absolute TTL, and the active tenant/organisation/facility context set directly on the row (using the same `activeTenantMembershipId`, `activeOrganisationId`, `activeFacilityId` columns used by the session-context module). The composite foreign keys enforce that the membership belongs to the user, the organisation belongs to the tenant, and the facility belongs to the organisation.
+
+### Role-switch result
+
+Switching role calls the secure backend `select` endpoint with only the canonical role code. The server:
+1. verifies the feature flag (defence-in-depth);
+2. resolves the preview identity from the role code via `findPreviewIdentity`;
+3. resolves the preview workspace (tenant, organisation, facility) by slug/code lookup;
+4. verifies the preview identity's user exists and has an active membership in the preview tenant;
+5. atomically creates the new session, sets the context, revokes the previous session, and emits the `role_preview.session.created` audit event in the same Prisma transaction;
+6. invalidates the previous session's CSRF token (best-effort, in-memory);
+7. returns the safe response (selected role, preview workspace display names, interface path) and the raw token (for the controller to set in the HttpOnly cookie).
+
+The previous session is **always** revoked — whether it was a preview session or a normal operator session. This is the structural enforcement of "safely revoke or replace the previous preview session during role switching".
+
+### Tenant-context / Organisation-context / Facility-context results
+
+The new session's `activeTenantMembershipId`, `activeOrganisationId`, and `activeFacilityId` are set directly on the row in the same Prisma transaction that creates the session. The values are derived server-side from the preview workspace's deterministic identifiers; the caller cannot supply them. The composite foreign keys enforce tenant/organisation/facility consistency at the database level.
+
+### R09 routing result
+
+When R09 is selected, the response carries `interfacePath: '/clinic-admin'`. The frontend's `/role-preview` page calls `router.push('/clinic-admin')`, which mounts the existing Clinic Admin shell. The shell's session and context checks pass because the new session has a valid active tenant/organisation/facility context. The operator sees the canonical Clinic Admin Overview page rendered exactly as a normal R09 operator would see it.
+
+### Unimplemented-role behaviour
+
+When a role other than R09 is selected, the response carries `interfacePath: null`. The frontend's `/role-preview` page shows a safe role-status view that displays the current role, the preview tenant/organisation/facility display names, and an honest statement that the role-specific product interface is not implemented. The page does NOT invent operational widgets or fake business data. The operator can use the role switcher (rendered in the page header) to switch to a different role.
+
+### `/role-preview` route result
+
+The `/role-preview` route is a development-only Next.js App Router page at `apps/web/src/app/role-preview/page.tsx`. The page:
+- queries the backend availability endpoint on mount;
+- renders a safe unavailable result when the backend returns 404 or `enabled: false`;
+- displays one role card for every canonical role R01 through R14 when enabled;
+- shows the role code, Arabic and English names, canonical scope, current interface implementation status, and a preview action;
+- supports Arabic RTL and English LTR via the existing `LanguageProvider`;
+- uses the existing design tokens, typography, and API-client conventions;
+- never displays internal UUIDs, the session token, or any credential material.
+
+### Header role-switcher result
+
+The role switcher (`apps/web/src/components/role-preview/role-preview-switcher.tsx`) is rendered in the Clinic Admin header only when the parent (`ClinicAdminShell`) has confirmed that (a) the backend availability endpoint returned `enabled: true` AND (b) the current-preview-role endpoint returned `active: true`. The switcher:
+- lists all canonical roles;
+- shows the current role;
+- calls the secure backend `select` endpoint on role switch;
+- navigates to `/clinic-admin` when an implemented role (R09) is selected;
+- navigates to `/role-preview` when an unimplemented role is selected;
+- supports Arabic and English labels;
+- is keyboard accessible (Escape closes the dropdown and restores focus to the trigger);
+- has visible focus states;
+- works on desktop, tablet, and mobile;
+- does NOT hardcode credentials, does NOT mutate client-side permission state, does NOT store the role code as authorization state in localStorage, and does NOT fake the unread notification count.
+
+The existing notification bell, the eleven-item Clinic Admin sidebar, the language switch, the active organisation/facility context chips, the profile menu, and the sign-out control all remain intact.
+
+### Production-hidden result
+
+Ten unit tests in `role-preview-feature.config.spec.ts` verify that the gate returns `false` in production regardless of the flag value, returns `false` for any non-`true` flag value, and returns `true` only when `NODE_ENV !== 'production'` AND the flag is the exact string `true`. The frontend availability check renders the safe unavailable result when the backend returns 404; the role switcher is rendered only when the parent has confirmed both `enabled: true` and `active: true`.
+
+### Normal-login / Dashboard / Clinic Admin regression results
+
+The implementation does NOT modify the existing `/login`, `/dashboard`, `/clinic-admin`, auth, session-context, or authorization code. The Clinic Admin header gains two optional props (`previewRoles` and `currentPreviewRoleCode`) that default to `null`/`undefined`; when absent, the header renders exactly as before. All existing authentication, session, context, and Clinic Admin tests remain green (180 web tests pass, including 29 existing Clinic Admin tests; 31 API tests pass; 154 contracts tests pass; 97 domain tests pass; 83 observability tests pass).
+
+### Files created
+
+**Backend (apps/api):**
+- `src/modules/dev/index.ts`
+- `src/modules/dev/role-preview/index.ts`
+- `src/modules/dev/role-preview/preview-identity-catalogue.ts`
+- `src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+- `src/modules/dev/role-preview/role-preview-feature.config.ts`
+- `src/modules/dev/role-preview/role-preview-feature.config.spec.ts`
+- `src/modules/dev/role-preview/role-preview.errors.ts`
+- `src/modules/dev/role-preview/role-preview.service.ts`
+- `src/modules/dev/role-preview/role-preview.controller.ts`
+- `src/modules/dev/role-preview/role-preview.module.ts`
+- `src/scripts/role-preview-seed-dev.ts`
+
+**Contracts (packages/contracts):**
+- `src/role-preview/index.ts`
+- `src/role-preview/role-preview.schema.ts`
+- `src/role-preview/role-preview.schema.spec.ts`
+
+**Frontend (apps/web):**
+- `src/app/role-preview/layout.tsx`
+- `src/app/role-preview/page.tsx`
+- `src/components/role-preview/role-preview-copy.ts`
+- `src/components/role-preview/role-preview-switcher.tsx`
+- `src/components/role-preview/role-preview-switcher.spec.tsx`
+- `src/lib/api/role-preview/index.ts`
+- `src/lib/api/role-preview/role-preview.client.ts`
+
+### Files modified
+
+- `.env.example` (added `IBN_HAYAN_ROLE_PREVIEW_ENABLED=false` documentation)
+- `apps/api/package.json` (added `role-preview:seed` and `prerole-preview:seed` scripts)
+- `apps/api/src/app.module.ts` (registered `RolePreviewModule`)
+- `apps/web/src/components/clinic-admin/clinic-admin-header.tsx` (added optional `previewRoles` and `currentPreviewRoleCode` props; renders `RolePreviewSwitcher` only when both are present)
+- `apps/web/src/components/clinic-admin/clinic-admin-shell.tsx` (added preview availability + current preview role loading; passes preview props to header)
+- `apps/web/src/lib/api/index.ts` (re-exported role-preview client)
+- `packages/contracts/src/index.ts` (re-exported role-preview contracts)
+- `packages/observability/src/audit/action-codes.ts` (added `role_preview.session.created` and `role_preview.session.ended` action codes; updated `inferCategoryFromAction`)
+
+### Files deleted
+
+None.
+
+### Schema or migration files changed
+
+**None.** The implementation uses the existing `User`, `LocalCredential`, `Tenant`, `Organisation`, `Facility`, `TenantMembership`, `TenantRoleAssignment`, `AuthSession`, and `AuditOutboxEvent` models. No `prisma/schema.prisma` change, no `prisma/migrations/**` change, no `prisma-audit/schema.prisma` change.
+
+### Dependency or lockfile changes
+
+**None.** No `package.json` dependency was added or removed; `pnpm-lock.yaml` is unchanged. The `apps/api/package.json` modification adds only the `role-preview:seed` and `prerole-preview:seed` scripts.
+
+### Fake business data introduced
+
+**None.** The preview seed creates only identity, tenancy, membership, and role-assignment records. No patients, appointments, invoices, payments, inventory, attendance, waiting-room, or notification records are created.
+
+### Secrets exposed
+
+**None.** The implementation NEVER logs, prints, or returns:
+- the preview password (referenced only as a constant for hashing);
+- the password hash;
+- the raw session token;
+- the CSRF token;
+- the preview identities' email addresses (used only for database lookup);
+- internal UUIDs (the API response carries only display labels).
+
+### Validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run build:shared` | PASS | contracts + domain built |
+| `pnpm --filter @ibn-hayan/observability build` | PASS | observability built (includes the new role-preview action codes) |
+| `pnpm run typecheck` | PASS | 7 packages + 2 apps typecheck clean |
+| `pnpm run lint` | PASS | 7 packages + 2 apps lint clean |
+| `pnpm run test` | PASS | 545 tests pass (97 domain + 154 contracts + 83 observability + 31 api + 180 web) |
+| `pnpm run build` | PASS | All packages built; Next.js production build succeeded; `/role-preview` registered as a static route alongside `/`, `/_not-found`, `/clinic-admin`, `/dashboard`, `/login` |
+| `git diff --check` | PASS | No whitespace errors |
+
+### Database-backed validation status
+
+**BLOCKED.** This environment has no PostgreSQL 17 available. The database-backed validation (creating the isolated `role_preview` database, applying migrations, running the preview seed, verifying every canonical role identity, testing session switching, verifying R09 context reaches `/clinic-admin`, verifying other roles reach the honest role-status view) was NOT executed in this environment. Per the specification, the task does NOT substitute production infrastructure and does NOT claim integration validation passed. The unit tests (gate, catalogue, contracts, switcher) provide structural verification; the PostgreSQL 17 integration validation will run on GitHub Actions CI when the branch is pushed through a separate controlled branch-and-PR workflow.
+
+### Known limitations
+
+1. **Branch is local-only.** `feat/demo-role-preview-v1` has NOT been pushed to `origin`. A separate controlled branch-and-PR workflow remains required.
+2. **Database-backed runtime validation is blocked.** See "Database-backed validation status" above.
+3. **Operator visual review remains required.** Build-time HTML inspection verified the route is registered, but runtime browser validation (Arabic RTL desktop, English LTR desktop, tablet, mobile, role-card grid, role switcher open/close, role switch with R09 navigation, role switch with unimplemented role, keyboard nav, focus states, console errors, network requests) was not executed in this environment.
+4. **The preview seed has not been run.** Running the seed requires a PostgreSQL 17 database whose URL contains `role_preview` or `preview_role`. The seed script is registered as `pnpm --filter @ibn-hayan/api role-preview:seed` and is ready to run in a development environment with the required `ALLOW_ROLE_PREVIEW_SEED=true`, `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`, and the isolated preview database URL.
+
+### Immediate next product slice
+
+**Today's Appointments.** This Demo Role Preview Mode implementation does NOT alter the canonical next-vertical-slice ordering. Today's Appointments remains the immediate next product slice, to be implemented end-to-end using real tenant-scoped and facility-scoped data through database, business logic, API, permissions, frontend table, tests, RTL/LTR states, and manual validation. The notification backend remains a **later** vertical slice; the notification bell in the fixed header continues to show an honest empty/unavailable state.
+
+### Recovery information
+
+- **Implementation branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+- **Implementation worktree:** `/home/z/demo-role-preview-v1`
+- **Branch parent:** `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (the merged PR #4 commit on `main`)
+- **Implementation commit subject:** `feat: add secure demo role preview mode v1`
+- **Implementation commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule)
+- **To inspect the implementation without checking out the branch:** `git worktree add /tmp/demo-role-preview-review feat/demo-role-preview-v1` (the local branch is reachable from the primary worktree)
+- **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+- **To run the preview seed (requires PostgreSQL 17 + isolated preview database):** `cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`

@@ -12,12 +12,17 @@ import {
 import { useRouter } from 'next/navigation';
 import { getSession, getCsrfToken, logout } from '@/lib/api/auth/auth.client';
 import { getContext } from '@/lib/api/context';
+import {
+  getRolePreviewAvailability,
+  getCurrentPreviewRole,
+} from '@/lib/api/role-preview';
 import type {
   SessionResponse,
   ContextResponse,
   ActiveTenantContext,
   ActiveOrganisationContext,
   ActiveFacilityContext,
+  RolePreviewRoleCard,
 } from '@ibn-hayan/contracts';
 import { useLanguage } from '@/components/i18n/language-context';
 import { getClinicAdminCopy } from './clinic-admin-copy';
@@ -117,6 +122,7 @@ export function ClinicAdminShell({
 
   const sessionLoadedRef = useRef(false);
   const contextLoadedRef = useRef(false);
+  const previewLoadedRef = useRef(false);
 
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [context, setContext] = useState<ContextResponse | null>(null);
@@ -125,6 +131,18 @@ export function ClinicAdminShell({
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Demo Role Preview Mode state. The availability response tells
+  // the shell whether the feature is enabled (development-only).
+  // The current-preview-role response tells the shell whether the
+  // current session belongs to the isolated preview workspace. The
+  // role switcher is rendered only when both are true.
+  const [previewRoles, setPreviewRoles] = useState<
+    readonly RolePreviewRoleCard[] | null
+  >(null);
+  const [currentPreviewRoleCode, setCurrentPreviewRoleCode] = useState<
+    string | null
+  >(null);
 
   // Resolve the responsive breakpoint via `useSyncExternalStore` so
   // the initial client render reads the actual window width without
@@ -192,6 +210,43 @@ export function ClinicAdminShell({
     };
   }, [session, router]);
 
+  // Demo Role Preview Mode availability + current preview role
+  // load. The shell consults the backend availability endpoint
+  // and the current-preview-role endpoint. The role switcher is
+  // rendered only when the backend reports `enabled: true` AND
+  // the current session is `active` (i.e. belongs to the
+  // isolated preview workspace). The shell cannot enable the
+  // switcher by changing client-side state.
+  useEffect(() => {
+    if (previewLoadedRef.current) return;
+    if (session === null) return;
+    previewLoadedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      const availResult = await getRolePreviewAvailability();
+      if (cancelled) return;
+      if (!availResult.ok || !availResult.data.enabled) {
+        // Feature disabled or unavailable; leave previewRoles null.
+        return;
+      }
+      setPreviewRoles(availResult.data.roles);
+      // Best-effort load of the current preview role; ignore
+      // failures (the session may not be a preview session).
+      const currentResult = await getCurrentPreviewRole();
+      if (cancelled) return;
+      if (
+        currentResult.ok &&
+        currentResult.data.active &&
+        currentResult.data.selectedRole !== null
+      ) {
+        setCurrentPreviewRoleCode(currentResult.data.selectedRole.code);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
   async function handleSignOut(
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
@@ -247,6 +302,8 @@ export function ClinicAdminShell({
         onSignOut={handleSignOut}
         signingOut={signingOut}
         onToggleSidebar={isMobile ? () => setSidebarOpen((v) => !v) : undefined}
+        previewRoles={previewRoles}
+        currentPreviewRoleCode={currentPreviewRoleCode}
       />
       <div className="ih-clinic-admin-shell__body">
         {sidebarVisible && (
