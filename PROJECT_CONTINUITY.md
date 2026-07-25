@@ -9,6 +9,25 @@
 - **Monorepo manager:** pnpm (workspace)
 - **Key packages:** `apps/api`, `apps/web`, `packages/contracts`, `packages/domain`, `packages/observability`
 
+## Authority and Live State (durable rule)
+
+This section is the durable authority rule for how agents must interpret this document. It is invariant across documentation refreshes — it does NOT become stale when `main` advances.
+
+**Three distinct kinds of information live in this document, and they must never be conflated:**
+
+1. **Last verified repository baseline when a section was authored.** This is a timestamped snapshot of what `main` and other refs pointed at when an agent wrote that section. It is always labelled with the date and explicitly described as a baseline-at-time-of-authoring, NEVER as "the current tip". A baseline is a frozen historical observation, not a live claim.
+2. **Completed project events and their verified SHAs.** These are immutable historical facts: PR #1 merged at `e610635`, PR #2 merged at `b34c974`, the ADR-015 integration landed at `c7929c0`, etc. Once recorded, they never change. They are the canonical record of what has happened on `main`.
+3. **Live current Git state.** The actual current SHA of `main`, `origin/main`, divergence, working-tree status, and remote branch list are NEVER reliably knowable from a document — `main` may have advanced since the document was last refreshed. Agents MUST retrieve live state by running Git commands, never by trusting a hardcoded "current tip" statement in this document.
+
+**Authority hierarchy:**
+
+- `AGENTS.md` and `PROJECT_CONTINUITY.md` provide **durable context** (invariants, historical events, recovery checkpoints, deployment-key lifecycle, quarantine state, architectural decisions). They are authoritative for what has happened and what the operating rules are.
+- **Git commands are authoritative for the live current branch, SHA, divergence, remote state, and working-tree status.** No statement in this document overrides what `git fetch && git rev-parse origin/main` returns.
+- **Every agent must run `git fetch origin` and verify the current local and remote `main` SHAs before editing any tracked file.** Hardcoded SHA claims in this document are a baseline-at-time-of-authoring only; they are not authorisation to skip the fetch.
+- **A documentation merge may advance `main` after the document is authored.** This is the continuity recursion problem: any continuity-only PR that records the "current tip" will itself advance `main` via its own merge commit, making its own "current tip" claim stale the moment it lands. The fix is to NEVER write "current tip of `origin/main` is `<SHA>`" as a live claim — instead write "last verified `main` baseline when this section was authored: `<SHA>` (date)" and require readers to fetch for the live value.
+
+**When an agent finds a stale "current tip" claim in this document,** the correct response is NOT to immediately open another continuity-only PR to update it (that just restarts the recursion). The correct response is to (a) use Git for the live value, (b) update the claim as part of the next substantive documentation refresh that has a non-recursion reason to exist, and (c) ensure the new wording uses the "last verified baseline when authored" formulation rather than a live "current tip" claim.
+
 ## Canonical Commit History
 
 The following table records every commit that has been reviewed, verified, and pushed to `origin/main`. This is the authoritative record — if local `main` diverges from what is listed here without explicit authorization, treat it as an anomaly.
@@ -24,20 +43,30 @@ The following table records every commit that has been reviewed, verified, and p
 | `5825ba4417d2708af126325dede65df8cfa1b77f` | 2026-07-24 11:55 | Merge validated ADR-015 organisation and facility context implementation | ADR-015 integration merge commit (parents: `e046e0d` and `c05fc323`). Merged the validated ADR-015 workflow and test corrections. No new production code was introduced by this merge. |
 | `c7929c0360874b596ae1a62a80511cc78598da3e` | 2026-07-24 11:57 | docs: record validated ADR-015 integration | ADR-015 continuity commit (parent: `5825ba4`). Recorded validated integration state in PROJECT_CONTINUITY.md. |
 | `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` | 2026-07-24 12:50 | ci: add standard validation workflow for main | Main CI implementation (parent: `c7929c0`). Added `.github/workflows/main-ci.yml` and updated PROJECT_CONTINUITY.md. No production code, test, schema, migration, or dependency file changed. |
-| `e610635956a4a406305aca2b0b6a12a84b7f32a6` | 2026-07-24 16:57 | Merge pull request #1 from abdalla12455-dev/ci/main-standard-workflow-v1 | Pull Request #1 merge commit (parents: `c7929c0` and `0acb9da`). GitHub merge-commit strategy. PR Main CI and main-push Main CI both passed (operator-verified). **Current tip of `origin/main`.** |
+| `e610635956a4a406305aca2b0b6a12a84b7f32a6` | 2026-07-24 16:57 | Merge pull request #1 from abdalla12455-dev/ci/main-standard-workflow-v1 | Pull Request #1 merge commit (parents: `c7929c0` and `0acb9da`). GitHub merge-commit strategy. PR Main CI and main-push Main CI both passed (operator-verified). Last verified `main` baseline when the post-CI-merge continuity refresh (commit `ed27ce6`) was authored on 2026-07-24. |
+| `ed27ce60f9d5548f088c8657871ebb24cb38f587` | 2026-07-24 14:29 | docs: refresh continuity after PR #1 merge and green main CI | Post-CI-merge continuity refresh (parent: `e610635`). Documentation-only: refreshed `PROJECT_CONTINUITY.md` to record PR #1 merge, green PR/main Main CI runs, v13 deploy-key lifecycle, and recovery-checkpoint additions. No production code, workflow, schema, migration, dependency, or test file changed. Authored on the `docs/post-ci-merge-continuity-update` branch; pushed to `origin` using the v15 deploy key; merged into `main` via PR #2. |
+| `b34c974cd123869bca825fefa5f885a90a879eea` | 2026-07-25 10:51 | Merge pull request #2 from abdalla12455-dev/docs/post-ci-merge-continuity-update | Pull Request #2 merge commit (parents: `e610635` and `ed27ce6`). GitHub merge-commit strategy. PR Main CI and main-push Main CI both passed (operator-verified 2026-07-25, both `static-and-build` and `postgresql17-validation` jobs green). PROJECT_CONTINUITY.md-only merge — the merge result tree is byte-identical to the documentation branch tip `ed27ce6`. Last verified `main` baseline when this housekeeping refresh was authored on 2026-07-25. |
 
-### Current State (as of post-CI-merge continuity refresh 2026-07-24)
+### Current State (as of post-PR #2 housekeeping refresh 2026-07-25)
 
-- **Local `main`:** `e610635956a4a406305aca2b0b6a12a84b7f32a6`
-- **`origin/main`:** `e610635956a4a406305aca2b0b6a12a84b7f32a6`
-- **Ahead/behind main:** `0 0` (in sync)
-- **`adr-015-validation` tip (local + remote):** `c05fc323c086603942d6c9ed264367cf450745e9`
+> **Authority note:** The SHAs below are the **last verified baseline when this section was authored** (2026-07-25). They are NOT a live claim about the current `main` tip. Any subsequent merge into `main` will advance `main` past `b34c974` and make the "Local `main`" and "`origin/main`" lines below stale. Before acting on any of this information, run `git fetch origin && git rev-parse main origin/main` and trust Git, not this section.
+
+- **Local `main` (last verified 2026-07-25):** `b34c974cd123869bca825fefa5f885a90a879eea`
+- **`origin/main` (last verified 2026-07-25):** `b34c974cd123869bca825fefa5f885a90a879eea`
+- **Ahead/behind main (last verified):** `0 0` (in sync)
+- **`adr-015-validation` tip (local + remote):** `c05fc323c086603942d6c9ed264367cf450745e9` — unchanged since 2026-07-24
 - **Validation ahead/behind origin:** `0 0` (in sync)
-- **`ci/main-standard-workflow-v1` tip (local + remote):** `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` — pushed, merged into `main` via Pull Request #1 (merge commit `e610635`)
+- **`ci/main-standard-workflow-v1` tip (local + remote):** `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` — pushed, merged into `main` via PR #1 (merge commit `e610635`). Branch retained on local + remote as historical reference; operator may delete at discretion.
+- **`docs/post-ci-merge-continuity-update` tip (local + remote):** `ed27ce60f9d5548f088c8657871ebb24cb38f587` — pushed using v15 deploy key, merged into `main` via PR #2 (merge commit `b34c974`). Branch retained on local + remote as historical reference; operator may delete at discretion.
+- **`docs/final-post-pr2-housekeeping` tip (local-only):** This is the branch the present refresh is being authored on (2026-07-25). Local-only until pushed.
 - **`integration/adr-015-validated` tip (local-only):** `c7929c0360874b596ae1a62a80511cc78598da3e` — local-only, never pushed
 - **Recovery tag `adr-015-validated-pre-main-v1` (local + remote):** target `c7929c0360874b596ae1a62a80511cc78598da3e` — intact
 - **Working tree (primary worktree `/home/z/my-project`):** clean
-- **Safety skill installed:** added at `e046e0dac9334ec8a5b919140ca9eefe53df64c0` (AGENTS.md, PROJECT_CONTINUITY.md, docs/AI_AGENT_SAFETY_SKILL.md) and remains intact at the current `main` tip `e610635`. Note: `e046e0d` is no longer the `main` tip — it is the commit where the safety skill was first introduced.
+- **Safety skill installed:** added at `e046e0dac9334ec8a5b919140ca9eefe53df64c0` (AGENTS.md, PROJECT_CONTINUITY.md, docs/AI_AGENT_SAFETY_SKILL.md) and remains intact at the current `main` baseline `b34c974`. Note: `e046e0d` is no longer the `main` tip — it is the commit where the safety skill was first introduced.
+
+### Post-PR #2 synchronization record (2026-07-25)
+
+Local `main` was fast-forwarded from `e610635956a4a406305aca2b0b6a12a84b7f32a6` to `b34c974cd123869bca825fefa5f885a90a879eea` using `git merge --ff-only origin/main` after PR #2 was merged and the post-merge `main`-push Main CI run was verified green by the operator. The fast-forward advanced local `main` by 2 commits (the documentation commit `ed27ce6` content and the PR #2 merge commit `b34c974` itself), updating only `PROJECT_CONTINUITY.md` (+115/-63). No other tracked file changed. No push occurred during the synchronization. No force, rebase, reset, restore, or clean operation was performed.
 
 ## Integration Branch: `integration/adr-015-validated`
 
@@ -399,17 +428,21 @@ The workflow's Docker image build, container execution, PG cluster bootstrap, an
 | PostgreSQL 17 suites | 10 | 229 | Job 2 (postgresql17-validation) |
 | **Total** | **31** | **700** | |
 
-### Cross-reference: existing branches, tags, and quarantine (as of post-CI-merge continuity refresh)
+### Cross-reference: existing branches, tags, and quarantine (as of post-PR #2 housekeeping refresh 2026-07-25)
 
-- **`main` (local + remote):** `e610635956a4a406305aca2b0b6a12a84b7f32a6` — updated by PR #1 merge
-- **`ci/main-standard-workflow-v1` (local + remote):** `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` — pushed, merged into `main` via PR #1
+> **Authority note:** The SHAs below are the last verified baseline when this section was authored (2026-07-25). Run `git fetch origin && git ls-remote --heads --tags origin` for the live state.
+
+- **`main` (local + remote):** `b34c974cd123869bca825fefa5f885a90a879eea` — updated by PR #2 merge (prior: `e610635` via PR #1)
+- **`ci/main-standard-workflow-v1` (local + remote):** `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` — pushed, merged into `main` via PR #1. Branch retained as historical reference; operator may delete.
+- **`docs/post-ci-merge-continuity-update` (local + remote):** `ed27ce60f9d5548f088c8657871ebb24cb38f587` — pushed using v15 deploy key, merged into `main` via PR #2. Branch retained as historical reference; operator may delete.
+- **`docs/final-post-pr2-housekeeping` (local-only):** The branch this housekeeping refresh is being authored on (2026-07-25). Local-only until pushed.
 - **`adr-015-validation` (local + remote):** `c05fc323c086603942d6c9ed264367cf450745e9` — unchanged
 - **`integration/adr-015-validated` (local-only):** `c7929c0360874b596ae1a62a80511cc78598da3e` — unchanged
 - **Recovery tag `adr-015-validated-pre-main-v1` (local + remote):** target `c7929c0360874b596ae1a62a80511cc78598da3e` — unchanged
 - **`quarantine/auto-commit-8d5e167` (local-only):** `8d5e167490824d1489a56efbda9574d882356176` — unchanged
 - **`quarantine/accidental-main-amend-271006f` (local-only):** `271006f59eac656cd03bd313a1d5aa5d30de8623` — unchanged
 
-### v13 deploy key
+### v13 deploy key (HISTORICAL)
 
 A v13 Ed25519 deploy key was generated for the push of `ci/main-standard-workflow-v1` to `origin`:
 - **Private key (HISTORICAL):** `/home/z/.ssh/ibn_hayan_main_ci_deploy_key_v13` (permissions 600, outside the repository) — **DELETED**. The private key was `shred -u` deleted locally immediately after the CI branch push was verified (per AGENTS.md invariant 5). No v13 private-key material remains on the local filesystem.
@@ -418,20 +451,31 @@ A v13 Ed25519 deploy key was generated for the push of `ci/main-standard-workflo
 - **Status:** Local private and public key files are gone. The v13 public key entry was registered as a repository deploy key on github.com (with write access) for the CI branch push. The v13 GitHub deploy-key entry should now be removed by the operator because the Pull Request Main CI run and the `main`-push Main CI run are both green (operator-verified 2026-07-24). GitHub-side removal has NOT been independently verified from this environment (no `gh` CLI, no API token) — the operator must perform and confirm the removal.
 - **Lifecycle:** Per AGENTS.md invariant 5, the local private key was deleted immediately after the push was verified. The github.com-side public key entry is the final cleanup step, now safe to perform since both CI runs are green.
 
-### Older deploy keys (v9, v10, v11, v12) — github.com-side audit pending
+### v15 deploy key (HISTORICAL)
 
-Per AGENTS.md invariant 5, each of these temporary GitHub deploy keys was used for a single fast-forward push, and the local private-key material was `shred -u` deleted after each push was verified. However, the corresponding public-key entries on github.com may still be registered. The operator should audit the repository's deploy-key list on github.com and remove any v9, v10, v11, v12, and v13 entries that are still present. GitHub-side removal has NOT been independently verified from this environment. Until these entries are removed, defence-in-depth argues for prompt operator action (the private keys are gone, so a leaked public-key fingerprint alone is insufficient to authenticate, but stale deploy-key entries are an unnecessary attack surface).
+A v15 Ed25519 deploy key was generated for the push of `docs/post-ci-merge-continuity-update` to `origin`:
+- **Private key (HISTORICAL):** `/home/z/.ssh/ibn_hayan_continuity_deploy_key_v15` (permissions 600, outside the repository) — **DELETED**. The private key was `shred -u` deleted locally immediately after the docs branch push was verified (per AGENTS.md invariant 5). No v15 private-key material remains on the local filesystem.
+- **Public key (HISTORICAL):** `/home/z/.ssh/ibn_hayan_continuity_deploy_key_v15.pub` (permissions 644) — **DELETED**. Removed with `rm -f` after the push was verified.
+- **Comment:** `ibn-hayan-continuity-v15`
+- **Public-key fingerprint (for operator audit only — fingerprint is public, never the private key):** `SHA256:U5D0Yk8NOOEGe8EJzSb3VhDSO50blY4LT+2WZG1lODI`
+- **Status:** Local private and public key files are gone. The v15 public key entry was registered as a repository deploy key on github.com (with write access) for the docs branch push. The v15 GitHub deploy-key entry should now be removed by the operator because both the PR #2 Main CI run and the post-merge `main`-push Main CI run are green (operator-verified 2026-07-25). GitHub-side removal has NOT been independently verified from this environment (no `gh` CLI, no API token) — the operator must perform and confirm the removal.
+- **Lifecycle:** Per AGENTS.md invariant 5, the local private key was deleted immediately after the push was verified. The github.com-side public key entry is the final cleanup step, now safe to perform since both PR #2 CI runs are green.
+- **Note on v14:** A v14 key was proposed in an earlier task but was never generated locally (the task was stopped before key generation because the v14 key files were absent when the push task began). The v14 numbering was skipped in practice; the v15 key was generated fresh for the docs branch push. No v14 private or public key material ever existed on the local filesystem. The GitHub-side deploy-key list should be audited for any spurious v14 entry (none expected, but defence-in-depth).
 
-### Immediate next step (post-CI-merge)
+### Older deploy keys (v9, v10, v11, v12, v13, v15) — github.com-side audit pending
 
-The CI branch preparation, push, PR #1 merge, and both Main CI runs are all complete. The remaining operator actions are:
+Per AGENTS.md invariant 5, each of these temporary GitHub deploy keys was used for a single fast-forward push, and the local private-key material was `shred -u` deleted after each push was verified. However, the corresponding public-key entries on github.com may still be registered. The operator should audit the repository's deploy-key list on github.com and remove any v9, v10, v11, v12, v13, and v15 entries that are still present. GitHub-side removal has NOT been independently verified from this environment — this environment has no `gh` CLI or API token to verify or perform removal. The operator must perform and confirm removal. Until these entries are removed, defence-in-depth argues for prompt operator action (the private keys are gone, so a leaked public-key fingerprint alone is insufficient to authenticate, but stale deploy-key entries are an unnecessary attack surface).
 
-1. **Remove the v13 GitHub deploy-key entry from github.com.** Both Main CI runs (PR-triggered and `main`-push-triggered) are green, so the v13 entry is no longer needed. GitHub-side removal must be performed and confirmed by the operator (this environment has no `gh` CLI or API token to perform it directly).
-2. **Audit and remove any remaining v9, v10, v11, v12 GitHub deploy-key entries from github.com.** Each was registered for a single push and is no longer needed after the corresponding CI run is green.
-3. **Verify the authoritative GitHub Actions test totals.** Inspect the `main-ci` workflow run logs on `e610635` directly and confirm the exact test counts. If the GitHub Actions logs report a different PostgreSQL 17 test total than the 229 recorded in this document, update the "PostgreSQL 17 suite inventory" and "Test discovery totals" tables in a follow-up documentation commit.
-4. **Decide quarantine branch disposition.** `quarantine/auto-commit-8d5e167` (94 files) and `quarantine/accidental-main-amend-271006f` (1 commit) remain local-only and pending operator decision (cherry-pick, preserve, or delete).
-5. **Update `worklog.md`.** Bring `worklog.md` in line with the current repository state (ADR-015 integration, CI branch push, PR #1 merge, Main CI green, local main synchronization, this continuity refresh). `worklog.md` was intentionally not modified by this task.
-6. **Decide whether the merged CI branch should be retained or deleted.** `ci/main-standard-workflow-v1` (local + remote, at `0acb9da`) is now merged into `main` via PR #1. The operator may keep it as a historical reference or delete it (both local and remote) now that it is merged. Operator preference.
+### Immediate next step (post-PR #2 housekeeping, 2026-07-25)
+
+The CI branch preparation, push, PR #1 merge, PR #2 docs-branch push, PR #2 merge, both pairs of Main CI runs, both local main synchronizations, and this final housekeeping refresh are all complete. The remaining operator actions are:
+
+1. **Audit and remove stale GitHub deploy-key entries from github.com.** All of v9, v10, v11, v12, v13, and v15 were registered for single pushes and are no longer needed (each corresponding CI run is green). The v15 entry in particular is now safe to remove since both PR #2 CI runs are green. GitHub-side removal must be performed and confirmed by the operator (this environment has no `gh` CLI or API token to perform it directly). While there, audit for any spurious v14 entry (none expected — v14 was never generated locally — but verify).
+2. **Verify the authoritative GitHub Actions test totals.** Inspect the `main-ci` workflow run logs on `b34c974` directly and confirm the exact PostgreSQL 17 test count. If the GitHub Actions logs report a different total than the 229 recorded in this document (a previous session referenced 232), update the "PostgreSQL 17 suite inventory" and "Test discovery totals" tables in a follow-up documentation commit. This document does NOT invent the authoritative count — see the "Test-count documentation discrepancy" note above.
+3. **Decide quarantine branch disposition.** `quarantine/auto-commit-8d5e167` (94 files) and `quarantine/accidental-main-amend-271006f` (1 commit) remain local-only and pending operator decision (cherry-pick, preserve, or delete). Both are unchanged from their original quarantine state.
+4. **Decide whether the merged CI and documentation branches should be retained or deleted.** `ci/main-standard-workflow-v1` (local + remote, at `0acb9da`, merged via PR #1) and `docs/post-ci-merge-continuity-update` (local + remote, at `ed27ce6`, merged via PR #2) are both now merged into `main`. The operator may keep them as historical references or delete them (both local and remote). Operator preference.
+5. **Decide whether to push `docs/final-post-pr2-housekeeping` and open PR #3.** This branch (the present housekeeping refresh) is local-only. If the operator wants the refreshed PROJECT_CONTINUITY.md and worklog.md on `main`, a fresh v16 deploy key should be generated, the branch pushed, PR #3 opened, the PR #3 Main CI run verified green, and PR #3 merged. (Note: per the durable authority rule above, this PR #3 will itself advance `main` past `b34c974`, which is expected and acceptable — the document's "last verified baseline" wording will remain accurate because it never claimed `b34c974` was the live tip.)
+6. **Update `worklog.md` going forward.** `worklog.md` is being updated in this same housekeeping commit to record the full ADR-015 → PR #2 sequence. Future operational tasks should append new entries rather than rewriting historical ones.
 
 ### Recovery information
 
@@ -462,7 +506,8 @@ If the repository enters an unknown or corrupted state, use these checkpoints.
 | ADR-015 integration merge commit | `5825ba4417d2708af126325dede65df8cfa1b77f` | `git checkout 5825ba4` (inspect) or `git checkout integration/adr-015-validated` (branch tip at `c7929c0`) |
 | ADR-015 continuity commit | `c7929c0360874b596ae1a62a80511cc78598da3e` | `git checkout c7929c0` (inspect) — `main` tip after ADR-015 integration, before CI branch merge |
 | Integration recovery tag | `adr-015-validated-pre-main-v1` | `git checkout adr-015-validated-pre-main-v1` (annotated tag, target `c7929c0`) |
-| Post-CI-merge main | `e610635956a4a406305aca2b0b6a12a84b7f32a6` | `git reset --hard e610635` (with explicit operator authorisation) — **current verified `main` tip after PR #1 and green Main CI** |
+| Post-CI-merge main (PR #1) | `e610635956a4a406305aca2b0b6a12a84b7f32a6` | `git reset --hard e610635` (with explicit operator authorisation) — `main` tip after PR #1 and green Main CI (no longer the current tip after PR #2) |
+| Post-PR #2-merge main | `b34c974cd123869bca825fefa5f885a90a879eea` | `git reset --hard b34c974` (with explicit operator authorisation) — last verified `main` baseline when this housekeeping refresh was authored on 2026-07-25. **Not a live claim** — run `git rev-parse origin/main` for the current tip. |
 | Quarantine (accidental commit) | `8d5e167490824d1489a56efbda9574d882356176` | `git checkout quarantine/auto-commit-8d5e167` |
 | Quarantine (accidental amend) | `271006f59eac656cd03bd313a1d5aa5d30de8623` | `git checkout quarantine/accidental-main-amend-271006f` |
 | Safety skill tag | `project-safety-skill-v1` | `git checkout project-safety-skill-v1` |
