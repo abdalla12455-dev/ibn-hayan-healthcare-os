@@ -91,6 +91,44 @@ setupRolePreviewDatabaseTests();
 
 const ORIGIN = 'http://localhost:3000';
 
+/**
+ * Canonical API routes for the Role Preview integration tests.
+ *
+ * The production API applies a global prefix `api/v1` (see
+ * `apps/api/src/main.ts`). The integration-test Nest application
+ * applies the same prefix via `app.setGlobalPrefix('api/v1')` in
+ * the `beforeAll` hook below. Every request in this spec file MUST
+ * therefore target the prefixed production paths — never the
+ * unprefixed controller paths (`/dev/role-preview/...`,
+ * `/auth/...`).
+ *
+ * Centralising the routes here (rather than scattering hardcoded
+ * `/api/v1` literals across dozens of `supertest` calls) keeps the
+ * spec maintainable and prevents a future copy/paste from silently
+ * dropping the prefix again. If the production route layout ever
+ * changes, only this block needs to be updated.
+ *
+ * The constants match the routes exposed by:
+ *   - {@link RolePreviewController} (`@Controller('dev/role-preview')`)
+ *   - {@link AuthController} (`@Controller('auth')`)
+ * combined with the global `api/v1` prefix.
+ */
+const API_PREFIX = '/api/v1';
+
+const rolePreviewRoutes = {
+  availability: `${API_PREFIX}/dev/role-preview`,
+  bootstrap: `${API_PREFIX}/dev/role-preview/bootstrap`,
+  current: `${API_PREFIX}/dev/role-preview/current`,
+  select: `${API_PREFIX}/dev/role-preview/select`,
+  end: `${API_PREFIX}/dev/role-preview/end`,
+} as const;
+
+const authRoutes = {
+  login: `${API_PREFIX}/auth/login`,
+  session: `${API_PREFIX}/auth/session`,
+  csrf: `${API_PREFIX}/auth/csrf`,
+} as const;
+
 let app: INestApplication;
 let server: Server;
 let prisma: PrismaService;
@@ -220,7 +258,7 @@ async function bootstrapAndSelect(roleCode: string): Promise<{
   challengeId: string;
 }> {
   const bootRes = await request(server)
-    .get('/dev/role-preview/bootstrap')
+    .get(rolePreviewRoutes.bootstrap)
     .set('Origin', ORIGIN);
   expect(bootRes.status).toBe(200);
   const bootBody = bootRes.body as BootstrapChallengeResponse;
@@ -231,7 +269,7 @@ async function bootstrapAndSelect(roleCode: string): Promise<{
   );
 
   const selectRes = await request(server)
-    .post('/dev/role-preview/select')
+    .post(rolePreviewRoutes.select)
     .set('Origin', ORIGIN)
     .set('Cookie', `ibn_hayan_role_preview_bootstrap=${bootstrapCookie}`)
     .send({ roleCode, challengeId });
@@ -244,7 +282,7 @@ async function bootstrapChallenge(): Promise<{
   bootstrapCookie: string;
 }> {
   const bootRes = await request(server)
-    .get('/dev/role-preview/bootstrap')
+    .get(rolePreviewRoutes.bootstrap)
     .set('Origin', ORIGIN);
   expect(bootRes.status).toBe(200);
   const bootBody = bootRes.body as BootstrapChallengeResponse;
@@ -433,7 +471,7 @@ describe('Preview seed results', () => {
 describe('Logged-out bootstrap flow', () => {
   it('12. Logged-out bootstrap succeeds (returns challengeId and sets cookie)', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     expect(res.status).toBe(200);
     const body = res.body as BootstrapChallengeResponse;
@@ -450,7 +488,7 @@ describe('Logged-out bootstrap flow', () => {
 
   it('13. Expired/non-existent challenge fails (403)', async () => {
     const res = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .send({
         roleCode: 'R09_ADMINISTRATOR',
@@ -464,7 +502,7 @@ describe('Logged-out bootstrap flow', () => {
 
     // First select succeeds.
     const firstRes = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_role_preview_bootstrap=${bootstrapCookie}`)
       .send({ roleCode: 'R09_ADMINISTRATOR', challengeId });
@@ -473,7 +511,7 @@ describe('Logged-out bootstrap flow', () => {
     // Second select with the same challengeId + cookie must fail
     // with 403 (replay).
     const replayRes = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_role_preview_bootstrap=${bootstrapCookie}`)
       .send({ roleCode: 'R09_ADMINISTRATOR', challengeId });
@@ -484,7 +522,7 @@ describe('Logged-out bootstrap flow', () => {
     const { challengeId, bootstrapCookie } = await bootstrapChallenge();
 
     const res = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_role_preview_bootstrap=${bootstrapCookie}`)
       .send({ roleCode: 'R99_UNKNOWN', challengeId });
@@ -493,7 +531,7 @@ describe('Logged-out bootstrap flow', () => {
 
   it('16. Caller-supplied IDs fail contract validation (400)', async () => {
     const res = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .send({
         roleCode: 'R09_ADMINISTRATOR',
@@ -592,14 +630,14 @@ describe('Logged-out bootstrap flow', () => {
     );
 
     const csrfRes = await request(server)
-      .get('/auth/csrf')
+      .get(authRoutes.csrf)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_session=${firstSessionCookie}`);
     expect(csrfRes.status).toBe(200);
     const csrfToken = (csrfRes.body as { token: string }).token;
 
     const switchRes = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_session=${firstSessionCookie}`)
       .set('X-CSRF-Token', csrfToken)
@@ -620,13 +658,13 @@ describe('Logged-out bootstrap flow', () => {
     );
 
     const csrfRes = await request(server)
-      .get('/auth/csrf')
+      .get(authRoutes.csrf)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_session=${firstSessionCookie}`);
     const csrfToken = (csrfRes.body as { token: string }).token;
 
     const endRes = await request(server)
-      .post('/dev/role-preview/end')
+      .post(rolePreviewRoutes.end)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_session=${firstSessionCookie}`)
       .set('X-CSRF-Token', csrfToken);
@@ -640,7 +678,7 @@ describe('Logged-out bootstrap flow', () => {
 
   it('25. HttpOnly behaviour is correct (bootstrap cookie)', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     const cookieStr = getSetCookieString(res);
     expect(cookieStr.toLowerCase()).toContain('httponly');
@@ -648,7 +686,7 @@ describe('Logged-out bootstrap flow', () => {
 
   it('26. SameSite behaviour is correct (bootstrap cookie is Strict)', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     const cookieStr = getSetCookieString(res);
     expect(cookieStr.toLowerCase()).toContain('samesite=strict');
@@ -662,7 +700,7 @@ describe('Logged-out bootstrap flow', () => {
 describe('Security', () => {
   it('27. Secure cookie behaviour follows environment rules (not secure in dev)', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     const cookieStr = getSetCookieString(res);
     // In development (NODE_ENV !== production), Secure is NOT set.
@@ -671,14 +709,14 @@ describe('Security', () => {
 
   it('28. Valid Origin succeeds', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     expect(res.status).toBe(200);
   });
 
   it('28a. Invalid Origin fails (403)', async () => {
     const res = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', 'https://evil.example.com');
     expect(res.status).toBe(403);
   });
@@ -692,7 +730,7 @@ describe('Security', () => {
 
     // Attempt to switch WITHOUT a CSRF token.
     const res = await request(server)
-      .post('/dev/role-preview/select')
+      .post(rolePreviewRoutes.select)
       .set('Origin', ORIGIN)
       .set('Cookie', `ibn_hayan_session=${firstSessionCookie}`)
       .send({ roleCode: 'R01_PHYSICIAN' });
@@ -729,7 +767,7 @@ describe('Security', () => {
     // NEVER returned in the JSON body. The challenge value (the
     // raw nonce) must not appear in any response body.
     const bootRes = await request(server)
-      .get('/dev/role-preview/bootstrap')
+      .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     const bodyStr = JSON.stringify(bootRes.body);
     expect(bodyStr).not.toContain('nonce');
@@ -968,19 +1006,19 @@ describe('Audit database integrity (Phase 6 items 29–34)', () => {
 describe('Regression', () => {
   it('35. Normal login remains unchanged (login route still exists)', async () => {
     const res = await request(server)
-      .post('/auth/login')
+      .post(authRoutes.login)
       .set('Origin', ORIGIN)
       .send({ email: 'nobody@example.com', password: 'wrong-password-12' });
     expect(res.status).toBe(401);
   });
 
   it('36. Normal dashboard remains unchanged (session route requires auth)', async () => {
-    const res = await request(server).get('/auth/session');
+    const res = await request(server).get(authRoutes.session);
     expect(res.status).toBe(401);
   });
 
   it('37. Normal Clinic Admin protection remains unchanged (session route requires auth)', async () => {
-    const res = await request(server).get('/auth/session');
+    const res = await request(server).get(authRoutes.session);
     expect(res.status).toBe(401);
   });
 
@@ -995,7 +1033,7 @@ describe('Regression', () => {
 
     try {
       const res = await request(server)
-        .get('/dev/role-preview/bootstrap')
+        .get(rolePreviewRoutes.bootstrap)
         .set('Origin', ORIGIN);
       expect(res.status).toBe(403);
     } finally {

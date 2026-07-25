@@ -2013,3 +2013,39 @@ next-vertical-slice ordering.
   only):** push the branch through a controlled branch-and-PR
   workflow; the `postgresql17-validation` job runs
   `pnpm test:role-preview` alongside the existing seven suites.
+
+### Role Preview CI route-prefix fix (working-tree edit, 2026-07-26)
+
+**Branch:** `feat/demo-role-preview-v1` (present on `origin`; local and remote SHAs identical at `896a4aafd90ac0bf515d89bc8e09feb505d74ebf` before this edit).
+
+**Trigger:** GitHub Actions `postgresql17-validation` job failed on the pushed branch with `32 failed | 18 passed` in `apps/api/test/role-preview/role-preview.role-preview-spec.ts`. Representative failure: test 37a expected `403`, received `404` for `request(server).get('/dev/role-preview/bootstrap')`.
+
+**Root cause:** The integration-test Nest application correctly applied `app.setGlobalPrefix('api/v1')` (mirroring production `apps/api/src/main.ts` line 36), but every supertest request in the spec file targeted the UNPREFIXED controller path (`/dev/role-preview/...`, `/auth/...`). With the global prefix applied, the unprefixed paths did not match any registered route, so Nest's router returned a framework-level 404 for every request. All 32 failures were framework 404s — not Role-Preview safe-unavailable 404s, not application-defined 403s, not auth 401s. The expected status codes and the production error helpers were already correct; only the request URLs were wrong.
+
+**Fix (single-file working-tree edit, NOT yet committed):** Added a canonical route-constant block at the top of `apps/api/test/role-preview/role-preview.role-preview-spec.ts`:
+
+```ts
+const API_PREFIX = '/api/v1';
+const rolePreviewRoutes = {
+  availability: `${API_PREFIX}/dev/role-preview`,
+  bootstrap:    `${API_PREFIX}/dev/role-preview/bootstrap`,
+  current:      `${API_PREFIX}/dev/role-preview/current`,
+  select:       `${API_PREFIX}/dev/role-preview/select`,
+  end:          `${API_PREFIX}/dev/role-preview/end`,
+} as const;
+const authRoutes = {
+  login:   `${API_PREFIX}/auth/login`,
+  session: `${API_PREFIX}/auth/session`,
+  csrf:    `${API_PREFIX}/auth/csrf`,
+} as const;
+```
+
+Replaced every `request(server).get/post(...)` URL in the spec file (23 call sites across helpers + test bodies) with the corresponding constant. The only `/api/v1` literal remaining in the file is the `API_PREFIX` constant itself. No production code (main.ts, controllers, error helpers, services) was modified. No security contract was weakened. No expected status code was changed.
+
+**Validation (local):** `pnpm run typecheck` PASS (all 7 packages + 2 apps). `pnpm run lint` PASS (all packages; 0 errors, 0 warnings). `pnpm run test` PASS (667 unit tests; 0 regressions). `pnpm run build` PASS (api via SWC, web via Next.js; `/role-preview` registered as a static route). `git diff --check` PASS.
+
+**Diff scope:** 1 file modified (`apps/api/test/role-preview/role-preview.role-preview-spec.ts`); +62 / -24 lines; 0 files created; 0 files deleted; 0 schema/migration/dependency/lockfile changes; 0 production code changes.
+
+**Posture:** Working-tree edit only. No commit, no push, no PR merge, no deploy key, no production deployment, no database access, no Preview launch. The operator will authorise the commit + push of this single-file fix in the next task; the GitHub Actions `postgresql17-validation` job will then re-run the corrected 38-test Role Preview integration suite.
+
+**Recovery:** The branch tip before this edit is `896a4aafd90ac0bf515d89bc8e09feb505d74ebf` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore apps/api/test/role-preview/role-preview.role-preview-spec.ts` from the demo-preview worktree (the file is unstaged).
