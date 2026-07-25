@@ -112,6 +112,32 @@ describe('authorization role catalogue', () => {
     expect(entry?.displayNameAr).toBe('مسؤول النظام');
   });
 
+  it('the catalogue includes R09 Administrator with the canonical Clinic Admin Arabic label', () => {
+    // Per DESIGN_BIBLE.md §17.1, the canonical Arabic presentation label
+    // for R09_ADMINISTRATOR (used throughout the Clinic Admin shell) is
+    // `مدير المنشأة`. The domain catalogue's `displayNameAr` is the
+    // canonical display label exposed via the API contract and consumed
+    // by the shell; it must match §17.1 exactly. The bare word `مدير`
+    // is rejected because it is ambiguous (it could refer to any
+    // managerial role) and because the Clinic Admin shell v1 presents
+    // the role as `مدير المنشأة` everywhere it is user-facing.
+    const entry = findRoleCatalogueEntry('R09_ADMINISTRATOR');
+    expect(entry).not.toBeNull();
+    expect(entry?.shortCode).toBe('R09');
+    expect(entry?.category).toBe('operational');
+    expect(entry?.displayNameEn).toBe('Administrator');
+    expect(entry?.displayNameAr).toBe('مدير المنشأة');
+  });
+
+  it('getRoleDisplayName returns the canonical Arabic label for R09 by default', () => {
+    // Arabic is the default locale (Arabic-first posture).
+    expect(getRoleDisplayName('R09_ADMINISTRATOR')).toBe('مدير المنشأة');
+  });
+
+  it('getRoleDisplayName returns the English label for R09 when requested', () => {
+    expect(getRoleDisplayName('R09_ADMINISTRATOR', 'en')).toBe('Administrator');
+  });
+
   it('the catalogue includes R14 Integration Account', () => {
     const entry = findRoleCatalogueEntry('R14_INTEGRATION_ACCOUNT');
     expect(entry).not.toBeNull();
