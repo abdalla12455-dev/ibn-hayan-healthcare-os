@@ -48,7 +48,14 @@ import {
   rolePreviewRoleUnknown,
   rolePreviewSessionRequired,
   rolePreviewNotActive,
+  rolePreviewBootstrapExpired,
+  rolePreviewBootstrapReplay,
+  rolePreviewBootstrapInvalid,
 } from './role-preview.errors.js';
+import {
+  BootstrapChallengeStore,
+  BOOTSTRAP_MAX_AGE_MS,
+} from './bootstrap-store.js';
 
 /**
  * Demo Role Preview Mode application service.
@@ -144,6 +151,7 @@ export class RolePreviewService {
     private readonly sessionTokens: SessionTokenService,
     private readonly csrfService: CsrfService,
     private readonly auditHelper: AuditHelperService,
+    private readonly bootstrapStore: BootstrapChallengeStore,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -411,6 +419,290 @@ export class RolePreviewService {
 
     this.logger.debug(
       `Preview session created: id=${newSession.id} role=${previewIdentity.catalogue.code}`,
+    );
+
+    const selectedRole = this.toRoleCard(previewIdentity.catalogue);
+    return {
+      response: {
+        selectedRole,
+        previewTenant: PREVIEW_TENANT_DISPLAY_NAME,
+        previewOrganisation: PREVIEW_ORGANISATION_DISPLAY_NAME,
+        previewFacility: PREVIEW_FACILITY_DISPLAY_NAME,
+        interfacePath: selectedRole.interfacePath,
+      },
+      rawToken,
+      expiresAt,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Logged-out bootstrap flow
+  // -------------------------------------------------------------------------
+
+  /**
+   * Issue a one-time bootstrap challenge for a logged-out operator.
+   *
+   * The challenge is a cryptographically random nonce stored in a
+   * separate HttpOnly bootstrap cookie. The server-side state (in
+   * `BootstrapChallengeStore`) retains only the SHA-256 hashes of
+   * the nonce and the opaque `challengeId`. The raw nonce is NEVER
+   * stored server-side; it lives only in the cookie.
+   *
+   * Returns:
+   * - `challengeId`: the opaque identifier the client must echo
+   *   back in the `POST /select` body. NOT secret on its own.
+   * - `nonce`: the raw nonce the controller sets in the HttpOnly
+   *   bootstrap cookie. NEVER returned in the JSON body.
+   * - `expiresInMs`: the challenge's remaining lifetime in
+   *   milliseconds (≤ 300 000).
+   *
+   * The bootstrap state grants NO role, NO tenant, NO organisation,
+   * NO facility, NO membership, NO permission, and NO application
+   * session. It is ONLY a proof-of-possession nonce for the
+   * subsequent `POST /select` request.
+   *
+   * Throws:
+   * - `rolePreviewDisabled()` when the feature is disabled.
+   */
+  issueBootstrap(): {
+    readonly challengeId: string;
+    readonly nonce: string;
+    readonly expiresInMs: number;
+  } {
+    if (!this.featureConfig.isRolePreviewEnabled()) {
+      throw rolePreviewDisabled();
+    }
+    const issued = this.bootstrapStore.issue(BOOTSTRAP_MAX_AGE_MS);
+    const expiresInMs = Math.max(0, issued.expiresAt - Date.now());
+    return {
+      challengeId: issued.challengeId,
+      nonce: issued.nonce,
+      expiresInMs,
+    };
+  }
+
+  /**
+   * Select a canonical role through the logged-out bootstrap flow.
+   *
+   * This method is the logged-out counterpart of {@link selectRole}.
+   * It is called by the controller when the `POST /select` request
+   * carries a `challengeId` in the body AND the bootstrap cookie is
+   * present. The method:
+   *
+   * 1. Verifies the feature gate (defence-in-depth).
+   * 2. Verifies the bootstrap challenge by consuming it from the
+   *    store. The consume is atomic and one-time: a second call
+   *    with the same `challengeId` returns `'replay'`. The raw
+   *    nonce is read from the cookie (passed in by the controller);
+   *    the store verifies it against the stored hash using
+   *    `timingSafeEqual`.
+   * 3. Resolves the preview identity from the role code.
+   * 4. Resolves the preview workspace (tenant, organisation,
+   *    facility) by slug/code lookup.
+   * 5. Verifies the preview identity's user exists and has an
+   *    active membership in the preview tenant.
+   * 6. Atomically creates a new session for the preview identity's
+   *    user, sets the active tenant membership, organisation, and
+   *    facility on the new session, revokes any previous session
+   *    (if the operator somehow already had one), and emits a
+   *    `role_preview.session.bootstrapped` audit event in the same
+   *    Prisma transaction.
+   * 7. Returns the safe response (selected role, preview workspace
+   *    display names, interface path) plus the raw session token
+   *    for the controller to set in the HttpOnly application-
+   *    session cookie. The raw token is NEVER returned in the JSON
+   *    body.
+   *
+   * The method does NOT require an existing application session. It
+   * does NOT consult the CSRF service. The proof-of-possession
+   * (bootstrap cookie) is the CSRF defense for the initial logged-
+   * out request; the SameSite=Strict attribute provides additional
+   * defense.
+   *
+   * Throws:
+   * - `rolePreviewDisabled()` when the feature is disabled.
+   * - `rolePreviewRoleUnknown()` when the role code is not
+   *   canonical.
+   * - `rolePreviewBootstrapExpired()` when the challenge is
+   *   expired or not found.
+   * - `rolePreviewBootstrapReplay()` when the challenge was
+   *   already consumed.
+   * - `rolePreviewBootstrapInvalid()` when the nonce does not
+   *   match.
+   */
+  async selectRoleWithBootstrap(input: {
+    readonly roleCode: string;
+    readonly challengeId: string;
+    readonly nonce: string;
+    readonly previousCookieValue: string | undefined;
+    readonly auditContext: AuditRequestContext;
+  }): Promise<{
+    readonly response: SelectPreviewRoleResponse;
+    readonly rawToken: string;
+    readonly expiresAt: Date;
+  }> {
+    if (!this.featureConfig.isRolePreviewEnabled()) {
+      throw rolePreviewDisabled();
+    }
+
+    // Verify and atomically consume the bootstrap challenge. The
+    // consume is one-time; a second call with the same challengeId
+    // returns 'replay'. The nonce is read from the cookie; the
+    // store verifies it against the stored hash using
+    // timingSafeEqual.
+    const outcome = this.bootstrapStore.consume(input.challengeId, input.nonce);
+    if (outcome === 'not_found' || outcome === 'expired') {
+      throw rolePreviewBootstrapExpired();
+    }
+    if (outcome === 'replay') {
+      throw rolePreviewBootstrapReplay();
+    }
+    if (outcome === 'invalid') {
+      throw rolePreviewBootstrapInvalid();
+    }
+    // outcome === 'ok' — fall through.
+
+    const previewIdentity = findPreviewIdentity(input.roleCode);
+    if (previewIdentity === null) {
+      throw rolePreviewRoleUnknown();
+    }
+
+    // Resolve the preview workspace. The lookups by slug/code are
+    // deterministic; the preview seed creates these rows.
+    const previewTenant = await this.tenants.findBySlug(PREVIEW_TENANT_SLUG);
+    if (previewTenant === null) {
+      this.logger.warn(
+        'Preview tenant not found; the preview seed must be run before bootstrap.',
+      );
+      throw rolePreviewDisabled();
+    }
+    const previewOrganisations = await this.organisations.listForTenant(
+      previewTenant.id,
+    );
+    const previewOrganisation = previewOrganisations.find(
+      (o) => o.code === PREVIEW_ORGANISATION_CODE,
+    );
+    if (previewOrganisation === undefined) {
+      this.logger.warn('Preview organisation not found.');
+      throw rolePreviewDisabled();
+    }
+    const previewFacilities = await this.facilities.listForOrganisation(
+      previewTenant.id,
+      previewOrganisation.id,
+    );
+    const previewFacility = previewFacilities.find(
+      (f) => f.code === PREVIEW_FACILITY_CODE,
+    );
+    if (previewFacility === undefined) {
+      this.logger.warn('Preview facility not found.');
+      throw rolePreviewDisabled();
+    }
+
+    // Resolve the preview identity's user by email.
+    const normalisedEmail = previewIdentity.email.trim().toLowerCase();
+    const previewUser = await this.users.findByNormalisedEmail(normalisedEmail);
+    if (previewUser === null) {
+      this.logger.warn(
+        `Preview identity not found for role ${previewIdentity.catalogue.code}; the preview seed must be run.`,
+      );
+      throw rolePreviewDisabled();
+    }
+
+    // Resolve the preview identity's membership in the preview
+    // tenant.
+    const userMemberships = await this.memberships.listForUser(previewUser.id);
+    const previewMembership = userMemberships.find(
+      (m) => m.tenantId === previewTenant.id && m.status === 'active',
+    );
+    if (previewMembership === undefined) {
+      this.logger.warn(
+        `Preview membership not found for role ${previewIdentity.catalogue.code}.`,
+      );
+      throw rolePreviewDisabled();
+    }
+
+    // Resolve the previous session (if any) so we can revoke it
+    // atomically. In the logged-out bootstrap flow, there is
+    // usually no previous session; but if the operator somehow
+    // already had one (e.g. they visited /login first), we revoke
+    // it to avoid leaving two concurrent sessions.
+    let previousSessionId: string | null = null;
+    if (
+      input.previousCookieValue !== undefined &&
+      input.previousCookieValue.length > 0
+    ) {
+      const previousTokenHash = this.sessionTokens.hash(
+        input.previousCookieValue,
+      );
+      const now = new Date();
+      const previousSession = await this.sessions.findActiveByTokenHash(
+        previousTokenHash,
+        now,
+      );
+      if (previousSession !== null) {
+        previousSessionId = previousSession.id;
+      }
+    }
+
+    // Create the new session, set its context, revoke the previous
+    // session, and emit the bootstrapped audit event atomically.
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS);
+    const rawToken = this.sessionTokens.generate();
+    const tokenHash = this.sessionTokens.hash(rawToken);
+
+    const newSession = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.authSession.create({
+        data: {
+          userId: previewUser.id,
+          tokenHash,
+          expiresAt,
+          lastSeenAt: now,
+          activeTenantMembershipId: previewMembership.id,
+          activeOrganisationId: previewOrganisation.id,
+          activeFacilityId: previewFacility.id,
+        },
+      });
+
+      if (previousSessionId !== null) {
+        await tx.authSession.updateMany({
+          where: { id: previousSessionId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+      }
+
+      await this.auditHelper.emitOrFail(
+        {
+          action: 'role_preview.session.bootstrapped',
+          outcome: 'success',
+          source: 'api',
+          tenantId: previewTenant.id,
+          actorType: 'USER',
+          actorId: previewUser.id,
+          sessionId: row.id,
+          requestId: input.auditContext.requestId,
+          correlationId: input.auditContext.correlationId,
+          ipAddress: input.auditContext.ipAddress,
+          userAgent: input.auditContext.userAgent,
+          scope: 'role_preview',
+          metadata: {
+            endpoint: 'role_preview_bootstrap_select',
+            roleCode: previewIdentity.catalogue.code,
+          },
+        },
+        { transaction: tx },
+      );
+
+      return row;
+    });
+
+    // Invalidate the previous session's CSRF token (best-effort).
+    if (previousSessionId !== null) {
+      this.csrfService.invalidate(previousSessionId as never);
+    }
+
+    this.logger.debug(
+      `Preview session bootstrapped: id=${newSession.id} role=${previewIdentity.catalogue.code}`,
     );
 
     const selectedRole = this.toRoleCard(previewIdentity.catalogue);

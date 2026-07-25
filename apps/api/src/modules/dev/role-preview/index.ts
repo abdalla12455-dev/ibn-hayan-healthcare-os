@@ -2,9 +2,10 @@
  * Public Demo Role Preview Mode module entry point.
  *
  * Re-exports the module, controller, service, feature-config gate,
- * preview identity catalogue, and error helpers so that consumers
- * import from `./role-preview` without reaching into internal file
- * paths.
+ * preview identity catalogue, error helpers, bootstrap challenge
+ * store, bootstrap cookie helpers, and database-identity gate so
+ * that consumers import from `./role-preview` without reaching
+ * into internal file paths.
  */
 
 export { RolePreviewModule } from './role-preview.module.js';
@@ -41,4 +42,22 @@ export {
   rolePreviewCsrfInvalid,
   rolePreviewOriginDisallowed,
   rolePreviewNotActive,
+  rolePreviewBootstrapExpired,
+  rolePreviewBootstrapReplay,
+  rolePreviewBootstrapInvalid,
+  rolePreviewDatabaseIdentityInvalid,
 } from './role-preview.errors.js';
+export {
+  BootstrapChallengeStore,
+  BOOTSTRAP_MAX_AGE_MS,
+} from './bootstrap-store.js';
+export {
+  BOOTSTRAP_COOKIE_NAME,
+  buildBootstrapCookieOptions,
+  buildBootstrapCookieClearOptions,
+} from './role-preview.cookies.js';
+export {
+  isPreviewTransactionalDatabaseUrl,
+  isPreviewAuditDatabaseUrl,
+  isPreviewDatabaseIdentityValid,
+} from './preview-database-identity.js';

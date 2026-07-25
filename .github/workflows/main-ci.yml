@@ -36,6 +36,7 @@ name: Main CI
 #      then runs the seven PostgreSQL-17-dependent test suites:
 #        - pnpm test:context
 #        - pnpm test:database
+#        - pnpm test:role-preview
 #        - pnpm audit:test:atomicity
 #        - pnpm audit:test:integration
 #        - pnpm audit:test:database
@@ -264,12 +265,18 @@ jobs:
           '
 
       - name: Run PostgreSQL 17 test suites
-        # Seven PostgreSQL-17-dependent suites. Each suite boots a disposable
+        # Eight PostgreSQL-17-dependent suites. Each suite boots a disposable
         # PG 17 cluster via apps/api/test/database/_pg-bootstrap.ts. The
         # pool:forks + singleFork:true vitest configuration ensures the
         # cluster is shared across all test files within a single suite run.
         # Failure propagation: set -euo pipefail causes the step to fail on
         # the first suite that returns a non-zero exit code.
+        #
+        # The `pnpm test:role-preview` suite additionally runs the preview
+        # seed and verifies the Secure Logged-Out Demo Role Bootstrap flow
+        # end-to-end against the disposable cluster. The suite is NOT run
+        # locally (no PostgreSQL 17 in the development environment); it
+        # runs only on GitHub Actions inside this composite image.
         shell: bash
         run: |
           docker run --rm ibn-hayan-main-ci-pg17 bash -c '
@@ -279,6 +286,7 @@ jobs:
             cd apps/api
             pnpm test:context
             pnpm test:database
+            pnpm test:role-preview
             pnpm audit:test:atomicity
             pnpm audit:test:integration
             pnpm audit:test:database

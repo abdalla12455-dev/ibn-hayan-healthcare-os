@@ -74,6 +74,10 @@ export interface RolePreviewCopy {
   readonly navigateToClinicAdmin: string;
   /** Loading message. */
   readonly loadingMessage: string;
+  /** Network error message (honest — shown when the request fails). */
+  readonly networkError: string;
+  /** Expired/replay/invalid bootstrap challenge message (honest). */
+  readonly challengeExpired: string;
   /** Arabic display name for the tenant scope level. */
   readonly scopeTenant: string;
   /** Arabic display name for the organisation scope level. */
@@ -127,6 +131,9 @@ export const ROLE_PREVIEW_COPY_AR: RolePreviewCopy = {
   switcherDropdownLabel: 'اختر دورًا للمعاينة',
   navigateToClinicAdmin: 'الذهاب إلى إدارة المنشأة',
   loadingMessage: 'جارٍ التحميل…',
+  networkError: 'تعذّر الاتصال بالخادم. تحقّق من الشبكة وأعد المحاولة.',
+  challengeExpired:
+    'انتهت صلاحية تحدّي المعاينة أو استُخدم بالفعل. أعد تحميل الصفحة للحصول على تحدٍّ جديد.',
   scopeTenant: 'نطاق المستأجر',
   scopeOrganisation: 'نطاق المؤسسة',
   scopeFacility: 'نطاق المنشأة',
@@ -173,6 +180,9 @@ export const ROLE_PREVIEW_COPY_EN: RolePreviewCopy = {
   switcherDropdownLabel: 'Choose a role to preview',
   navigateToClinicAdmin: 'Go to Clinic Admin',
   loadingMessage: 'Loading…',
+  networkError: 'Could not reach the server. Check the network and try again.',
+  challengeExpired:
+    'The preview challenge has expired or was already used. Reload the page to request a fresh challenge.',
   scopeTenant: 'Tenant scope',
   scopeOrganisation: 'Organisation scope',
   scopeFacility: 'Facility scope',

@@ -124,7 +124,9 @@ export type RolePreviewAvailabilityResponse = z.infer<
  * The canonical select-preview-role request schema. The body of
  * `POST /api/v1/dev/role-preview/select`.
  *
- * The client supplies only the canonical role code. The server
+ * The client supplies only the canonical role code and (for the
+ * initial logged-out bootstrap flow) the opaque `challengeId`
+ * returned by `GET /api/v1/dev/role-preview/bootstrap`. The server
  * derives the preview user, membership, tenant, organisation,
  * facility, and role assignment from the role code via the preview
  * identity catalogue. The client CANNOT supply any of:
@@ -138,6 +140,13 @@ export type RolePreviewAvailabilityResponse = z.infer<
  * - session IDs
  * - password hashes
  *
+ * The `challengeId` field is OPTIONAL. When present, the server
+ * attempts the logged-out bootstrap flow: it verifies the HttpOnly
+ * bootstrap cookie, consumes the one-time challenge, and creates
+ * the first preview session. When absent, the server falls back to
+ * the existing session-bound switching flow (which requires a
+ * valid session cookie and a valid `X-CSRF-Token` header).
+ *
  * The `.strict()` modifier rejects any additional field at the
  * boundary, which is the structural enforcement of the "no
  * arbitrary IDs accepted" rule.
@@ -145,11 +154,60 @@ export type RolePreviewAvailabilityResponse = z.infer<
 export const SelectPreviewRoleRequestSchema = z
   .object({
     roleCode: RoleCodeSchema,
+    /**
+     * The opaque `challengeId` returned by
+     * `GET /api/v1/dev/role-preview/bootstrap`. Required for the
+     * initial logged-out bootstrap flow; optional for subsequent
+     * session-bound switching (in which case the server reads the
+     * session cookie and the `X-CSRF-Token` header instead).
+     */
+    challengeId: z.string().min(1).max(200).optional(),
   })
   .strict();
 
 export type SelectPreviewRoleRequest = z.infer<
   typeof SelectPreviewRoleRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// BootstrapChallengeResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical bootstrap-challenge response schema. Returned by
+ * `GET /api/v1/dev/role-preview/bootstrap`.
+ *
+ * Carries only safe challenge metadata:
+ * - `ok`: always `true` when the bootstrap is available.
+ * - `challengeId`: an opaque string the client must echo back in
+ *   the `POST /select` body. The `challengeId` is NOT secret on
+ *   its own; the proof-of-possession is the HttpOnly bootstrap
+ *   cookie that the server sets in the same response. The
+ *   `challengeId` is used as a server-side lookup key so that the
+ *   server can find the right challenge state when the cookie
+ *   arrives.
+ * - `expiresInMs`: the challenge's remaining lifetime in
+ *   milliseconds. The client MAY display a countdown so the
+ *   operator knows how long they have to select a role. The
+ *   server-side expiry is authoritative; the client's countdown is
+ *   advisory.
+ *
+ * The response NEVER includes:
+ * - the raw nonce (it lives only in the HttpOnly cookie);
+ * - the nonce hash (it is server-side state);
+ * - any password, session token, CSRF token, or internal UUID;
+ * - any preview identity's email address or display name.
+ */
+export const BootstrapChallengeResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    challengeId: z.string().min(1).max(200),
+    expiresInMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type BootstrapChallengeResponse = z.infer<
+  typeof BootstrapChallengeResponseSchema
 >;
 
 // ---------------------------------------------------------------------------
@@ -290,6 +348,10 @@ export const RolePreviewErrorResponseSchema = z
           'ROLE_PREVIEW_ORIGIN_DISALLOWED',
           'ROLE_PREVIEW_NOT_ACTIVE',
           'ROLE_PREVIEW_REQUEST_INVALID',
+          'ROLE_PREVIEW_BOOTSTRAP_EXPIRED',
+          'ROLE_PREVIEW_BOOTSTRAP_REPLAY',
+          'ROLE_PREVIEW_BOOTSTRAP_INVALID',
+          'ROLE_PREVIEW_DATABASE_IDENTITY_INVALID',
         ]),
         message: z.string(),
       })

@@ -1021,7 +1021,9 @@ None.
 
 The initial Demo Role Preview Mode v1 implementation (`dfd22f9`) tracked a
 fixed plaintext preview password as a TypeScript constant
-(`PREVIEW_IDENTITY_PASSWORD = 'preview-role-only-do-not-use-in-production'`)
+(`PREVIEW_IDENTITY_PASSWORD = '[REDACTED-RETIRED-PREVIEW-LITERAL]'` — the
+retired literal has been removed from all tracked files per the Secure
+Logged-Out Demo Role Bootstrap correction)
 in `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`.
 While the implementation defended the password through seed-time
 production-refusal and database-URL validation, the password value itself
@@ -1286,3 +1288,421 @@ correction does NOT alter the canonical next-vertical-slice ordering.
 - **To inspect the correction without checking out the branch:** `git worktree add /tmp/demo-role-preview-correction-review feat/demo-role-preview-v1`.
 - **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`.
 - **To run the preview seed (requires PostgreSQL 17 + isolated preview database + protected preview.env):** `set -a && source /home/z/.config/ibn-hayan-role-preview/preview.env && set +a && cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`.
+
+---
+
+## Secure Logged-Out Demo Role Bootstrap — Correction v2
+
+**Date:** 2026-07-26
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `1bd24117532e286839947d486d99419314a4531a` (`fix: secure demo role preview runtime v1`)
+**Correction commit subject:** `fix: enable secure logged-out demo role bootstrap`
+
+### Problem corrected
+
+The Secure Demo Role Preview Mode v1 correction (`1bd2411`) replaced
+the tracked fixed preview password with a server-only environment
+variable, but it preserved the original requirement that
+`POST /api/v1/dev/role-preview/select` demands an existing application
+session cookie AND a session-bound CSRF token. The CSRF token can
+only be obtained via `GET /api/v1/auth/csrf`, which itself requires a
+valid session. Consequently, a fresh logged-out operator could NOT
+bootstrap a preview session from `/role-preview` without first
+visiting `/login` and entering credentials — contradicting the
+operator requirement that role selection be possible without manual
+credential entry.
+
+### Root cause
+
+`role-preview.controller.ts` (select endpoint, lines 284–308 in the
+`1bd2411` revision) called `authService.getSessionFromCookie` and
+threw `rolePreviewSessionRequired()` (401) when no session was
+present, then called `csrfService.verify(session.id, csrfToken)` and
+threw `rolePreviewCsrfInvalid()` (403) when no CSRF token was
+present. The frontend's `handleSelect` (`/role-preview/page.tsx:130`)
+called `getCsrfToken()` first, which fails for logged-out users
+because `/api/v1/auth/csrf` returns 401.
+
+### Correction architecture
+
+A new one-time bootstrap challenge flow was added. The flow uses a
+separate HttpOnly bootstrap cookie (carrying a cryptographically
+random nonce) plus a server-side in-memory challenge store. The
+bootstrap cookie's `SameSite=Strict` attribute is the CSRF defense
+for the initial logged-out `POST /select` request; no session-bound
+CSRF token is required for the bootstrap flow.
+
+**New routes and methods:**
+
+- `GET /api/v1/dev/role-preview/bootstrap` — issues a one-time
+  bootstrap challenge. Sets the HttpOnly bootstrap cookie
+  (`ibn_hayan_role_preview_bootstrap`) with a 32-byte random nonce
+  (base64url, 43 ASCII characters, ~256 bits of entropy). Returns
+  only safe challenge metadata: `{ ok: true, challengeId,
+  expiresInMs }`. The raw nonce is NEVER returned in the JSON body.
+- `POST /api/v1/dev/role-preview/select` — now supports TWO flows:
+  1. **Logged-out bootstrap flow.** When the request body carries a
+     `challengeId` AND the bootstrap cookie is present, the
+     controller verifies the challenge, consumes it (one-time),
+     creates the first preview session, sets the application-session
+     cookie, and clears the bootstrap cookie.
+  2. **Session-bound switching flow.** When the request body does
+     NOT carry a `challengeId`, the controller requires an existing
+     session cookie and a valid `X-CSRF-Token` header (the existing
+     behaviour, preserved for subsequent role switching from an
+     active preview session).
+
+**New backend files:**
+
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.ts` —
+  `BootstrapChallengeStore` (NestJS `@Injectable`): in-memory
+  `Map<challengeIdHash, { nonceHash, expiresAt, consumed }>`.
+  `issue(maxAgeMs)` generates a 32-byte nonce + 16-byte
+  challengeId, hashes both with SHA-256, stores the hashes.
+  `consume(challengeId, nonce)` verifies the nonce against the
+  stored hash using `timingSafeEqual`, marks the challenge
+  consumed atomically, returns one of
+  `'ok' | 'not_found' | 'expired' | 'replay' | 'invalid'`.
+  `cleanup()` removes expired/consumed entries. `BOOTSTRAP_MAX_AGE_MS`
+  is exactly 5 minutes (300 000 ms).
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.spec.ts` —
+  22 unit tests covering issue, consume success/replay/not-found/
+  invalid/expiry, invalidate, cleanup, and the no-logging-of-
+  secret-material requirement.
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.ts` —
+  `BOOTSTRAP_COOKIE_NAME`, `BOOTSTRAP_MAX_AGE_MS`,
+  `buildBootstrapCookieOptions(isProduction, maxAgeMs)`,
+  `buildBootstrapCookieClearOptions(isProduction)`. The cookie is
+  HttpOnly, SameSite=Strict, Secure in production, Max-Age clamped
+  to 300s, Path=`/api/v1/dev/role-preview`, no domain.
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.spec.ts`
+  — 18 unit tests covering all cookie attributes.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+  — `isPreviewTransactionalDatabaseUrl(url)`,
+  `isPreviewAuditDatabaseUrl(url)`,
+  `isPreviewDatabaseIdentityValid(env)`. Returns true only when the
+  URL contains `role_preview` or `preview_role` (case-insensitive).
+  Mirrors the seed script's check exactly. NEVER logs the URL.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+  — 18 unit tests.
+
+**Modified backend files:**
+
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts`
+  — added `GET /bootstrap` route; updated `POST /select` to
+  dispatch to `selectRoleViaBootstrap` (when `challengeId` is
+  present) or `selectRoleViaSession` (when it is not). Both flows
+  verify Origin. The bootstrap flow additionally checks the
+  database-identity gate. The `end` route defensively clears the
+  bootstrap cookie.
+- `apps/api/src/modules/dev/role-preview/role-preview.service.ts`
+  — added `issueBootstrap()` and `selectRoleWithBootstrap()`
+  methods. The latter verifies and consumes the challenge, resolves
+  the preview identity, creates the new session, revokes any
+  previous session, and emits a
+  `role_preview.session.bootstrapped` audit event in the same
+  Prisma transaction.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts`
+  — added `rolePreviewBootstrapExpired()`,
+  `rolePreviewBootstrapReplay()`,
+  `rolePreviewBootstrapInvalid()`,
+  `rolePreviewDatabaseIdentityInvalid()`.
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts`
+  — registered `BootstrapChallengeStore` as a provider and exported
+  it.
+- `apps/api/src/modules/dev/role-preview/index.ts` — exported the
+  new public API.
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+  — removed the retired literal from the test comment.
+
+**Modified contracts files:**
+
+- `packages/contracts/src/role-preview/role-preview.schema.ts` —
+  added `BootstrapChallengeResponseSchema` (with `ok`, `challengeId`,
+  `expiresInMs`); updated `SelectPreviewRoleRequestSchema` to accept
+  an optional `challengeId`; added new error codes to
+  `RolePreviewErrorResponseSchema`.
+- `packages/contracts/src/role-preview/index.ts` — exported the new
+  schema.
+- `packages/contracts/src/role-preview/role-preview.schema.spec.ts`
+  — added tests for the bootstrap response schema, the updated
+  select request schema, and the new error codes.
+
+**Modified observability files:**
+
+- `packages/observability/src/audit/action-codes.ts` — added
+  `role_preview.session.bootstrapped` to `ROLE_PREVIEW_ACTION_CODES`.
+
+**Modified frontend files:**
+
+- `apps/web/src/lib/api/role-preview/role-preview.client.ts` —
+  added `requestRolePreviewBootstrap()`; updated
+  `selectPreviewRole()` to accept an optional `challengeId` and
+  route to the bootstrap flow when present (no CSRF header).
+- `apps/web/src/lib/api/role-preview/index.ts` — exported the new
+  function.
+- `apps/web/src/app/role-preview/page.tsx` — updated the page to:
+  (1) fetch Preview availability; (2) check for an active preview
+  session; (3) if no active session, request a bootstrap challenge
+  and hold the `challengeId` in component memory only (NEVER in
+  localStorage); (4) on role selection, dispatch to the bootstrap
+  flow (no CSRF header) or the session-bound flow (with CSRF
+  header) based on whether a session is active; (5) handle
+  expired/replay/network-error states honestly with new copy keys
+  `networkError` and `challengeExpired`; (6) redirect to
+  `/role-preview` (not `/login`) after ending the preview session
+  so the operator can immediately request a fresh bootstrap.
+- `apps/web/src/components/role-preview/role-preview-copy.ts` —
+  added `networkError` and `challengeExpired` copy keys in both
+  Arabic and English.
+
+**New CI integration test files:**
+
+- `apps/api/vitest.role-preview.config.ts` — Vitest config for the
+  role-preview integration tests (mirror of
+  `vitest.context.config.ts`).
+- `apps/api/test/role-preview/_role-preview-bootstrap.ts` —
+  Role-Preview-specific database bootstrap that wraps
+  `setupDatabaseTests()` and additionally creates databases named
+  `role_preview_test` and `role_preview_audit_test` (so the
+  database-identity gate passes), applies migrations to them, and
+  overrides `DATABASE_URL`/`AUDIT_DATABASE_URL` plus the preview
+  env vars.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+  — 38 integration tests covering the full Secure Logged-Out Demo
+  Role Bootstrap flow against real PostgreSQL 17.
+
+**Modified CI configuration:**
+
+- `apps/api/package.json` — added `test:role-preview` and
+  `pretest:role-preview` scripts.
+- `.github/workflows/main-ci.yml` — added `pnpm test:role-preview`
+  to the `postgresql17-validation` job (now eight suites, was
+  seven).
+
+### Required runtime gates
+
+The logged-out bootstrap operates ONLY when ALL of the following are
+true:
+
+1. `NODE_ENV !== 'production'` (checked by `RolePreviewFeatureConfig`)
+2. `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true` (checked by
+   `RolePreviewFeatureConfig`)
+3. `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` is present and valid server-side
+   (checked by `RolePreviewPasswordValidator` at module init)
+4. `DATABASE_URL` is positively identified as an isolated role-preview
+   transactional database (checked by
+   `isPreviewDatabaseIdentityValid`)
+5. `AUDIT_DATABASE_URL` is positively identified as an isolated
+   role-preview audit database (checked by
+   `isPreviewDatabaseIdentityValid`)
+6. Request Origin passes the existing allow-list validation
+   (checked by `AuthService.isOriginAllowed`)
+7. Requested role code exists in the canonical role catalogue
+   (checked by `findPreviewIdentity`)
+8. Selected identity belongs to the isolated preview tenant (checked
+   by membership lookup)
+9. Preview seed state is valid and complete (checked by tenant,
+   organisation, facility, user, and membership lookups)
+
+If any precondition fails, the route returns a safe unavailable
+result (404 for the gate, 403 for Origin/database-identity).
+
+### Bootstrap-cookie settings
+
+- Name: `ibn_hayan_role_preview_bootstrap`
+- HttpOnly: true
+- SameSite: Strict
+- Secure: true in production, false in development
+- Max-Age: 300s (5 minutes), clamped
+- Path: `/api/v1/dev/role-preview`
+- Domain: not set (bound to the exact origin)
+
+### Production-disable guarantee
+
+The feature is completely unavailable in production regardless of
+the flag, password, or database-identity values. The
+`RolePreviewFeatureConfig.isRolePreviewEnabled()` method returns
+`false` unconditionally when `NODE_ENV === 'production'`. Every
+route consults the gate before delegating to the service. The
+database-identity gate provides additional defence-in-depth.
+
+### Initial logged-out role selection vs subsequent session-bound
+role switching
+
+- **Initial selection (logged-out bootstrap flow):** uses the
+  bootstrap cookie as proof-of-possession; NO CSRF token required;
+  consumes the one-time challenge; creates the first preview
+  session; clears the bootstrap cookie.
+- **Subsequent switching (session-bound flow):** requires an
+  existing session cookie AND a valid `X-CSRF-Token` header
+  (preserves the existing behaviour); safely revokes the previous
+  preview session in the same Prisma transaction as the new session
+  creation.
+
+### Local validation results
+
+- `pnpm run typecheck`: PASS (all 7 packages + 2 apps)
+- `pnpm run lint`: PASS (all 7 packages + 2 apps)
+- `pnpm run test`: PASS (303 tests: 123 api + 180 web; was 245
+  before this correction; +58 new unit tests across bootstrap-store,
+  cookies, database-identity, and contracts schemas)
+- `pnpm run build`: PASS (Next.js production build;
+  `/role-preview` registered as a static route alongside `/`,
+  `/_not-found`, `/clinic-admin`, `/dashboard`, `/login`)
+- `git diff --check`: PASS (no whitespace errors)
+- Clinic Admin shell still has exactly 11 sidebar items (1
+  implemented + 10 unimplemented)
+- Notifications still in the header bell, NOT in the sidebar
+- R09 Arabic label still `مدير المنشأة`
+- No fake business data introduced
+- Normal login remains unchanged
+- Normal dashboard remains unchanged
+- Normal Clinic Admin protections remain unchanged
+- Retired password literal is absent from all tracked files
+- Actual protected password value is absent from Git and bundles
+- No Preview daemon exists
+- No runtime log was created
+- No long-running process remains
+
+### PostgreSQL 17 GitHub Actions integration-test coverage
+
+38 integration scenarios added under
+`apps/api/test/role-preview/role-preview.role-preview-spec.ts`,
+covering:
+
+- Seed validation (1–11): production refusal, non-preview DB
+  refusal, audit-DB gap, tenant/org/facility creation, 14
+  identities, R01–R14 role codes, scope levels, idempotency, no
+  business records.
+- Bootstrap + select (12–26): bootstrap success, expired challenge
+  rejection, replay rejection, unknown role rejection, caller-
+  supplied IDs rejection, R09 session creation, tenant/org/facility
+  context correctness, R09 → `/clinic-admin` routing, unimplemented
+  role → `/role-preview` routing, subsequent switching replaces the
+  previous session, end revokes the session, HttpOnly and
+  SameSite=Strict cookie behaviour.
+- Security (27–38): Secure-attribute follows environment rules,
+  valid Origin succeeds, invalid Origin fails, CSRF enforced on
+  session-bound switching, no password/hash/token in responses, no
+  bootstrap secret in audit records (documented gap), preview
+  routes fail against non-preview database identities, normal login
+  / dashboard / Clinic Admin protection unchanged.
+
+The CI suites are EXPLICITLY listed in
+`.github/workflows/main-ci.yml`; the new `pnpm test:role-preview`
+suite was added alongside the existing seven suites. The suite is
+NOT run locally (no PostgreSQL 17 in the development environment);
+it runs only on GitHub Actions inside the composite node:24 +
+postgres:17 Docker image.
+
+### CI status
+
+PENDING. The integration tests have been added but have NOT been
+executed on GitHub Actions yet. The branch is local-only and
+unpushed. The next step is to push the branch through a controlled
+branch-and-PR workflow so GitHub Actions can run the PostgreSQL 17
+integration tests.
+
+### Runtime Preview status
+
+NOT LAUNCHED. Per the task specification, this correction does NOT
+launch the user-visible Z.AI Preview. The Preview requires a backend
+PostgreSQL 17 database, which is not available in this development
+environment.
+
+### Files created
+
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.ts`
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.spec.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.spec.ts`
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+- `apps/api/vitest.role-preview.config.ts`
+- `apps/api/test/role-preview/_role-preview-bootstrap.ts`
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/index.ts`
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.service.ts`
+- `apps/web/src/app/role-preview/page.tsx`
+- `apps/web/src/components/role-preview/role-preview-copy.ts`
+- `apps/web/src/lib/api/role-preview/index.ts`
+- `apps/web/src/lib/api/role-preview/role-preview.client.ts`
+- `packages/contracts/src/role-preview/index.ts`
+- `packages/contracts/src/role-preview/role-preview.schema.ts`
+- `packages/contracts/src/role-preview/role-preview.schema.spec.ts`
+- `packages/observability/src/audit/action-codes.ts`
+- `apps/api/package.json`
+- `.github/workflows/main-ci.yml`
+- `PROJECT_CONTINUITY.md`
+- `worklog.md`
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None.
+
+### Dependency or lockfile changes
+
+None.
+
+### Fake business data introduced
+
+None.
+
+### Known limitations
+
+1. **No local PostgreSQL 17.** The 38 integration tests run only
+   on GitHub Actions. The local environment has no PostgreSQL 17
+   runtime (per `AGENTS.md` §"Environment Constraints").
+2. **Audit-URL validation gap.** The preview seed validates
+   `DATABASE_URL` but not `AUDIT_DATABASE_URL`. This is documented
+   in test 3; a follow-up will add the audit-URL check.
+3. **Audit-database assertion gap.** Test 34 documents that a full
+   audit-database query for bootstrap secrets is a follow-up. The
+   unit tests already verify the audit metadata carries only
+   `endpoint` and `roleCode`.
+4. **In-memory challenge store.** Restarting the API invalidates
+   all outstanding bootstrap challenges. This is acceptable for a
+   development-only feature.
+
+### Immediate next product slice
+
+Today's Appointments — unchanged. The Secure Logged-Out Demo Role
+Bootstrap correction does NOT alter the canonical next-vertical-
+slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at
+  `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with
+  origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on
+  `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `1bd24117532e286839947d486d99419314a4531a`
+  (`fix: secure demo role preview runtime v1`).
+- **Correction commit subject:** `fix: enable secure logged-out
+  demo role bootstrap`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the
+  durable Git-authority rule).
+- **Protected password file:**
+  `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory
+  `0700`, file `0600`, outside the repository).
+- **To re-run local validation:** `cd /home/z/demo-role-preview-v1
+  && pnpm install --frozen-lockfile && pnpm run build:shared &&
+  pnpm --filter @ibn-hayan/observability... build && pnpm run
+  typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the PostgreSQL 17 integration tests (GitHub Actions
+  only):** push the branch through a controlled branch-and-PR
+  workflow; the `postgresql17-validation` job runs
+  `pnpm test:role-preview` alongside the existing seven suites.

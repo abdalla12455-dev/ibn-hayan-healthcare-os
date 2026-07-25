@@ -1,5 +1,6 @@
 export {
   getRolePreviewAvailability,
+  requestRolePreviewBootstrap,
   getCurrentPreviewRole,
   selectPreviewRole,
   endPreviewRole,

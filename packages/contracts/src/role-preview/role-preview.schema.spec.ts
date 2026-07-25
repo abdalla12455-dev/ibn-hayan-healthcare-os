@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   RolePreviewAvailabilityResponseSchema,
   RolePreviewRoleCardSchema,
+  BootstrapChallengeResponseSchema,
   SelectPreviewRoleRequestSchema,
   SelectPreviewRoleResponseSchema,
   CurrentPreviewRoleResponseSchema,
@@ -139,6 +140,14 @@ describe('SelectPreviewRoleRequestSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('validates a request with roleCode and challengeId (bootstrap flow)', () => {
+    const result = SelectPreviewRoleRequestSchema.safeParse({
+      roleCode: 'R09_ADMINISTRATOR',
+      challengeId: 'some-opaque-challenge-id',
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('validates every canonical role code', () => {
     const codes = [
       'R01_PHYSICIAN',
@@ -171,9 +180,26 @@ describe('SelectPreviewRoleRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects an empty challengeId', () => {
+    const result = SelectPreviewRoleRequestSchema.safeParse({
+      roleCode: 'R09_ADMINISTRATOR',
+      challengeId: '',
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects a request that supplies userId (Phase 9 item 17)', () => {
     const result = SelectPreviewRoleRequestSchema.safeParse({
       roleCode: 'R09_ADMINISTRATOR',
+      userId: 'should-be-rejected',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a request that supplies a challengeId AND userId', () => {
+    const result = SelectPreviewRoleRequestSchema.safeParse({
+      roleCode: 'R09_ADMINISTRATOR',
+      challengeId: 'some-opaque-challenge-id',
       userId: 'should-be-rejected',
     });
     expect(result.success).toBe(false);
@@ -231,6 +257,108 @@ describe('SelectPreviewRoleRequestSchema', () => {
     const result = SelectPreviewRoleRequestSchema.safeParse({
       roleCode: 'R09_ADMINISTRATOR',
       passwordHash: 'should-be-rejected',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('BootstrapChallengeResponseSchema', () => {
+  it('validates a minimal response with ok=true, challengeId, and expiresInMs', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates a response with expiresInMs=0 (about-to-expire)', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a response with ok=false', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: false,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response missing the challengeId field', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      expiresInMs: 300_000,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response missing the expiresInMs field', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with an empty challengeId', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: '',
+      expiresInMs: 300_000,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with a negative expiresInMs', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: -1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with a non-integer expiresInMs', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000.5,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with an additional field (no nonce leak)', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000,
+      nonce: 'should-not-be-included',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with an additional password field', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000,
+      password: 'should-not-be-included',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a response with an additional sessionToken field', () => {
+    const result = BootstrapChallengeResponseSchema.safeParse({
+      ok: true,
+      challengeId: 'some-opaque-challenge-id',
+      expiresInMs: 300_000,
+      sessionToken: 'should-not-be-included',
     });
     expect(result.success).toBe(false);
   });
@@ -420,6 +548,46 @@ describe('RolePreviewErrorResponseSchema', () => {
       error: {
         code: 'ROLE_PREVIEW_SESSION_REQUIRED',
         message: 'A valid session is required.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates the bootstrap-expired error code', () => {
+    const result = RolePreviewErrorResponseSchema.safeParse({
+      error: {
+        code: 'ROLE_PREVIEW_BOOTSTRAP_EXPIRED',
+        message: 'Bootstrap challenge is expired or not found.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates the bootstrap-replay error code', () => {
+    const result = RolePreviewErrorResponseSchema.safeParse({
+      error: {
+        code: 'ROLE_PREVIEW_BOOTSTRAP_REPLAY',
+        message: 'Bootstrap challenge is expired or not found.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates the bootstrap-invalid error code', () => {
+    const result = RolePreviewErrorResponseSchema.safeParse({
+      error: {
+        code: 'ROLE_PREVIEW_BOOTSTRAP_INVALID',
+        message: 'Bootstrap challenge is expired or not found.',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates the database-identity-invalid error code', () => {
+    const result = RolePreviewErrorResponseSchema.safeParse({
+      error: {
+        code: 'ROLE_PREVIEW_DATABASE_IDENTITY_INVALID',
+        message: 'Role Preview Mode is unavailable.',
       },
     });
     expect(result.success).toBe(true);

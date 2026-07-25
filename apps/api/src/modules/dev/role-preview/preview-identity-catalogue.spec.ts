@@ -87,11 +87,10 @@ describe('PREVIEW_IDENTITY_CATALOGUE', () => {
   it('does NOT track any fixed preview password constant (no PREVIEW_IDENTITY_PASSWORD export remains in the catalogue module)', () => {
     // Assert that the previously-tracked fixed plaintext password
     // export is gone from the catalogue module's public surface.
-    // The export was `PREVIEW_IDENTITY_PASSWORD` with the literal
-    // value `preview-role-only-do-not-use-in-production`; both the
-    // export name and the literal value were removed in the
-    // Secure Demo Role Preview Mode v1 correction. The password
-    // now lives in the server-only
+    // The retired export (`PREVIEW_IDENTITY_PASSWORD`) and its
+    // retired literal value were both removed in the Secure Demo
+    // Role Preview Mode v1 correction; neither is referenced here
+    // by name. The password now lives in the server-only
     // `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` environment variable
     // (see `preview-password.ts`). This is the structural
     // enforcement of "no tracked fixed preview password remains"

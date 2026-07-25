@@ -16,6 +16,7 @@
 export {
   RolePreviewAvailabilityResponseSchema,
   RolePreviewRoleCardSchema,
+  BootstrapChallengeResponseSchema,
   SelectPreviewRoleRequestSchema,
   SelectPreviewRoleResponseSchema,
   CurrentPreviewRoleResponseSchema,
@@ -23,6 +24,7 @@ export {
   RolePreviewErrorResponseSchema,
   type RolePreviewAvailabilityResponse,
   type RolePreviewRoleCard,
+  type BootstrapChallengeResponse,
   type SelectPreviewRoleRequest,
   type SelectPreviewRoleResponse,
   type CurrentPreviewRoleResponse,

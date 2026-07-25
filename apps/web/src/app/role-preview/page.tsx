@@ -10,6 +10,7 @@ import {
 import { useRouter } from 'next/navigation';
 import {
   getRolePreviewAvailability,
+  requestRolePreviewBootstrap,
   getCurrentPreviewRole,
   selectPreviewRole,
   endPreviewRole,
@@ -30,36 +31,36 @@ import { getRolePreviewCopy } from '@/components/role-preview/role-preview-copy'
 /**
  * Demo Role Preview Mode page (`/role-preview`).
  *
- * Per the Demo Role Preview Mode v1 specification, this is a
- * development-only route. The page is **unavailable** when the
- * backend returns 404 (production or flag off); the page renders
- * a safe unavailable result and does NOT expose the role cards.
+ * Per the Secure Logged-Out Demo Role Bootstrap specification, this
+ * is a development-only route that supports TWO selection flows:
  *
- * The page displays one role card for every canonical role R01
- * through R14. Each card shows:
- * - the role code (e.g. `R09_ADMINISTRATOR`);
- * - the Arabic and English role names;
- * - the canonical role scope (tenant / organisation / facility);
- * - the current interface implementation status (only R09 is
- *   implemented, at `/clinic-admin`);
- * - a preview action.
+ * 1. **Logged-out bootstrap flow.** When the page is opened by a
+ *    fresh browser with no application session, the page:
+ *    a. fetches Preview availability;
+ *    b. requests a one-time bootstrap challenge (the server sets
+ *       the HttpOnly bootstrap cookie carrying the raw nonce);
+ *    c. displays the canonical R01–R14 role cards;
+ *    d. on selection, calls `POST /select` with `{ roleCode,
+ *       challengeId }` (no CSRF header, no session cookie). The
+ *       bootstrap cookie auto-attaches. The server consumes the
+ *       challenge, creates the first preview session, sets the
+ *       application-session cookie, and clears the bootstrap
+ *       cookie.
  *
- * When R09 is selected:
- * 1. the page creates the real preview session via the backend
- *    endpoint;
- * 2. the backend establishes the preview tenant, organisation, and
- *    facility context on the new session;
- * 3. the page navigates to `/clinic-admin`.
+ * 2. **Session-bound switching flow.** When the page detects an
+ *    active preview session (via `getCurrentPreviewRole`), the
+ *    page falls back to the existing behaviour: fetch a CSRF token,
+ *    call `POST /select` with `{ roleCode }` and the `X-CSRF-Token`
+ *    header.
  *
- * When another role is selected:
- * 1. the page creates the real preview session;
- * 2. the page shows a safe role-status view that displays the
- *    current role and active scope, and honestly states that the
- *    role-specific product interface is not implemented.
+ * The page never displays a username field, never displays a
+ * password field, never displays a fake login form, never hardcodes
+ * a credential, never displays an internal UUID, never displays the
+ * session token, never displays the bootstrap nonce, never stores
+ * the nonce or any role authorization in localStorage.
  *
- * The page never displays internal UUIDs, never displays the
- * session token, never displays any credential, and never creates
- * fake business data.
+ * The page renders honest loading, unavailable, expired-challenge,
+ * replay-failure, and network-error states.
  */
 export default function RolePreviewPage(): ReactElement {
   const router = useRouter();
@@ -72,6 +73,12 @@ export default function RolePreviewPage(): ReactElement {
   const [current, setCurrent] = useState<CurrentPreviewRoleResponse | null>(
     null,
   );
+  // challengeId is held in component memory ONLY. It is NOT stored
+  // in localStorage, sessionStorage, or a cookie. It is the opaque
+  // identifier returned by the bootstrap endpoint; the matching
+  // nonce lives in the HttpOnly bootstrap cookie that the browser
+  // auto-attaches.
+  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -105,14 +112,32 @@ export default function RolePreviewPage(): ReactElement {
         return;
       }
       setAvailability(availResult.data);
-      // Best-effort load of the current preview role; ignore
-      // failures (the session may not exist or may not be a preview
-      // session).
+
+      // Best-effort load of the current preview role. If the
+      // operator already has an active preview session, we keep
+      // it and use the session-bound switching flow. If not, we
+      // fall back to the logged-out bootstrap flow.
       const currentResult = await getCurrentPreviewRole();
       if (cancelled) return;
-      if (currentResult.ok) {
+      if (currentResult.ok && currentResult.data.active) {
         setCurrent(currentResult.data);
+        setLoading(false);
+        return;
       }
+
+      // No active preview session → request a one-time bootstrap
+      // challenge. The server sets the HttpOnly bootstrap cookie;
+      // we retain only the opaque challengeId in component memory.
+      const bootstrapResult = await requestRolePreviewBootstrap();
+      if (cancelled) return;
+      if (!bootstrapResult.ok) {
+        // The bootstrap endpoint returned an error. Surface an
+        // honest unavailable state so the operator is not stuck.
+        setUnavailable(true);
+        setLoading(false);
+        return;
+      }
+      setChallengeId(bootstrapResult.data.challengeId);
       setLoading(false);
     })();
     return () => {
@@ -127,18 +152,55 @@ export default function RolePreviewPage(): ReactElement {
     setError(null);
     setInfo(null);
     setSwitching(true);
-    const csrfResult = await getCsrfToken();
-    if (!csrfResult.ok) {
+
+    let selectResult;
+    if (current !== null && current.active) {
+      // Session-bound switching flow: fetch a CSRF token, then
+      // call select with `{ roleCode }` and the `X-CSRF-Token`
+      // header.
+      const csrfResult = await getCsrfToken();
+      if (!csrfResult.ok) {
+        setError(copy.switchFailed);
+        setSwitching(false);
+        return;
+      }
+      selectResult = await selectPreviewRole(
+        csrfResult.data.token,
+        roleCode,
+      );
+    } else if (challengeId !== null) {
+      // Logged-out bootstrap flow: call select with
+      // `{ roleCode, challengeId }` and no CSRF header. The
+      // bootstrap cookie auto-attaches.
+      selectResult = await selectPreviewRole(null, roleCode, challengeId);
+      // The challenge is one-time; clear it from component memory
+      // regardless of outcome so it cannot be retried.
+      setChallengeId(null);
+    } else {
+      // No session and no challenge — the operator must reload the
+      // page to request a fresh bootstrap.
       setError(copy.switchFailed);
       setSwitching(false);
       return;
     }
-    const selectResult = await selectPreviewRole(csrfResult.data.token, roleCode);
+
     if (!selectResult.ok) {
-      setError(copy.switchFailed);
+      // Distinguish the honest expired/replay/network states for
+      // the operator. The error category is the only signal we
+      // have; the message is intentionally generic.
+      if (selectResult.error.category === 'NETWORK_ERROR') {
+        setError(copy.networkError);
+      } else if (selectResult.error.statusCode === 403) {
+        // 403 from the bootstrap flow means expired/replay/invalid
+        // challenge or database-identity gate failure.
+        setError(copy.challengeExpired);
+      } else {
+        setError(copy.switchFailed);
+      }
       setSwitching(false);
       return;
     }
+
     setInfo(copy.switchSucceeded);
     setSwitching(false);
     // Refresh the current-role state.
@@ -176,8 +238,12 @@ export default function RolePreviewPage(): ReactElement {
     setInfo(copy.endSucceeded);
     setEnding(false);
     setCurrent(null);
-    // Redirect to /login so the operator can re-authenticate.
-    router.replace('/login');
+    setChallengeId(null);
+    // Redirect to /role-preview (not /login) so the operator can
+    // immediately request a fresh bootstrap and select another role.
+    // The previous implementation redirected to /login, which
+    // contradicted the logged-out bootstrap flow.
+    router.replace('/role-preview');
   }
 
   if (loading) {

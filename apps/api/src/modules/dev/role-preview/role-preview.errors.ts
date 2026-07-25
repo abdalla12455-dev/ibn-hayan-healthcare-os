@@ -125,3 +125,87 @@ export function rolePreviewNotActive(): ForbiddenException {
     },
   });
 }
+
+/**
+ * Return a 403 for the bootstrap / select endpoint when the
+ * supplied bootstrap challenge has expired. The challenge may have
+ * expired because the bootstrap cookie's Max-Age (5 minutes) has
+ * elapsed, or because the server-side challenge state was
+ * garbage-collected.
+ *
+ * The same generic shape is used for "expired", "not found", and
+ * "replay" so that the client cannot distinguish between them
+ * (defence-in-depth). The code is stable so that the frontend can
+ * render an honest "expired challenge" message that prompts the
+ * operator to request a fresh bootstrap.
+ */
+export function rolePreviewBootstrapExpired(): ForbiddenException {
+  return new ForbiddenException({
+    error: {
+      code: 'ROLE_PREVIEW_BOOTSTRAP_EXPIRED',
+      message: 'Bootstrap challenge is expired or not found.',
+    },
+  });
+}
+
+/**
+ * Return a 403 for the select endpoint when the supplied bootstrap
+ * challenge has already been consumed. Each challenge is one-time
+ * use; a second call with the same challenge is a replay.
+ *
+ * The same generic shape is used for "expired", "not found", and
+ * "replay" so that the client cannot distinguish between them.
+ */
+export function rolePreviewBootstrapReplay(): ForbiddenException {
+  return new ForbiddenException({
+    error: {
+      code: 'ROLE_PREVIEW_BOOTSTRAP_REPLAY',
+      message: 'Bootstrap challenge is expired or not found.',
+    },
+  });
+}
+
+/**
+ * Return a 403 for the select endpoint when the supplied bootstrap
+ * challenge is invalid. This is the proof-of-possession failure:
+ * the `challengeId` exists in the store, but the nonce read from
+ * the bootstrap cookie does not match the stored nonce hash. This
+ * happens when:
+ * - the bootstrap cookie was not sent (e.g. the operator cleared
+ *   cookies);
+ * - the wrong cookie was sent (e.g. a stale cookie from a previous
+ *   bootstrap);
+ * - the cookie value was tampered with.
+ *
+ * The same generic shape is used so that the client cannot
+ * distinguish between "invalid", "expired", and "replay".
+ */
+export function rolePreviewBootstrapInvalid(): ForbiddenException {
+  return new ForbiddenException({
+    error: {
+      code: 'ROLE_PREVIEW_BOOTSTRAP_INVALID',
+      message: 'Bootstrap challenge is expired or not found.',
+    },
+  });
+}
+
+/**
+ * Return a 403 for the bootstrap / select endpoint when the
+ * bootstrap flow is unavailable because the preview database
+ * identity could not be verified. This is the database-identity
+ * gate: the role-preview feature is only available when
+ * `DATABASE_URL` positively identifies an isolated role-preview
+ * transactional database AND `AUDIT_DATABASE_URL` positively
+ * identifies an isolated role-preview audit database.
+ *
+ * The same generic shape is used so that the client cannot
+ * distinguish this from the general "disabled" condition.
+ */
+export function rolePreviewDatabaseIdentityInvalid(): ForbiddenException {
+  return new ForbiddenException({
+    error: {
+      code: 'ROLE_PREVIEW_DATABASE_IDENTITY_INVALID',
+      message: 'Role Preview Mode is unavailable.',
+    },
+  });
+}
