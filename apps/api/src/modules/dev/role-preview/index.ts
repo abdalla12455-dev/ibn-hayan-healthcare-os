@@ -60,4 +60,9 @@ export {
   isPreviewTransactionalDatabaseUrl,
   isPreviewAuditDatabaseUrl,
   isPreviewDatabaseIdentityValid,
+  validatePreviewDatabaseUrl,
+  validatePreviewDatabaseIdentity,
+  PREVIEW_DATABASE_NAME_IDENTIFIERS,
+  type PreviewDatabaseUrlValidation,
+  type PreviewDatabaseIdentityResult,
 } from './preview-database-identity.js';

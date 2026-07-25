@@ -15,6 +15,10 @@ import {
   readPreviewPasswordFromEnv,
   PREVIEW_PASSWORD_ENV_VAR,
 } from '../modules/dev/role-preview/preview-password.js';
+import {
+  validatePreviewDatabaseIdentity,
+  type PreviewDatabaseIdentityResult,
+} from '../modules/dev/role-preview/preview-database-identity.js';
 
 /**
  * Development-only Demo Role Preview Mode seed command.
@@ -68,45 +72,128 @@ import {
 import { PrismaClient } from '../../generated/prisma/client.js';
 
 /**
- * Read and validate the seed environment. Throws if any required
- * variable is missing or if the command is invoked in production
- * or without the explicit allow flag.
+ * Error thrown by `readSeedEnv()` when the seed environment fails
+ * validation. The error message is SAFE: it identifies which
+ * variable failed and a short reason code, but it NEVER includes
+ * the URL value, the credentials, the username, the password, the
+ * hostname, the query string, or the database password.
+ *
+ * The error is a plain `Error` (not a NestJS exception) so that it
+ * can be thrown from the standalone seed script without pulling in
+ * NestJS runtime dependencies, and so that it can be caught and
+ * inspected by unit tests.
+ */
+export class RolePreviewSeedEnvError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RolePreviewSeedEnvError';
+    // Restore the prototype chain after the super call; required
+    // for `instanceof` to work correctly when targeting ES2022+.
+    Object.setPrototypeOf(this, RolePreviewSeedEnvError.prototype);
+  }
+}
+
+/**
+ * The validated seed environment. Returned by `readSeedEnv()` when
+ * every validation passes.
+ *
+ * - `databaseUrl`: the raw transactional `DATABASE_URL`. The seed
+ *   needs the raw URL to construct the Prisma adapter. The URL is
+ *   NEVER printed, NEVER logged, NEVER returned in any API
+ *   response, and NEVER persisted in any audit event.
+ * - `auditDatabaseUrl`: the raw `AUDIT_DATABASE_URL`. The seed does
+ *   NOT write to the audit database (the audit outbox + dispatcher
+ *   handle that at runtime), but the seed MUST verify the audit
+ *   database is an isolated preview database so that subsequent
+ *   runtime audit emissions do not land in a production audit
+ *   database.
+ * - `previewPassword`: the validated preview password. The seed
+ *   hashes this with Argon2id before persistence. It is NEVER
+ *   printed, NEVER logged, and NEVER returned in any API response.
+ * - `databaseIdentity`: the safe structured database-identity
+ *   validation result. Carries only safe fields (no credential,
+ *   no full URL). The seed MAY log the `databaseName` fields.
+ */
+export interface SeedEnv {
+  readonly databaseUrl: string;
+  readonly auditDatabaseUrl: string;
+  readonly previewPassword: string;
+  readonly databaseIdentity: PreviewDatabaseIdentityResult;
+}
+
+/**
+ * Read and validate the seed environment. Throws
+ * {@link RolePreviewSeedEnvError} when any required variable is
+ * missing, malformed, or invalid; when the feature is disabled;
+ * when the seed authorisation flag is missing; when production mode
+ * is active; or when the transactional and audit databases are not
+ * distinct isolated preview databases.
  *
  * Per the Secure Demo Role Preview Mode v1 correction specification,
- * the seed ALSO requires the server-only
- * `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` environment variable when
- * preview mode is enabled. The password is read through
- * `readPreviewPasswordFromEnv`, which validates that the value is
- * present, non-empty, non-whitespace, and at least
- * `MIN_PREVIEW_PASSWORD_LENGTH` characters. The plaintext is
- * hashed with Argon2id before persistence and is NEVER printed,
- * logged, or returned in any API response.
+ * the seed requires ALL of the following before it writes a single
+ * entity:
+ *
+ * 1. `NODE_ENV !== 'production'` — production fails closed.
+ * 2. `ALLOW_ROLE_PREVIEW_SEED=true` — explicit defence-in-depth
+ *    flag to prevent accidental execution.
+ * 3. `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true` — the feature gate.
+ * 4. `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` present and valid (≥ 12
+ *    characters, non-whitespace) — read through
+ *    {@link readPreviewPasswordFromEnv}.
+ * 5. `DATABASE_URL` parses as a PostgreSQL URL whose database name
+ *    contains an approved preview identifier (`role_preview` or
+ *    `preview_role`).
+ * 6. `AUDIT_DATABASE_URL` parses as a PostgreSQL URL whose database
+ *    name contains an approved preview identifier.
+ * 7. The transactional and audit database names are DISTINCT
+ *    (per ADR-014, the audit store is a dedicated database
+ *    separate from the transactional store).
+ *
+ * The validation is fail-before-write: every check runs BEFORE any
+ * Prisma query, BEFORE any migration, and BEFORE any entity
+ * creation. A failure throws {@link RolePreviewSeedEnvError} and
+ * the seed exits without touching the database.
+ *
+ * The error messages are SAFE: they identify which variable failed
+ * and a short reason code, but they NEVER include the URL value,
+ * the credentials, the username, the password, the hostname, the
+ * query string, or the database password. The seed's top-level
+ * error handler prints the error message to stderr; the message
+ * is therefore the only thing an operator or a log aggregator
+ * might see, and it is deliberately safe.
+ *
+ * The function is pure: it does NOT read `process.env` directly.
+ * Callers pass the environment record explicitly so that the
+ * function is unit-testable without mutating global state. The
+ * seed's `main()` passes `process.env`; unit tests pass a
+ * constructed record.
+ *
+ * @param env The environment record (typically `process.env`).
+ * @returns The validated seed environment.
+ * @throws {RolePreviewSeedEnvError} When any validation fails.
  */
-function readSeedEnv(): {
-  readonly databaseUrl: string;
-  readonly previewPassword: string;
-} {
-  const nodeEnv = process.env['NODE_ENV'];
+export function readSeedEnv(env: NodeJS.ProcessEnv = process.env): SeedEnv {
+  const nodeEnv = env['NODE_ENV'];
   if (nodeEnv === 'production') {
-    throw new Error(
+    throw new RolePreviewSeedEnvError(
       'role-preview:seed refuses to run when NODE_ENV=production. ' +
         'This command is development-only and must never be used in ' +
         'a production environment.',
     );
   }
 
-  const allowSeed = process.env['ALLOW_ROLE_PREVIEW_SEED'] ?? '';
+  const allowSeed = env['ALLOW_ROLE_PREVIEW_SEED'] ?? '';
   if (allowSeed !== 'true') {
-    throw new Error(
+    throw new RolePreviewSeedEnvError(
       'role-preview:seed requires ALLOW_ROLE_PREVIEW_SEED=true to be ' +
         'set explicitly. This is a defence-in-depth measure to prevent ' +
         'accidental execution.',
     );
   }
 
-  const featureFlag = process.env['IBN_HAYAN_ROLE_PREVIEW_ENABLED'] ?? '';
+  const featureFlag = env['IBN_HAYAN_ROLE_PREVIEW_ENABLED'] ?? '';
   if (featureFlag !== 'true') {
-    throw new Error(
+    throw new RolePreviewSeedEnvError(
       'role-preview:seed requires IBN_HAYAN_ROLE_PREVIEW_ENABLED=true. ' +
         'The seed creates preview-only identities and must not run ' +
         'when the feature is disabled.',
@@ -118,32 +205,115 @@ function readSeedEnv(): {
   // whitespace-only, or too short. The plaintext is returned to
   // the caller (the seed) so that it can be hashed with Argon2id;
   // it is NEVER printed, logged, or returned in any API response.
-  const previewPassword = readPreviewPasswordFromEnv(process.env);
+  let previewPassword: string;
+  try {
+    previewPassword = readPreviewPasswordFromEnv(env);
+  } catch (err) {
+    // Wrap the password error in a seed-env error so the seed's
+    // top-level handler prints a single, consistent message. The
+    // underlying error message is safe (it names only the variable
+    // and the minimum length, never the value).
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new RolePreviewSeedEnvError(
+      `role-preview:seed requires a valid ${PREVIEW_PASSWORD_ENV_VAR}. ` +
+        `${detail}`,
+    );
+  }
 
-  const databaseUrl = process.env['DATABASE_URL'];
-  if (!databaseUrl || databaseUrl.length === 0) {
-    throw new Error(
+  // Database-identity gate: validate BOTH the transactional URL
+  // and the audit URL, and verify they resolve to distinct
+  // database names. The validation is pure (no DB connection, no
+  // logging of the URL); it parses the URL with the native `URL`
+  // parser and checks the database NAME only.
+  //
+  // This corrects the prior gap where the seed validated ONLY
+  // `DATABASE_URL` (never `AUDIT_DATABASE_URL`) using an unsafe
+  // substring match across the entire URL. The new check:
+  // - parses both URLs with the native `URL` parser;
+  // - derives the database name from `url.pathname` only;
+  // - rejects when either database name does not contain an
+  //   approved preview identifier;
+  // - rejects when the two database names are identical (ADR-014
+  //   requires a dedicated audit database).
+  //
+  // The error messages identify which check failed and a short
+  // reason code, but NEVER include the URL value, credentials,
+  // hostname, or query string.
+  const databaseIdentity = validatePreviewDatabaseIdentity(env);
+  if (!databaseIdentity.ok) {
+    throw new RolePreviewSeedEnvError(
+      formatDatabaseIdentityError(databaseIdentity),
+    );
+  }
+
+  // Both URLs are valid and distinct. Read the raw URLs from the
+  // environment; the seed needs them to construct the Prisma
+  // adapter (transactional) and to log the audit database name
+  // (audit). The raw URLs are NEVER printed, NEVER logged, NEVER
+  // returned in any API response, and NEVER persisted in any
+  // audit event.
+  const databaseUrl = env['DATABASE_URL'];
+  if (typeof databaseUrl !== 'string' || databaseUrl.length === 0) {
+    // Defensive: the validator already confirmed the URL is a
+    // non-empty string. This branch is unreachable in practice.
+    throw new RolePreviewSeedEnvError(
       'DATABASE_URL is not set. The seed requires a running PostgreSQL ' +
         'database with the migrations applied.',
     );
   }
-
-  // Defence-in-depth: refuse to seed a database whose URL does not
-  // contain the substring 'role_preview' or 'preview_role'. This
-  // prevents the seed from accidentally running against a production
-  // database whose URL happens to be set in the environment.
-  const lower = databaseUrl.toLowerCase();
-  if (!lower.includes('role_preview') && !lower.includes('preview_role')) {
-    throw new Error(
-      'DATABASE_URL must contain the substring "role_preview" or ' +
-        '"preview_role". The seed refuses to run against a database ' +
-        'whose URL does not identify it as the isolated preview ' +
-        'database. This is a defence-in-depth measure to prevent ' +
-        'accidental seeding of a production database.',
+  const auditDatabaseUrl = env['AUDIT_DATABASE_URL'];
+  if (typeof auditDatabaseUrl !== 'string' || auditDatabaseUrl.length === 0) {
+    // Defensive: same as above.
+    throw new RolePreviewSeedEnvError(
+      'AUDIT_DATABASE_URL is not set. The seed requires an isolated ' +
+        'audit database whose name contains "role_preview" or ' +
+        '"preview_role".',
     );
   }
 
-  return { databaseUrl, previewPassword };
+  return { databaseUrl, auditDatabaseUrl, previewPassword, databaseIdentity };
+}
+
+/**
+ * Format a safe error message for a failed database-identity
+ * validation. The message identifies which check failed and a short
+ * reason code, but NEVER includes the URL value, credentials,
+ * hostname, or query string.
+ */
+function formatDatabaseIdentityError(
+  result: PreviewDatabaseIdentityResult,
+): string {
+  switch (result.reason) {
+    case 'transactional_invalid':
+      return (
+        'DATABASE_URL failed the preview database-identity check: ' +
+        `${result.transactional.reason ?? 'unknown'}. ` +
+        'The transactional database URL must parse as a PostgreSQL URL ' +
+        'whose database name contains "role_preview" or "preview_role".'
+      );
+    case 'audit_invalid':
+      return (
+        'AUDIT_DATABASE_URL failed the preview database-identity check: ' +
+        `${result.audit.reason ?? 'unknown'}. ` +
+        'The audit database URL must parse as a PostgreSQL URL whose ' +
+        'database name contains "role_preview" or "preview_role".'
+      );
+    case 'databases_not_distinct':
+      return (
+        'DATABASE_URL and AUDIT_DATABASE_URL resolve to the same ' +
+        'database name. Per ADR-014, the audit store must be a ' +
+        'dedicated database separate from the transactional store. ' +
+        'Use distinct database names for the transactional and audit ' +
+        'preview databases.'
+      );
+    default:
+      return (
+        'The preview database-identity check failed. Both DATABASE_URL ' +
+        'and AUDIT_DATABASE_URL must parse as PostgreSQL URLs whose ' +
+        'database names contain "role_preview" or "preview_role", and ' +
+        'the two database names must be distinct.'
+      );
+  }
 }
 
 /**
@@ -405,13 +575,53 @@ async function main(): Promise<void> {
     logger.log(
       `  No business-domain data (patients, appointments, invoices, etc.) was created.`,
     );
+    // Log the validated database names (safe: the database name is
+    // the pathname of the URL, never a credential). The raw URLs
+    // are NEVER logged.
+    if (env.databaseIdentity.transactional.databaseName !== undefined) {
+      logger.log(
+        `  Transactional database name: ${env.databaseIdentity.transactional.databaseName}`,
+      );
+    }
+    if (env.databaseIdentity.audit.databaseName !== undefined) {
+      logger.log(
+        `  Audit database name:         ${env.databaseIdentity.audit.databaseName}`,
+      );
+    }
+    logger.log('  (Raw DATABASE_URL and AUDIT_DATABASE_URL are NOT printed.)');
   } finally {
     await prisma.$disconnect();
   }
 }
 
-void main().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  console.error('Seed failed:', message);
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// Entry-point guard
+// ---------------------------------------------------------------------------
+
+// The seed's `main()` is invoked ONLY when this file is the Node.js
+// entry point. When the file is imported by a unit test (e.g.
+// `role-preview-seed-dev.spec.ts`), `main()` is NOT invoked; the
+// test imports `readSeedEnv` and `RolePreviewSeedEnvError` directly.
+//
+// The guard checks whether `process.argv[1]` (the entry-point
+// script path) ends with this file's name. When the seed is run as
+// `pnpm exec tsx src/scripts/role-preview-seed-dev.ts`,
+// `process.argv[1]` is the path to this script and the guard
+// invokes `main()`. When the file is imported by a test,
+// `process.argv[1]` is the test runner binary and the guard skips
+// `main()`.
+//
+// This pattern avoids `import.meta.url`, which is not allowed in
+// files that compile to CommonJS output (the api package does not
+// declare `"type": "module"`).
+const SCRIPT_FILENAME = 'role-preview-seed-dev.ts';
+const isMainModule =
+  process.argv[1] !== undefined && process.argv[1].endsWith(SCRIPT_FILENAME);
+
+if (isMainModule) {
+  void main().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Seed failed:', message);
+    process.exit(1);
+  });
+}

@@ -1706,3 +1706,310 @@ slice ordering.
   only):** push the branch through a controlled branch-and-PR
   workflow; the `postgresql17-validation` job runs
   `pnpm test:role-preview` alongside the existing seven suites.
+
+
+---
+
+## Isolated Preview Audit Database Enforcement (2026-07-25)
+
+**Date:** 2026-07-25
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `2b9f6dc01fe8e794e273c6638464ce3a24d7a341`
+(`fix: enable secure logged-out demo role bootstrap`)
+**Correction commit subject:** `fix: enforce isolated preview audit database`
+**Correction commit SHA:** recorded in `worklog.md` (per the durable
+Git-authority rule)
+
+### Audit-URL seed-gap root cause
+
+The prior implementation of the preview seed
+(`apps/api/src/scripts/role-preview-seed-dev.ts`) validated ONLY
+`DATABASE_URL` and never `AUDIT_DATABASE_URL`. The validation itself
+used an unsafe case-insensitive substring match across the FULL URL
+(`url.toLowerCase().includes('role_preview')`), which can false-positive
+when the substring appears in the username
+(`role_preview_user:pass@host/prod`), the hostname
+(`user:pass@role-preview-db.example.com/prod`), or the query string
+(`?schema=role_preview`). None of those prove the database NAME is
+preview-specific. A misconfigured environment could therefore pass
+the gate while pointing at a production database.
+
+The companion module
+(`apps/api/src/modules/dev/role-preview/preview-database-identity.ts`)
+had the same unsafe substring-matching issue and did NOT verify that
+the two URLs resolve to distinct database names (ADR-014 requires
+the audit store to be a dedicated database separate from the
+transactional store).
+
+### Database-name parsing architecture
+
+The corrected validator uses the native `URL` parser to derive the
+database name from `url.pathname` only. The validation steps are:
+
+1. The URL must be a non-empty string.
+2. The URL must parse with the native `URL` parser.
+3. The URL scheme must be `postgresql:` or `postgres:`.
+4. The URL pathname must yield a non-empty database name (the
+   leading `/` is stripped; the remainder must be non-empty).
+5. The database name (lowercased) must contain at least one
+   approved preview identifier (`role_preview` or `preview_role`).
+
+The pair validator additionally verifies the two database names are
+DISTINCT. The structured result carries only safe fields: `ok`,
+`reason` (a safe failure code), and `databaseName` (the pathname
+only — never the credentials, hostname, or query string). The
+validator never logs, never throws, and never connects to the
+database.
+
+### Transactional and audit database distinction
+
+Per ADR-014, the audit store is a dedicated PostgreSQL 17 database
+separate from the transactional store. The corrected validator
+enforces this by comparing the parsed database names of
+`DATABASE_URL` and `AUDIT_DATABASE_URL`. If the two names are
+identical, the validator returns `ok: false` with reason
+`databases_not_distinct`. This prevents the seed from running when
+the audit database is accidentally the same as the transactional
+database.
+
+### Seed fail-before-write protection
+
+The corrected seed's `readSeedEnv()` function (now exported for unit
+testing) runs ALL validation BEFORE any Prisma query, BEFORE any
+migration, and BEFORE any entity creation. The validation order is:
+
+1. `NODE_ENV !== 'production'`
+2. `ALLOW_ROLE_PREVIEW_SEED=true`
+3. `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`
+4. `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` present and valid (≥ 12 chars)
+5. `DATABASE_URL` parses as a PostgreSQL URL whose database name
+   contains an approved preview identifier
+6. `AUDIT_DATABASE_URL` parses as a PostgreSQL URL whose database
+   name contains an approved preview identifier
+7. The two database names are DISTINCT
+
+A failure at any step throws `RolePreviewSeedEnvError` and the seed
+exits without touching the database. The error messages are SAFE:
+they identify which check failed and a short reason code, but they
+NEVER include the URL value, the credentials, the username, the
+password, the hostname, the query string, or the database password.
+
+### Audit outbox and projection validation
+
+The audit architecture (per ADR-014 and the ninth canonical batch
+specification) uses a transactional outbox:
+
+1. Audit events are first written to the `audit_outbox_events` table
+   in the TRANSACTIONAL database (in the same Prisma transaction as
+   the state mutation — e.g. session creation).
+2. The `AuditDispatcherService` claims pending outbox rows using
+   PostgreSQL-safe concurrent claiming (`FOR UPDATE SKIP LOCKED`)
+   and appends each to the `audit_events` table in the DEDICATED
+   audit database.
+3. The outbox row is marked delivered only after successful
+   audit-store append AND only if the dispatcher still owns the
+   active lease on the row.
+
+The Role Preview bootstrap flow emits
+`role_preview.session.bootstrapped` through the outbox in the same
+Prisma transaction as the new session creation. The audit metadata
+carries ONLY `{ endpoint: 'role_preview_bootstrap_select', roleCode:
+'R09_ADMINISTRATOR' }` — no bootstrap nonce, no challenge value, no
+password, no session token, no hash, no complete database URL.
+
+### Audit database assertion coverage
+
+The prior Test 34 (`No bootstrap secret appears in audit records`)
+was a no-op placeholder (`expect(true).toBe(true)`). The corrected
+integration suite replaces it with six real audit-database
+assertion tests (Phase 6 items 29–34):
+
+- **29.** Approved audit action is emitted
+  (`role_preview.session.bootstrapped` in the transactional outbox).
+- **30.** Audit outbox contains no secret (no nonce, challenge,
+  password, token, hash, or URL in the outbox row).
+- **31.** Audit projection succeeds (the dispatcher delivers the
+  outbox event; `delivered_at` is set; no pending events remain).
+- **32.** Audit database receives the projected record (the
+  `audit_events` table in the DEDICATED audit database has the
+  `role_preview.session.bootstrapped` row).
+- **33.** Audit database record contains no password, token, nonce,
+  challenge, hash, or URL (the metadata carries ONLY `endpoint` and
+  `roleCode`).
+- **34.** Transactional and audit database isolation is proven (the
+  transactional Prisma client has NO `auditEvent` model; the audit
+  events live ONLY in the DEDICATED audit database).
+
+These tests use the REAL audit outbox + dispatcher + audit-store
+architecture — they do NOT bypass audit processing by directly
+inserting fake audit rows, and they do NOT merely inspect an
+in-memory mock. The tests run ONLY on GitHub Actions (PostgreSQL 17
+composite Docker image); they are NOT run locally because the
+development environment has no PostgreSQL 17.
+
+### Local validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run typecheck` | PASS | 7 packages + 2 apps typecheck clean |
+| `pnpm run lint` | PASS | 7 packages + 2 apps lint clean (11 prettier issues auto-fixed) |
+| `pnpm run test` (unit) | PASS | api 184 (was 5; +79 from the two new spec files) + web 180 + contracts 123 + domain 97 + observability 83 = 667 total. 0 regressions. |
+| `pnpm run build` | PASS | All packages built; Next.js production build succeeded; `/role-preview` registered as a static route |
+| `git diff --check` | PASS | No whitespace errors |
+| New `preview-database-identity.spec.ts` | PASS | 60 unit tests |
+| New `role-preview-seed-dev.spec.ts` | PASS | 19 unit tests (13 Phase 4 scenarios + 6 additional safety cases) |
+| Retired password literal scan | PASS | `preview-role-only-do-not-use-in-production` is ABSENT from all tracked files |
+| Actual preview password exposure scan | PASS | The protected preview password value is ABSENT from all git-tracked files and from all build output |
+| Database URL exposure scan | PASS | No complete `postgresql://` URL appears in any error message or log line |
+| Clinic Admin sidebar items | PASS | Exactly 11 items (`overview`, `appointments`, `patients`, `doctors`, `staff-attendance`, `waiting-room`, `services-procedures`, `billing-payments`, `inventory`, `reports-analytics`, `settings`) |
+| R09 Arabic label | PASS | `مدير المنشأة` in `packages/domain/src/authorization/role-catalogue.ts` line 232 |
+| Notification bell location | PASS | `NotificationBell` is in `clinic-admin-header.tsx` (the header), NOT in the sidebar |
+| `.preview-logs/` new files | PASS | No new files created under `.preview-logs/` by this task (the three pre-existing files `preview-proxy.py`, `start-api.sh`, `start-web.sh` were committed in `362d4cd`, an ancestor of `main` `72cce12`; they are static, not running) |
+| Preview daemon | PASS | No preview daemon created; no listeners on ports 3000/3001/3002 |
+| Runtime log | PASS | No runtime log created |
+
+### PostgreSQL 17 CI status
+
+**PENDING.** The 37-test PostgreSQL 17 integration suite
+(`apps/api/test/role-preview/role-preview.role-preview-spec.ts`)
+has been updated to cover all 37 Phase 6 scenarios. The suite runs
+ONLY on GitHub Actions inside the composite node:24 + postgres:17
+Docker image (per `.github/workflows/main-ci.yml`). The local
+environment has no PostgreSQL 17 runtime. The suite is NOT claimed
+to have passed locally; it will run on GitHub Actions CI when the
+branch is pushed through a controlled branch-and-PR workflow.
+
+### Files created
+
+- `apps/api/src/scripts/role-preview-seed-dev.spec.ts` — 19 unit
+  tests for the seed's `readSeedEnv()` function, covering all 13
+  Phase 4 seed-safety scenarios plus 6 additional safety cases
+  (username-only false positive, hostname-only false positive,
+  `postgres://` scheme, etc.).
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+  — rewrote with the structured `validatePreviewDatabaseUrl()` and
+  `validatePreviewDatabaseIdentity()` functions; replaced the unsafe
+  full-URL substring match with native `URL` parsing of the
+  database NAME only; added the distinct-database-name check;
+  retained the boolean wrappers (`isPreviewTransactionalDatabaseUrl`,
+  `isPreviewAuditDatabaseUrl`, `isPreviewDatabaseIdentityValid`) for
+  backward compatibility with the controller.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+  — expanded from 16 to 60 unit tests, covering URL parsing,
+  distinct-database check, no-credential return, no-full-URL
+  return, username-only/hostname-only/query-string-only false
+  positive rejection, and the `postgres://` legacy scheme.
+- `apps/api/src/scripts/role-preview-seed-dev.ts` — replaced the
+  unsafe substring check with `validatePreviewDatabaseIdentity()`;
+  added `AUDIT_DATABASE_URL` validation; added the distinct-DB
+  check; exported `readSeedEnv()` and `RolePreviewSeedEnvError` for
+  unit testing; added an entry-point guard so importing the module
+  in a test does NOT execute `main()`; added safe database-name
+  logging (the raw URLs are NEVER logged).
+- `apps/api/src/modules/dev/role-preview/index.ts` — re-exported
+  the new `validatePreviewDatabaseUrl`, `validatePreviewDatabaseIdentity`,
+  `PREVIEW_DATABASE_NAME_IDENTIFIERS`, and the
+  `PreviewDatabaseUrlValidation` / `PreviewDatabaseIdentityResult`
+  types.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+  — replaced Test 3 (audit-URL gap placeholder) with 8 real
+  seed-validation tests (Phase 6 items 1–8); replaced Test 34
+  (audit-DB gap placeholder) with 6 real audit-database assertion
+  tests (Phase 6 items 29–34); added the `dispatchAll()` helper;
+  wired `AuditPrismaService` and `AuditDispatcherService` into the
+  test setup; added audit-tables cleanup in `beforeEach`; updated
+  the header comment to reflect the 37-test Phase 6 coverage.
+- `PROJECT_CONTINUITY.md` — appended this section.
+- `worklog.md` — appended a task entry.
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None. The correction uses the existing `audit_outbox_events` table
+(transactional database) and the existing `audit_events` +
+`audit_chain_heads` tables (dedicated audit database). No
+`prisma/schema.prisma` change, no `prisma/migrations/**` change, no
+`prisma-audit/schema.prisma` change.
+
+### Dependency or lockfile changes
+
+None. No `package.json` dependency was added or removed;
+`pnpm-lock.yaml` is unchanged.
+
+### Fake business data introduced
+
+None. The correction does NOT create any business records. The
+preview seed (unchanged in this correction) creates only identity,
+tenancy, membership, and role-assignment records.
+
+### Preview daemon or runtime artifact
+
+None. No daemon script was created. No runtime log was created. No
+persistent process was started. The three pre-existing
+`.preview-logs/` files (`preview-proxy.py`, `start-api.sh`,
+`start-web.sh`) were committed in `362d4cd` (an ancestor of `main`
+`72cce12`) and are NOT running.
+
+### Runtime Preview status
+
+**NOT LAUNCHED.** The Preview server was NOT started. No API, web,
+database, proxy, or daemon process was started. The correction is
+purely source-code + test-code + documentation. The Preview feature
+remains development-only and is activated only when an operator
+explicitly sets the environment variables and runs the seed.
+
+### Known limitations
+
+1. **No local PostgreSQL 17.** The 37-test PostgreSQL 17
+   integration suite runs ONLY on GitHub Actions. The local
+   environment has no PostgreSQL 17 runtime (per `AGENTS.md`
+   §"Environment Constraints").
+2. **PostgreSQL 17 CI status pending.** The integration suite has
+   been updated but has NOT been executed on GitHub Actions yet. A
+   controlled branch-and-PR workflow is required to run it.
+3. **In-memory challenge store.** Restarting the API invalidates
+   all outstanding bootstrap challenges. This is acceptable for a
+   development-only feature.
+4. **`.preview-logs/` pre-existing files.** The three files in
+   `.preview-logs/` were committed in `362d4cd` (a UUID-subject
+   autocommit) which is an ancestor of `main`. They are tracked,
+   static files — NOT running daemons. This correction does NOT
+   remove them; a separate operator decision is required if they
+   should be removed from `main`.
+
+### Immediate next product slice
+
+**Today's Appointments** — unchanged. The Isolated Preview Audit
+Database Enforcement correction does NOT alter the canonical
+next-vertical-slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at
+  `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with
+  origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on
+  `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `2b9f6dc01fe8e794e273c6638464ce3a24d7a341`
+  (`fix: enable secure logged-out demo role bootstrap`).
+- **Correction commit subject:** `fix: enforce isolated preview
+  audit database`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the
+  durable Git-authority rule).
+- **Protected password file:**
+  `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory
+  `0700`, file `0600`, outside the repository).
+- **To re-run local validation:** `cd /home/z/demo-role-preview-v1
+  && pnpm install --frozen-lockfile && pnpm run build:shared &&
+  pnpm --filter @ibn-hayan/observability... build && pnpm run
+  typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the PostgreSQL 17 integration tests (GitHub Actions
+  only):** push the branch through a controlled branch-and-PR
+  workflow; the `postgresql17-validation` job runs
+  `pnpm test:role-preview` alongside the existing seven suites.

@@ -6,6 +6,8 @@ import type { Server } from 'node:http';
 import { INestApplication } from '@nestjs/common';
 import { AppModule } from '../../src/app.module.js';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
+import { AuditPrismaService } from '../../src/modules/audit/audit-prisma.service.js';
+import { AuditDispatcherService } from '../../src/modules/audit/audit-dispatcher.service.js';
 import { setupRolePreviewDatabaseTests } from './_role-preview-bootstrap.js';
 import { execFileSync } from 'node:child_process';
 import { PREVIEW_TENANT_SLUG } from '../../src/modules/dev/role-preview/preview-identity-catalogue.js';
@@ -33,52 +35,56 @@ interface SelectPreviewRoleResponseBody {
  * node:24 + postgres:17 Docker image). They are NOT run locally
  * because the development environment has no PostgreSQL 17.
  *
- * Coverage (per the Secure Logged-Out Demo Role Bootstrap
- * specification's 38 required integration scenarios):
+ * Coverage (per the Phase 6 PostgreSQL 17 CI validation
+ * specification's 37 required integration scenarios):
  *
- * Seed validation (1–11):
- *  1. Preview seed refuses production.
- *  2. Preview seed refuses a non-preview database URL.
- *  3. Preview seed refuses a non-preview audit database URL.
- *  4. Preview seed creates one tenant.
- *  5. Preview seed creates one organisation.
- *  6. Preview seed creates one facility.
- *  7. Preview seed creates exactly fourteen identities.
- *  8. Exact R01–R14 roles exist.
- *  9. Correct scopes exist.
- * 10. Seed rerun is idempotent.
- * 11. No business records are created.
+ * Seed validation (1–8):
+ *  1. Seed rejects missing transactional URL.
+ *  2. Seed rejects malformed transactional URL.
+ *  3. Seed rejects non-preview transactional DB.
+ *  4. Seed rejects missing audit URL.
+ *  5. Seed rejects malformed audit URL.
+ *  6. Seed rejects non-preview audit DB.
+ *  7. Seed rejects identical transactional and audit DB names.
+ *  8. Seed accepts distinct Preview transactional and audit DBs.
  *
- * Bootstrap + select (12–26):
- * 12. Logged-out bootstrap succeeds.
- * 13. Expired challenge fails.
- * 14. Replay fails.
- * 15. Unknown role fails.
- * 16. Caller-supplied IDs fail.
- * 17. R09 creates a normal application session.
- * 18. R09 tenant context is correct.
- * 19. R09 organisation context is correct.
- * 20. R09 facility context is correct.
- * 21. R09 routes to `/clinic-admin`.
- * 22. Unimplemented role routes to `/role-preview`.
- * 23. Subsequent switching replaces the previous preview session.
- * 24. End preview revokes the session.
- * 25. HttpOnly behaviour is correct.
- * 26. SameSite behaviour is correct.
+ * Seed results (9–16):
+ *  9. Exactly one Preview tenant exists.
+ * 10. Exactly one Preview organisation exists.
+ * 11. Exactly one Preview facility exists.
+ * 12. Exactly fourteen Preview identities exist.
+ * 13. Exact R01–R14 role codes exist.
+ * 14. Correct scopes exist.
+ * 15. Seed is idempotent.
+ * 16. No business records are created.
  *
- * Security (27–38):
- * 27. Secure cookie behaviour follows environment rules.
- * 28. Valid Origin succeeds.
- * 29. Invalid Origin fails.
- * 30. CSRF remains enforced on active-session switching.
- * 31. No password appears in responses.
- * 32. No hash appears in responses.
- * 33. No raw session token appears in responses.
- * 34. No bootstrap secret appears in audit records.
- * 35. Preview routes fail against non-preview database identities.
- * 36. Normal login remains unchanged.
- * 37. Normal dashboard remains unchanged.
- * 38. Normal Clinic Admin protection remains unchanged.
+ * Bootstrap + select (17–27):
+ * 17. Logged-out bootstrap works.
+ * 18. Challenge expiry works.
+ * 19. Replay fails.
+ * 20. Invalid Origin fails.
+ * 21. R09 creates a normal session.
+ * 22. R09 context is correct.
+ * 23. Unimplemented role routing is honest.
+ * 24. Subsequent switching replaces the previous session.
+ * 25. End Preview revokes the session.
+ * 26. CSRF remains enforced.
+ * 27. Cookie security is correct.
+ *
+ * Security + audit (28–34):
+ * 28. No sensitive value appears in API responses.
+ * 29. Approved audit action is emitted.
+ * 30. Audit outbox contains no secret.
+ * 31. Audit projection succeeds.
+ * 32. Audit database receives the projected record.
+ * 33. Audit database record contains no password, token, nonce,
+ *     challenge, hash, or URL.
+ * 34. Transactional and audit database isolation is proven.
+ *
+ * Regression (35–37):
+ * 35. Normal login remains unchanged.
+ * 36. Normal dashboard remains unchanged.
+ * 37. Normal Clinic Admin protection remains unchanged.
  */
 
 setupRolePreviewDatabaseTests();
@@ -88,6 +94,8 @@ const ORIGIN = 'http://localhost:3000';
 let app: INestApplication;
 let server: Server;
 let prisma: PrismaService;
+let auditPrisma: AuditPrismaService;
+let dispatcher: AuditDispatcherService;
 
 beforeAll(async () => {
   // Run the preview seed before booting the app, so that the
@@ -104,6 +112,8 @@ beforeAll(async () => {
   await app.init();
   server = app.getHttpServer() as Server;
   prisma = app.get(PrismaService);
+  auditPrisma = app.get(AuditPrismaService);
+  dispatcher = app.get(AuditDispatcherService);
 }, 120_000);
 
 afterAll(async () => {
@@ -116,6 +126,17 @@ beforeEach(async () => {
   // Clean up any sessions left by previous tests so each test
   // starts with a clean slate.
   await prisma.authSession.deleteMany({});
+  // Clean the transactional audit outbox so each audit test starts
+  // fresh. The outbox lives in the TRANSACTIONAL database.
+  await prisma.auditOutboxEvent.deleteMany({});
+  // Clean the audit store (audit_events + audit_chain_heads) in the
+  // DEDICATED audit database. The audit_events table has
+  // immutability triggers that reject DELETE and TRUNCATE, so we
+  // must disable the triggers temporarily, delete, and re-enable.
+  await auditPrisma.$executeRaw`ALTER TABLE "audit_events" DISABLE TRIGGER USER`;
+  await auditPrisma.$executeRaw`TRUNCATE TABLE "audit_events"`;
+  await auditPrisma.$executeRaw`ALTER TABLE "audit_events" ENABLE TRIGGER USER`;
+  await auditPrisma.auditChainHead.deleteMany({});
 });
 
 // ---------------------------------------------------------------------------
@@ -150,6 +171,30 @@ function runPreviewSeedWithEnv(env: NodeJS.ProcessEnv): void {
       },
     },
   );
+}
+
+/**
+ * Dispatch all pending outbox events to the dedicated audit store.
+ *
+ * The audit architecture (per ADR-014 and the ninth canonical batch
+ * specification) uses a transactional outbox: audit events are
+ * first written to the `audit_outbox_events` table in the
+ * transactional database (in the same Prisma transaction as the
+ * state mutation), then projected to the `audit_events` table in
+ * the DEDICATED audit database by the
+ * {@link AuditDispatcherService}.
+ *
+ * This helper runs `dispatcher.dispatchOnce()` repeatedly until no
+ * more events are claimed, ensuring all outbox events are projected
+ * to the audit store before the test asserts on the audit store.
+ */
+async function dispatchAll(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    const summary = await dispatcher.dispatchOnce({ batchSize: 100 });
+    if (summary.claimed === 0) {
+      break;
+    }
+  }
 }
 
 function getSetCookieString(res: Response): string {
@@ -216,11 +261,19 @@ async function bootstrapChallenge(): Promise<{
 // ---------------------------------------------------------------------------
 
 describe('Preview seed validation', () => {
-  it('1. Preview seed refuses production', () => {
-    expect(() => runPreviewSeedWithEnv({ NODE_ENV: 'production' })).toThrow();
+  it('1. Preview seed rejects a missing transactional URL', () => {
+    // Override DATABASE_URL with an empty string. The seed's
+    // validator treats empty string as `missing`.
+    expect(() => runPreviewSeedWithEnv({ DATABASE_URL: '' })).toThrow();
   });
 
-  it('2. Preview seed refuses a non-preview database URL', () => {
+  it('2. Preview seed rejects a malformed transactional URL', () => {
+    expect(() =>
+      runPreviewSeedWithEnv({ DATABASE_URL: 'not-a-valid-url' }),
+    ).toThrow();
+  });
+
+  it('3. Preview seed rejects a non-preview transactional DB', () => {
     expect(() =>
       runPreviewSeedWithEnv({
         DATABASE_URL: 'postgresql://postgres@127.0.0.1:5432/ibn_hayan_test',
@@ -228,21 +281,66 @@ describe('Preview seed validation', () => {
     ).toThrow();
   });
 
-  it('3. Preview seed refuses a non-preview audit database URL (documented gap)', () => {
-    // The current seed only validates DATABASE_URL, not
-    // AUDIT_DATABASE_URL. This test documents the gap; a follow-up
-    // will add AUDIT_DATABASE_URL validation to the seed.
-    expect(true).toBe(true);
+  it('4. Preview seed rejects a missing audit URL', () => {
+    // Override AUDIT_DATABASE_URL with an empty string. The seed's
+    // validator treats empty string as `missing`.
+    expect(() => runPreviewSeedWithEnv({ AUDIT_DATABASE_URL: '' })).toThrow();
   });
 
-  it('4. Preview seed creates one tenant', async () => {
+  it('5. Preview seed rejects a malformed audit URL', () => {
+    expect(() =>
+      runPreviewSeedWithEnv({ AUDIT_DATABASE_URL: 'not-a-valid-url' }),
+    ).toThrow();
+  });
+
+  it('6. Preview seed rejects a non-preview audit DB', () => {
+    // Override AUDIT_DATABASE_URL with a non-preview URL. The seed
+    // must refuse to run because the audit database is not isolated.
+    expect(() =>
+      runPreviewSeedWithEnv({
+        AUDIT_DATABASE_URL:
+          'postgresql://postgres@127.0.0.1:5432/ibn_hayan_audit_test',
+      }),
+    ).toThrow();
+  });
+
+  it('7. Preview seed rejects identical transactional and audit DB names', () => {
+    // Set AUDIT_DATABASE_URL to the same value as DATABASE_URL.
+    // The seed must refuse to run because the audit store must be
+    // a DEDICATED database separate from the transactional store
+    // (ADR-014).
+    const txUrl = process.env['DATABASE_URL'];
+    if (!txUrl) {
+      throw new Error('DATABASE_URL must be set by the test bootstrap');
+    }
+    expect(() =>
+      runPreviewSeedWithEnv({ AUDIT_DATABASE_URL: txUrl }),
+    ).toThrow();
+  });
+
+  it('8. Preview seed accepts distinct Preview transactional and audit DBs', () => {
+    // The default environment (set by _role-preview-bootstrap.ts)
+    // has distinct preview transactional and audit databases. The
+    // seed must accept this configuration. We verify by running the
+    // seed with no overrides; it must NOT throw.
+    expect(() => runPreviewSeed()).not.toThrow();
+  });
+
+  // Additional: production mode is rejected (defence-in-depth).
+  it('1a. Preview seed refuses production', () => {
+    expect(() => runPreviewSeedWithEnv({ NODE_ENV: 'production' })).toThrow();
+  });
+});
+
+describe('Preview seed results', () => {
+  it('9. Exactly one Preview tenant exists', async () => {
     const tenants = await prisma.tenant.findMany({
       where: { slug: PREVIEW_TENANT_SLUG },
     });
     expect(tenants).toHaveLength(1);
   });
 
-  it('5. Preview seed creates one organisation', async () => {
+  it('10. Exactly one Preview organisation exists', async () => {
     const tenant = await prisma.tenant.findUnique({
       where: { slug: PREVIEW_TENANT_SLUG },
     });
@@ -253,7 +351,7 @@ describe('Preview seed validation', () => {
     expect(orgs).toHaveLength(1);
   });
 
-  it('6. Preview seed creates one facility', async () => {
+  it('11. Exactly one Preview facility exists', async () => {
     const tenant = await prisma.tenant.findUnique({
       where: { slug: PREVIEW_TENANT_SLUG },
     });
@@ -270,14 +368,14 @@ describe('Preview seed validation', () => {
     expect(facilities).toHaveLength(1);
   });
 
-  it('7. Preview seed creates exactly fourteen identities', async () => {
+  it('12. Exactly fourteen Preview identities exist', async () => {
     const users = await prisma.user.findMany({
       where: { email: { endsWith: '@role-preview.dev' } },
     });
     expect(users).toHaveLength(14);
   });
 
-  it('8. Exact R01–R14 roles exist', async () => {
+  it('13. Exact R01–R14 role codes exist', async () => {
     const codes = PLATFORM_ROLE_CATALOGUE.map((c) => c.code);
     const assignments = await prisma.tenantRoleAssignment.findMany({
       where: { roleCode: { in: codes } },
@@ -288,7 +386,7 @@ describe('Preview seed validation', () => {
     }
   });
 
-  it('9. Correct scopes exist (R13/R14 tenant, R01–R12 facility)', async () => {
+  it('14. Correct scopes exist (R13/R14 tenant, R01–R12 facility)', async () => {
     const tenantScoped = await prisma.tenantRoleAssignment.findMany({
       where: { scopeLevel: 'tenant' },
     });
@@ -318,11 +416,11 @@ describe('Preview seed validation', () => {
     }
   });
 
-  it('10. Seed rerun is idempotent', () => {
+  it('15. Seed rerun is idempotent', () => {
     expect(() => runPreviewSeed()).not.toThrow();
   });
 
-  it('11. No business records are created (only 14 identity users)', async () => {
+  it('16. No business records are created (only 14 identity users)', async () => {
     const users = await prisma.user.findMany({});
     expect(users.length).toBe(14);
   });
@@ -558,7 +656,7 @@ describe('Logged-out bootstrap flow', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Security (27–38)
+// Security (27–28, 30–31) — cookie, origin, csrf, no-secrets-in-responses
 // ---------------------------------------------------------------------------
 
 describe('Security', () => {
@@ -578,14 +676,14 @@ describe('Security', () => {
     expect(res.status).toBe(200);
   });
 
-  it('29. Invalid Origin fails (403)', async () => {
+  it('28a. Invalid Origin fails (403)', async () => {
     const res = await request(server)
       .get('/dev/role-preview/bootstrap')
       .set('Origin', 'https://evil.example.com');
     expect(res.status).toBe(403);
   });
 
-  it('30. CSRF remains enforced on active-session switching', async () => {
+  it('28b. CSRF remains enforced on active-session switching', async () => {
     const { response: first } = await bootstrapAndSelect('R09_ADMINISTRATOR');
     const firstSessionCookie = extractCookie(
       getSetCookieString(first),
@@ -601,7 +699,7 @@ describe('Security', () => {
     expect(res.status).toBe(403);
   });
 
-  it('31. No password appears in responses', async () => {
+  it('28c. No password appears in API responses', async () => {
     const { response } = await bootstrapAndSelect('R09_ADMINISTRATOR');
     const bodyStr = JSON.stringify(response.body);
     expect(bodyStr).not.toContain('password');
@@ -609,7 +707,7 @@ describe('Security', () => {
     expect(bodyStr).not.toContain('PASSWORD');
   });
 
-  it('32. No hash appears in responses', async () => {
+  it('28d. No hash appears in API responses', async () => {
     const { response } = await bootstrapAndSelect('R09_ADMINISTRATOR');
     const bodyStr = JSON.stringify(response.body);
     expect(bodyStr).not.toContain('hash');
@@ -617,7 +715,7 @@ describe('Security', () => {
     expect(bodyStr).not.toContain('argon2');
   });
 
-  it('33. No raw session token appears in responses', async () => {
+  it('28e. No raw session token appears in API responses', async () => {
     const { response } = await bootstrapAndSelect('R09_ADMINISTRATOR');
     const bodyStr = JSON.stringify(response.body);
     expect(bodyStr).not.toContain('token');
@@ -625,18 +723,268 @@ describe('Security', () => {
     expect(bodyStr).not.toContain('sessionToken');
   });
 
-  it('34. No bootstrap secret appears in audit records (documented gap)', () => {
-    // A full verification would query the audit database for
-    // role_preview events and assert that no event's metadata
-    // contains the bootstrap nonce or the password. The audit
-    // database is separate; querying it from the test requires
-    // wiring the audit client into the test setup. This is a
-    // follow-up; the unit tests already verify that the audit
-    // metadata carries only `endpoint` and `roleCode`.
-    expect(true).toBe(true);
+  it('28f. No bootstrap secret (nonce, challenge) appears in API responses', async () => {
+    // Bootstrap returns challengeId (NOT secret on its own) and
+    // expiresInMs. The nonce is set in the HttpOnly cookie and is
+    // NEVER returned in the JSON body. The challenge value (the
+    // raw nonce) must not appear in any response body.
+    const bootRes = await request(server)
+      .get('/dev/role-preview/bootstrap')
+      .set('Origin', ORIGIN);
+    const bodyStr = JSON.stringify(bootRes.body);
+    expect(bodyStr).not.toContain('nonce');
+    expect(bodyStr).not.toContain('Nonce');
+    expect(bodyStr).not.toContain('challenge');
+    expect(bodyStr).not.toContain('Challenge');
+    expect(bodyStr).not.toContain('secret');
+    expect(bodyStr).not.toContain('Secret');
+
+    // Now perform a select and verify the response body carries no
+    // bootstrap secret either.
+    const { response } = await bootstrapAndSelect('R09_ADMINISTRATOR');
+    const selectBodyStr = JSON.stringify(response.body);
+    expect(selectBodyStr).not.toContain('nonce');
+    expect(selectBodyStr).not.toContain('challenge');
+    expect(selectBodyStr).not.toContain('secret');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit database integrity (Phase 6 items 29–34)
+// ---------------------------------------------------------------------------
+
+/**
+ * Audit-database assertion tests.
+ *
+ * These tests verify the full audit pipeline for the Role Preview
+ * bootstrap flow:
+ *
+ * 1. The bootstrap + select flow emits a `role_preview.session.bootstrapped`
+ *    audit event through the transactional outbox (in the same
+ *    Prisma transaction as the session creation).
+ * 2. The dispatcher projects the outbox event to the DEDICATED audit
+ *    database (a separate database from the transactional store).
+ * 3. The projected audit record in the audit database contains NO
+ *    sensitive value (no bootstrap nonce, no challenge, no password,
+ *    no session token, no hash, no complete database URL).
+ * 4. The transactional database does NOT contain the audit record
+ *    (the audit lives ONLY in the audit database).
+ *
+ * These tests correct the prior gap where Test 34 was a no-op
+ * placeholder (`expect(true).toBe(true)`). The tests now use the
+ * real audit outbox + dispatcher + audit-store architecture (per
+ * ADR-014 and the ninth canonical batch specification).
+ */
+describe('Audit database integrity (Phase 6 items 29–34)', () => {
+  it('29. Approved audit action is emitted (role_preview.session.bootstrapped)', async () => {
+    // Trigger the bootstrap + select flow. This emits a
+    // `role_preview.session.bootstrapped` audit event through the
+    // transactional outbox.
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    // Verify the outbox row was created in the TRANSACTIONAL
+    // database with the correct action code.
+    const outboxRows = await prisma.auditOutboxEvent.findMany({});
+    const bootstrappedRows = outboxRows.filter((r) => {
+      const draft = r.canonicalEventDraft as { action?: string };
+      return draft.action === 'role_preview.session.bootstrapped';
+    });
+    expect(bootstrappedRows.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('35. Preview routes fail against non-preview database identities', async () => {
+  it('30. Audit outbox contains no secret (no nonce, challenge, password, token, hash, or URL)', async () => {
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    const outboxRows = await prisma.auditOutboxEvent.findMany({});
+    expect(outboxRows.length).toBeGreaterThanOrEqual(1);
+
+    // Serialise every outbox row to JSON and verify no sensitive
+    // value appears. The bootstrap nonce, the challenge value, the
+    // preview password, the raw session token, the password hash,
+    // and the complete database URLs must NOT appear anywhere in
+    // the outbox row (including the canonical_event_draft JSONB,
+    // the metadata, the actor_id, the session_id, etc.).
+    const allJson = JSON.stringify(outboxRows, (_k, v: unknown) =>
+      typeof v === 'bigint' ? v.toString() : v,
+    );
+    // No password (the variable name is fine; the value is NOT).
+    // The preview password is read from the env at test-bootstrap
+    // time; it must not appear in the outbox.
+    const previewPassword = process.env['IBN_HAYAN_ROLE_PREVIEW_PASSWORD'];
+    if (previewPassword) {
+      expect(allJson).not.toContain(previewPassword);
+    }
+    // No "password" key in the metadata (the audit builder rejects
+    // forbidden metadata keys, but we verify defensively).
+    for (const row of outboxRows) {
+      const draft = row.canonicalEventDraft as {
+        metadata?: Record<string, unknown>;
+      };
+      const metadata = draft.metadata ?? {};
+      const metadataKeys = Object.keys(metadata);
+      // The approved metadata keys for role_preview events are
+      // `endpoint` and `roleCode` only.
+      for (const key of metadataKeys) {
+        expect(['endpoint', 'roleCode']).toContain(key);
+      }
+    }
+    // No "nonce" or "challenge" or "secret" or "token" or "hash"
+    // appears as a metadata key.
+    expect(allJson).not.toMatch(/"nonce"/i);
+    expect(allJson).not.toMatch(/"challenge"/i);
+    expect(allJson).not.toMatch(/"secret"/i);
+    expect(allJson).not.toMatch(/"sessionToken"/i);
+    expect(allJson).not.toMatch(/"passwordHash"/i);
+    // No complete database URL.
+    expect(allJson).not.toContain('postgresql://');
+    expect(allJson).not.toContain('postgres://');
+  });
+
+  it('31. Audit projection succeeds (dispatcher delivers the outbox event)', async () => {
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    // Before dispatch: the outbox has pending events.
+    const pendingBefore = await prisma.auditOutboxEvent.count({
+      where: { deliveredAt: null },
+    });
+    expect(pendingBefore).toBeGreaterThanOrEqual(1);
+
+    // Run the dispatcher to project the outbox events to the
+    // dedicated audit store.
+    await dispatchAll();
+
+    // After dispatch: the outbox has no pending events (all
+    // delivered).
+    const pendingAfter = await prisma.auditOutboxEvent.count({
+      where: { deliveredAt: null },
+    });
+    expect(pendingAfter).toBe(0);
+  });
+
+  it('32. Audit database receives the projected record (role_preview.session.bootstrapped)', async () => {
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    // Project the outbox events to the audit database.
+    await dispatchAll();
+
+    // Query the DEDICATED audit database for the projected record.
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'role_preview.session.bootstrapped' },
+    });
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    const event = events[0]!;
+    expect(event.outcome).toBe('success');
+    expect(event.source).toBe('api');
+    expect(event.actorType).toBe('USER');
+    expect(event.scope).toBe('role_preview');
+  });
+
+  it('33. Audit database record contains no password, token, nonce, challenge, hash, or URL', async () => {
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    // Project the outbox events to the audit database.
+    await dispatchAll();
+
+    // Retrieve the projected record from the DEDICATED audit
+    // database.
+    const events = await auditPrisma.auditEvent.findMany({
+      where: { action: 'role_preview.session.bootstrapped' },
+    });
+    expect(events.length).toBeGreaterThanOrEqual(1);
+
+    // Serialise every audit event to JSON and verify no sensitive
+    // value appears anywhere (in the metadata, the actor_id, the
+    // session_id, the request_id, the integrity_hash, etc.).
+    const allJson = JSON.stringify(events, (_k, v: unknown) =>
+      typeof v === 'bigint' ? v.toString() : v,
+    );
+    // No preview password.
+    const previewPassword = process.env['IBN_HAYAN_ROLE_PREVIEW_PASSWORD'];
+    if (previewPassword) {
+      expect(allJson).not.toContain(previewPassword);
+    }
+    // No metadata key named nonce/challenge/secret/token/hash/password.
+    expect(allJson).not.toMatch(/"nonce"/i);
+    expect(allJson).not.toMatch(/"challenge"/i);
+    expect(allJson).not.toMatch(/"secret"/i);
+    expect(allJson).not.toMatch(/"sessionToken"/i);
+    expect(allJson).not.toMatch(/"passwordHash"/i);
+    // No complete database URL.
+    expect(allJson).not.toContain('postgresql://');
+    expect(allJson).not.toContain('postgres://');
+
+    // Verify the metadata carries ONLY the approved fields:
+    // `endpoint` (value `role_preview_bootstrap_select`) and
+    // `roleCode` (value `R09_ADMINISTRATOR`).
+    for (const event of events) {
+      const metadata = event.metadata as Record<string, unknown>;
+      const metadataKeys = Object.keys(metadata).sort();
+      expect(metadataKeys).toEqual(['endpoint', 'roleCode']);
+      expect(metadata['endpoint']).toBe('role_preview_bootstrap_select');
+      expect(metadata['roleCode']).toBe('R09_ADMINISTRATOR');
+    }
+  });
+
+  it('34. Transactional and audit database isolation is proven', async () => {
+    await bootstrapAndSelect('R09_ADMINISTRATOR');
+
+    // Project the outbox events to the audit database.
+    await dispatchAll();
+
+    // The TRANSACTIONAL database has the audit OUTBOX table
+    // (`audit_outbox_events`), but it must NOT have the audit
+    // EVENTS table (`audit_events`). The audit events live ONLY in
+    // the DEDICATED audit database.
+    //
+    // Verify by attempting to query `audit_events` through the
+    // transactional Prisma client. The Prisma client for the
+    // transactional database does NOT have an `auditEvent` model
+    // (it is generated from the transactional schema, not the audit
+    // schema). The query must therefore fail (or return undefined).
+    expect(
+      (prisma as unknown as { auditEvent?: unknown }).auditEvent,
+    ).toBeUndefined();
+
+    // The DEDICATED audit database has the `audit_events` table
+    // and it has the projected record.
+    const auditEvents = await auditPrisma.auditEvent.findMany({
+      where: { action: 'role_preview.session.bootstrapped' },
+    });
+    expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+
+    // The transactional database's outbox row was marked delivered
+    // (the dispatcher set `delivered_at`).
+    const deliveredOutbox = await prisma.auditOutboxEvent.count({
+      where: { deliveredAt: { not: null } },
+    });
+    expect(deliveredOutbox).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression (35–37) — normal login, dashboard, clinic-admin unchanged
+// ---------------------------------------------------------------------------
+
+describe('Regression', () => {
+  it('35. Normal login remains unchanged (login route still exists)', async () => {
+    const res = await request(server)
+      .post('/auth/login')
+      .set('Origin', ORIGIN)
+      .send({ email: 'nobody@example.com', password: 'wrong-password-12' });
+    expect(res.status).toBe(401);
+  });
+
+  it('36. Normal dashboard remains unchanged (session route requires auth)', async () => {
+    const res = await request(server).get('/auth/session');
+    expect(res.status).toBe(401);
+  });
+
+  it('37. Normal Clinic Admin protection remains unchanged (session route requires auth)', async () => {
+    const res = await request(server).get('/auth/session');
+    expect(res.status).toBe(401);
+  });
+
+  it('37a. Preview routes fail against non-preview database identities', async () => {
     const savedDbUrl = process.env['DATABASE_URL'];
     const savedAuditUrl = process.env['AUDIT_DATABASE_URL'];
 
@@ -654,23 +1002,5 @@ describe('Security', () => {
       process.env['DATABASE_URL'] = savedDbUrl;
       process.env['AUDIT_DATABASE_URL'] = savedAuditUrl;
     }
-  });
-
-  it('36. Normal login remains unchanged (login route still exists)', async () => {
-    const res = await request(server)
-      .post('/auth/login')
-      .set('Origin', ORIGIN)
-      .send({ email: 'nobody@example.com', password: 'wrong-password-12' });
-    expect(res.status).toBe(401);
-  });
-
-  it('37. Normal dashboard remains unchanged (session route requires auth)', async () => {
-    const res = await request(server).get('/auth/session');
-    expect(res.status).toBe(401);
-  });
-
-  it('38. Normal Clinic Admin protection remains unchanged (session route requires auth)', async () => {
-    const res = await request(server).get('/auth/session');
-    expect(res.status).toBe(401);
   });
 });
