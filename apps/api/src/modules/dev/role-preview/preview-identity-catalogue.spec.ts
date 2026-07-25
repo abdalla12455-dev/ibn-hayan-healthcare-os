@@ -8,11 +8,11 @@ import {
   PREVIEW_ORGANISATION_DISPLAY_NAME,
   PREVIEW_FACILITY_CODE,
   PREVIEW_FACILITY_DISPLAY_NAME,
-  PREVIEW_IDENTITY_PASSWORD,
   findPreviewIdentity,
   isCanonicalPreviewRoleCode,
   resolvePreviewScopeLevel,
 } from './preview-identity-catalogue.js';
+import * as catalogueModule from './preview-identity-catalogue.js';
 import {
   PLATFORM_ROLE_CATALOGUE,
   PLATFORM_ROLE_CODES,
@@ -84,8 +84,19 @@ describe('PREVIEW_IDENTITY_CATALOGUE', () => {
     expect(PREVIEW_FACILITY_DISPLAY_NAME).toBe('Preview Facility');
   });
 
-  it('uses a deterministic password that satisfies the platform password policy (≥ 12 characters)', () => {
-    expect(PREVIEW_IDENTITY_PASSWORD.length).toBeGreaterThanOrEqual(12);
+  it('does NOT track any fixed preview password constant (no PREVIEW_IDENTITY_PASSWORD export remains in the catalogue module)', () => {
+    // Assert that the previously-tracked fixed plaintext password
+    // export is gone from the catalogue module's public surface.
+    // The export was `PREVIEW_IDENTITY_PASSWORD` with the literal
+    // value `preview-role-only-do-not-use-in-production`; both the
+    // export name and the literal value were removed in the
+    // Secure Demo Role Preview Mode v1 correction. The password
+    // now lives in the server-only
+    // `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` environment variable
+    // (see `preview-password.ts`). This is the structural
+    // enforcement of "no tracked fixed preview password remains"
+    // (Phase 2 item 9 of the correction spec).
+    expect(catalogueModule).not.toHaveProperty('PREVIEW_IDENTITY_PASSWORD');
   });
 
   it('does NOT include any patient, appointment, invoice, payment, inventory, attendance, waiting-room, or notification data', () => {

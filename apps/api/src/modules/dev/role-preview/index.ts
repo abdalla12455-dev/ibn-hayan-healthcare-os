@@ -13,7 +13,6 @@ export { RolePreviewService } from './role-preview.service.js';
 export { RolePreviewFeatureConfig } from './role-preview-feature.config.js';
 export {
   PREVIEW_IDENTITY_CATALOGUE,
-  PREVIEW_IDENTITY_PASSWORD,
   PREVIEW_EMAIL_DOMAIN,
   PREVIEW_TENANT_SLUG,
   PREVIEW_TENANT_DISPLAY_NAME,
@@ -27,6 +26,13 @@ export {
   type PreviewIdentityEntry,
   type PreviewRoleScopeLevel,
 } from './preview-identity-catalogue.js';
+export {
+  MIN_PREVIEW_PASSWORD_LENGTH,
+  PREVIEW_PASSWORD_ENV_VAR,
+  PreviewPasswordMissingError,
+  isValidPreviewPassword,
+  readPreviewPasswordFromEnv,
+} from './preview-password.js';
 export {
   rolePreviewDisabled,
   rolePreviewRoleUnknown,

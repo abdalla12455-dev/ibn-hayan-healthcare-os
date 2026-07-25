@@ -1005,3 +1005,284 @@ None.
 - **To inspect the implementation without checking out the branch:** `git worktree add /tmp/demo-role-preview-review feat/demo-role-preview-v1` (the local branch is reachable from the primary worktree)
 - **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
 - **To run the preview seed (requires PostgreSQL 17 + isolated preview database):** `cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`
+
+
+---
+
+## Secure Demo Role Preview Mode v1 — Runtime Correction
+
+**Date:** 2026-07-25
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `dfd22f97a141ab6d7f19c84a6c5aa8c6eed67015` (`feat: add secure demo role preview mode v1`)
+**Correction commit subject:** `fix: secure demo role preview runtime v1`
+**Correction commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule)
+
+### Problem corrected
+
+The initial Demo Role Preview Mode v1 implementation (`dfd22f9`) tracked a
+fixed plaintext preview password as a TypeScript constant
+(`PREVIEW_IDENTITY_PASSWORD = 'preview-role-only-do-not-use-in-production'`)
+in `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`.
+While the implementation defended the password through seed-time
+production-refusal and database-URL validation, the password value itself
+was tracked in the repository — which is not acceptable as the final
+implementation.
+
+### Correction architecture
+
+The tracked fixed password was replaced with a server-only environment
+variable: `IBN_HAYAN_ROLE_PREVIEW_PASSWORD`.
+
+Properties of the corrected architecture:
+- **No default value.** The password is never defaulted. The operator
+  must supply it explicitly when preview mode is enabled.
+- **No fallback value.** When preview mode is enabled and the password
+  is missing or invalid, the application refuses to start.
+- **Never exposed through a `NEXT_PUBLIC_*` variable.** The password is
+  server-only; the frontend never sees it.
+- **Never returned to frontend code.** No API response, audit event, log
+  line, or error message contains the password.
+- **Never printed or logged.** The password is read from the
+  environment, hashed with Argon2id, and discarded.
+- **Never written into `PROJECT_CONTINUITY.md` or `worklog.md`.** Only
+  the variable name and the protected file location are documented.
+- **Required only when preview mode or the preview seed is being used.**
+  When `IBN_HAYAN_ROLE_PREVIEW_ENABLED` is not `'true'` (or when
+  `NODE_ENV === 'production'`), the password is not required and not
+  validated.
+- **Production fails closed.** Even if the password is present and the
+  flag is `'true'`, production refuses to enable preview mode.
+- **Minimum reasonable length.** The password must be at least 12
+  characters (matching ADR-013 §1.1).
+- **Whitespace-only value rejected.** A value that is empty after
+  trimming is treated as missing.
+- **Development preview startup fails safely when missing.** The
+  `RolePreviewPasswordValidator` provider is constructed eagerly when
+  the module is loaded; an invalid password prevents the application
+  from starting.
+- **Normal production and normal development startup with preview
+  disabled must not require it.** When the gate returns `false`, the
+  password is not read, not validated, and not required.
+
+### Protected password file
+
+The actual runtime password lives outside the repository at:
+`/home/z/.config/ibn-hayan-role-preview/preview.env`
+
+- Directory permissions: `0700` (`drwx------`)
+- File permissions: `0600` (`-rw-------`)
+- Password length: 32 characters (well above the 12-char minimum)
+- Password alphabet: `A-Za-z0-9-_` (≈187 bits of entropy)
+- Generated with Python `secrets.choice()` (cryptographically secure)
+- The password value is NEVER printed, logged, committed, or included
+  in any completion report.
+
+The `.env.example` file carries only a blank placeholder:
+`IBN_HAYAN_ROLE_PREVIEW_PASSWORD=`
+
+### Files created
+
+- `apps/api/src/modules/dev/role-preview/preview-password.ts` —
+  server-only password architecture: `MIN_PREVIEW_PASSWORD_LENGTH`,
+  `PREVIEW_PASSWORD_ENV_VAR`, `PreviewPasswordMissingError`,
+  `isValidPreviewPassword()`, `readPreviewPasswordFromEnv()`.
+- `apps/api/src/modules/dev/role-preview/preview-password.spec.ts` —
+  27 unit tests covering validation, error behaviour, and the
+  no-leakage requirement.
+- `apps/api/src/modules/dev/role-preview/role-preview-password-validator.ts`
+  — NestJS `@Injectable` provider whose constructor validates the
+  password at module-init time when the gate is enabled; a missing or
+  invalid password prevents the application from starting.
+- `apps/api/src/modules/dev/role-preview/role-preview-password-validator.spec.ts`
+  — 11 unit tests covering all gate/password combinations including
+  production fail-closed, fail-safe, and the no-exposure requirement.
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`
+  — removed the `PREVIEW_IDENTITY_PASSWORD` constant and its JSDoc;
+  updated item 7 of the catalogue documentation to describe the
+  server-only password architecture.
+- `apps/api/src/modules/dev/role-preview/index.ts` — removed the
+  `PREVIEW_IDENTITY_PASSWORD` re-export; added re-exports for the new
+  password module.
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+  — removed the test that asserted the tracked password's length;
+  replaced it with a test that asserts the catalogue module no longer
+  exports `PREVIEW_IDENTITY_PASSWORD`.
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts` —
+  registered the `RolePreviewPasswordValidator` as a provider so that
+  NestJS constructs it eagerly when the module is loaded.
+- `apps/api/src/scripts/role-preview-seed-dev.ts` — replaced the
+  `PREVIEW_IDENTITY_PASSWORD` import with
+  `readPreviewPasswordFromEnv`; the seed now reads the password from
+  the server-only environment variable and validates it before
+  hashing.
+- `.env.example` — added a blank `IBN_HAYAN_ROLE_PREVIEW_PASSWORD=`
+  placeholder with a safe explanatory comment that documents the
+  variable's purpose, validation rules, and the protected file
+  location without including any sample password.
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None.
+
+### Dependency or lockfile changes
+
+None.
+
+### Fake business data introduced
+
+None. The correction does not create any patient, appointment,
+invoice, payment, inventory, attendance, waiting-room, financial, or
+notification records.
+
+### Runtime authentication flow review (Phase 3)
+
+The existing runtime authentication flow was reviewed and verified
+correct. No changes were needed:
+
+- The backend feature gate (`RolePreviewFeatureConfig`) is
+  authoritative; every route consults it before delegating.
+- Production always rejects preview routes (the gate returns `false`
+  unconditionally when `NODE_ENV === 'production'`).
+- Role selection accepts only a canonical `roleCode` (Zod `.strict()`
+  schema rejects any additional field — no `userId`, `membershipId`,
+  `tenantId`, `organisationId`, `facilityId`, permission codes, or
+  session IDs accepted).
+- The selected identity is server-derived from the role code via the
+  preview identity catalogue; the caller cannot supply any identity or
+  context ID.
+- The selected identity must belong to the isolated preview tenant
+  (verified by slug lookup and membership check).
+- Normal session-token generation and hashing are used
+  (`SessionTokenService.generate()` and `.hash()`).
+- Normal secure HttpOnly session cookies are used
+  (`buildSessionCookieOptions()`).
+- The previous preview session is revoked atomically in the same
+  Prisma transaction as the new session creation.
+- Origin checks remain active on mutation routes (select, end).
+- CSRF remains active on mutation routes (verified after the session
+  check, before the business logic).
+- Audit events contain no secret (metadata carries only `endpoint`
+  and `roleCode`).
+- No raw session token is returned in JSON (it lives only in the
+  HttpOnly cookie).
+- No password or hash is returned in any response.
+- Normal login remains unchanged.
+- Normal non-preview sessions cannot use the preview role switcher
+  (the switcher is rendered only when the backend confirms the session
+  is an active preview session).
+
+### PostgreSQL 17 availability (Phase 4)
+
+**BLOCKED.** This environment does NOT provide a supported PostgreSQL 17
+runtime:
+
+- No `psql` command available.
+- No `/usr/lib/postgresql/` directory.
+- No `docker` or `podman` container runtime.
+- No repository-supported `docker-compose` or container command.
+- No official Z.AI development database capability documented in the
+  repository or environment.
+
+`AGENTS.md` §"Environment Constraints" confirms: "Have **no PostgreSQL
+17** locally — use the GitHub Actions Docker workflow for PG17
+validation."
+
+Per the correction specification's Phase 4 and Phase 10, the task does
+NOT substitute SQLite, PGlite, or another database while claiming
+PostgreSQL 17 validation. The task does NOT start a misleading
+frontend-only preview. The corrected branch and commit are preserved;
+the runtime preview launch is deferred until a supported PostgreSQL 17
+runtime is available.
+
+### Database-backed runtime validation (Phase 5–6)
+
+**BLOCKED** by Phase 4. The isolated preview database was not created,
+migrations were not applied, the seed was not run, and the 20-item
+database-backed integration validation was not executed. These steps
+will run on GitHub Actions CI when the branch is pushed through a
+separate controlled branch-and-PR workflow, or when a supported
+PostgreSQL 17 runtime is provided in the development environment.
+
+### Automated validation (Phase 7)
+
+| Check | Result |
+|---|---|
+| `pnpm run typecheck` | PASS (all 7 packages + 2 apps) |
+| `pnpm run lint` | PASS (all 7 packages + 2 apps) |
+| `pnpm run test` | PASS — 579 tests (97 domain + 154 contracts + 83 observability + 65 api + 180 web) |
+| `pnpm run build` | PASS — Next.js production build; `/role-preview` registered as a static route alongside `/`, `/_not-found`, `/clinic-admin`, `/dashboard`, `/login` |
+| `git diff --check` | PASS — no whitespace errors |
+
+### Clinic Admin shell regression check
+
+- Exactly 11 sidebar items (1 implemented `overview` + 10 unimplemented). ✓
+- Notifications remain in the header bell (`<NotificationBell />` at `clinic-admin-header.tsx:194`). ✓
+- R09 Arabic label remains `مدير المنشأة` in the role catalogue. ✓
+- No fake business data introduced. ✓
+
+### Production safety
+
+- The feature is completely unavailable in production regardless of the
+  flag value or the password value. Ten unit tests verify the gate's
+  fail-closed behaviour.
+- The frontend consults the backend availability endpoint; no
+  client-side state can enable the feature.
+- The password is server-only; no `NEXT_PUBLIC_*` variable exposes it.
+- The `RolePreviewPasswordValidator` prevents the application from
+  starting when preview mode is enabled but the password is missing or
+  invalid (fail-safe).
+- No tracked fixed preview password remains in the repository. A unit
+  test asserts the catalogue module no longer exports
+  `PREVIEW_IDENTITY_PASSWORD`.
+
+### Z.AI user-visible preview (Phase 9)
+
+**NOT LAUNCHED.** Per Phase 10, the official Z.AI preview mechanism
+requires a backend database to satisfy the specification's requirement
+that the preview be "backed by an isolated PostgreSQL 17 preview
+database and the real R01–R14 preview identities." Because no
+supported PostgreSQL 17 runtime is available (Phase 4), the preview
+was not launched. The task did NOT improvise platform infrastructure,
+did NOT create daemon scripts, did NOT probe hidden services, and did
+NOT leave orphan processes.
+
+### Known blockers
+
+1. **No supported PostgreSQL 17 runtime in this environment.** This
+   blocks Phase 5 (seed), Phase 6 (database-backed integration
+   validation), and Phase 9 (launch of the Z.AI user-visible preview
+   backed by a real database).
+
+2. **Pre-existing `.preview-logs/` tracked scripts.** The files
+   `.preview-logs/preview-proxy.py`, `.preview-logs/start-api.sh`, and
+   `.preview-logs/start-web.sh` are tracked in the repository from a
+   previous session (commit `362d4cd`, July 19). The `.gitignore`
+   documents them as "intentional preview-infrastructure scripts."
+   These are NOT part of the current correction and were NOT modified
+   or added by this task. The operator may wish to review whether they
+   should be removed in a separate housekeeping commit; they predate
+   the Demo Role Preview Mode v1 implementation.
+
+### Immediate next product slice
+
+Today's Appointments — unchanged. The Secure Demo Role Preview Mode v1
+correction does NOT alter the canonical next-vertical-slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `dfd22f97a141ab6d7f19c84a6c5aa8c6eed67015` (`feat: add secure demo role preview mode v1`).
+- **Correction commit subject:** `fix: secure demo role preview runtime v1`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule).
+- **Protected password file:** `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory `0700`, file `0600`, outside the repository).
+- **To inspect the correction without checking out the branch:** `git worktree add /tmp/demo-role-preview-correction-review feat/demo-role-preview-v1`.
+- **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the preview seed (requires PostgreSQL 17 + isolated preview database + protected preview.env):** `set -a && source /home/z/.config/ibn-hayan-role-preview/preview.env && set +a && cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`.

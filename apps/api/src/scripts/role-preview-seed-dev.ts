@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process';
 import { Logger } from '@nestjs/common';
 import {
   PREVIEW_IDENTITY_CATALOGUE,
-  PREVIEW_IDENTITY_PASSWORD,
   PREVIEW_TENANT_SLUG,
   PREVIEW_TENANT_DISPLAY_NAME,
   PREVIEW_ORGANISATION_CODE,
@@ -12,6 +11,10 @@ import {
   PREVIEW_FACILITY_CODE,
   PREVIEW_FACILITY_DISPLAY_NAME,
 } from '../modules/dev/role-preview/preview-identity-catalogue.js';
+import {
+  readPreviewPasswordFromEnv,
+  PREVIEW_PASSWORD_ENV_VAR,
+} from '../modules/dev/role-preview/preview-password.js';
 
 /**
  * Development-only Demo Role Preview Mode seed command.
@@ -47,6 +50,7 @@ import {
  * Usage:
  *   ALLOW_ROLE_PREVIEW_SEED=true \
  *   IBN_HAYAN_ROLE_PREVIEW_ENABLED=true \
+ *   IBN_HAYAN_ROLE_PREVIEW_PASSWORD=<loaded-from-protected-preview.env> \
  *   DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db \
  *   NODE_ENV=development \
  *   pnpm --filter @ibn-hayan/api role-preview:seed
@@ -67,9 +71,20 @@ import { PrismaClient } from '../../generated/prisma/client.js';
  * Read and validate the seed environment. Throws if any required
  * variable is missing or if the command is invoked in production
  * or without the explicit allow flag.
+ *
+ * Per the Secure Demo Role Preview Mode v1 correction specification,
+ * the seed ALSO requires the server-only
+ * `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` environment variable when
+ * preview mode is enabled. The password is read through
+ * `readPreviewPasswordFromEnv`, which validates that the value is
+ * present, non-empty, non-whitespace, and at least
+ * `MIN_PREVIEW_PASSWORD_LENGTH` characters. The plaintext is
+ * hashed with Argon2id before persistence and is NEVER printed,
+ * logged, or returned in any API response.
  */
 function readSeedEnv(): {
   readonly databaseUrl: string;
+  readonly previewPassword: string;
 } {
   const nodeEnv = process.env['NODE_ENV'];
   if (nodeEnv === 'production') {
@@ -98,6 +113,13 @@ function readSeedEnv(): {
     );
   }
 
+  // Read and validate the server-only preview password. Throws
+  // PreviewPasswordMissingError when the value is missing, empty,
+  // whitespace-only, or too short. The plaintext is returned to
+  // the caller (the seed) so that it can be hashed with Argon2id;
+  // it is NEVER printed, logged, or returned in any API response.
+  const previewPassword = readPreviewPasswordFromEnv(process.env);
+
   const databaseUrl = process.env['DATABASE_URL'];
   if (!databaseUrl || databaseUrl.length === 0) {
     throw new Error(
@@ -121,7 +143,7 @@ function readSeedEnv(): {
     );
   }
 
-  return { databaseUrl };
+  return { databaseUrl, previewPassword };
 }
 
 /**
@@ -229,9 +251,11 @@ async function main(): Promise<void> {
 
     // 4. Hash the preview password once. The same hash is reused
     //    for every preview identity's LocalCredential. The password
-    //    is NEVER printed, NEVER logged, and NEVER returned in any
-    //    API response.
-    const passwordHash = await argon2.hash(PREVIEW_IDENTITY_PASSWORD, {
+    //    is read from the server-only environment variable
+    //    `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` (validated by
+    //    `readSeedEnv`); it is NEVER printed, NEVER logged, and
+    //    NEVER returned in any API response.
+    const passwordHash = await argon2.hash(env.previewPassword, {
       type: argon2.argon2id,
     });
 
@@ -377,7 +401,7 @@ async function main(): Promise<void> {
     );
     logger.log(`  Role assignments created: ${String(createdCount)}`);
     logger.log(`  Role assignments reused:  ${String(reusedCount)}`);
-    logger.log('  (Password is NOT printed.)');
+    logger.log(`  (Password from ${PREVIEW_PASSWORD_ENV_VAR} is NOT printed.)`);
     logger.log(
       `  No business-domain data (patients, appointments, invoices, etc.) was created.`,
     );

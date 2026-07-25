@@ -90,46 +90,25 @@ import {
  *    attendance, waiting-room, or notification records are created
  *    by the preview seed.
  *
- * 7. **Deterministic password.** Every preview identity shares a
- *    single deterministic development password that satisfies the
- *    platform's password policy (≥ 12 characters). The password is
- *    NOT a production secret; it is a development-only convenience
- *    that the operator never types (the preview backend creates
- *    the session directly through the existing auth pipeline). The
- *    password is hashed with Argon2id before persistence, exactly
- *    like production credentials. The plaintext password is
- *    referenced here only so the seed can hash it; it is NEVER
- *    printed, NEVER logged, NEVER returned in any API response,
- *    and NEVER documented in `.env.example`.
- *
- *    The password is a fixed string assembled at module-evaluation
- *    time so that no environment variable is required to run the
- *    seed. This is acceptable because:
- *    - The seed refuses production.
- *    - The seed refuses an unverified or non-preview database
- *      target.
- *    - The preview database is isolated from production.
- *    - The password is never exposed to the operator or to the
- *      frontend; the preview backend creates the session through
- *    the existing auth pipeline without revealing the password.
- */
-
-/**
- * The deterministic password for every preview identity. Satisfies
- * the platform's password policy (≥ 12 characters; ADR-013 §1.1).
- *
- * The password is NOT a secret. It is a development-only
- * convenience. The seed refuses production and refuses an
- * unverified or non-preview database target before hashing and
- * persisting this password. The plaintext is never printed,
- * logged, or returned in any API response.
- */
-export const PREVIEW_IDENTITY_PASSWORD =
-  'preview-role-only-do-not-use-in-production';
-
-/**
- * The local development email domain for preview identities. NOT a
- * real domain. Exists only inside the isolated preview database.
+ * 7. **Server-only preview password.** Every preview identity
+ *    shares a single preview password that the seed reads from
+ *    the server-only environment variable
+ *    `IBN_HAYAN_ROLE_PREVIEW_PASSWORD`. The password is NOT
+ *    tracked in the repository; it lives in a protected file
+ *    outside the repository
+ *    (`/home/z/.config/ibn-hayan-role-preview/preview.env` in
+ *    development, with directory permissions `0700` and file
+ *    permissions `0600`). The password is hashed with Argon2id
+ *    before persistence, exactly like production credentials. The
+ *    plaintext is NEVER printed, NEVER logged, NEVER returned in
+ *    any API response, NEVER exposed through a `NEXT_PUBLIC_*`
+ *    variable, and NEVER documented in `.env.example` (which
+ *    carries only a blank placeholder). When preview mode is
+ *    enabled and the password is missing or invalid, the
+ *    application refuses to start (fail-safe). When preview mode
+ *    is disabled, the password is not required. Production fails
+ *    closed regardless of the password. See `preview-password.ts`
+ *    for the authoritative validation logic.
  */
 export const PREVIEW_EMAIL_DOMAIN = 'role-preview.dev';
 

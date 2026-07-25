@@ -5,16 +5,18 @@ import { DatabaseModule } from '../../../infrastructure/database/index.js';
 import { RolePreviewFeatureConfig } from './role-preview-feature.config.js';
 import { RolePreviewService } from './role-preview.service.js';
 import { RolePreviewController } from './role-preview.controller.js';
+import { RolePreviewPasswordValidator } from './role-preview-password-validator.js';
 
 /**
  * Demo Role Preview Mode module.
  *
- * Wires the role-preview controller, service, and feature-config
- * gate. Imports `AuthModule` to access `AuthService`,
- * `SessionTokenService`, and `CsrfService`; imports `DatabaseModule`
- * to access the user, tenant, organisation, facility, membership,
- * and session repositories; imports `AuditModule` to emit audit
- * events for preview session creation and ending.
+ * Wires the role-preview controller, service, feature-config gate,
+ * and the start-up password validator. Imports `AuthModule` to
+ * access `AuthService`, `SessionTokenService`, and `CsrfService`;
+ * imports `DatabaseModule` to access the user, tenant,
+ * organisation, facility, membership, and session repositories;
+ * imports `AuditModule` to emit audit events for preview session
+ * creation and ending.
  *
  * Per the Demo Role Preview Mode v1 specification, the module is
  * registered in the root `AppModule` regardless of the
@@ -24,13 +26,27 @@ import { RolePreviewController } from './role-preview.controller.js';
  * (select, end). The 404 status does NOT advertise the route's
  * existence in production.
  *
+ * Per the Secure Demo Role Preview Mode v1 correction
+ * specification, the {@link RolePreviewPasswordValidator} provider
+ * is constructed eagerly when the module is loaded. When the gate
+ * is enabled, the validator reads and validates the
+ * `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` environment variable; a
+ * missing, empty, whitespace-only, or too-short value prevents the
+ * application from starting (fail-safe). When the gate is
+ * disabled, the validator does nothing — the password is not
+ * required for normal production or normal development startup.
+ *
  * The module does NOT duplicate authentication, CSRF, Origin, or
  * audit logic. It reuses the existing services via Nest DI.
  */
 @Module({
   imports: [AuthModule, DatabaseModule, AuditModule],
   controllers: [RolePreviewController],
-  providers: [RolePreviewFeatureConfig, RolePreviewService],
+  providers: [
+    RolePreviewFeatureConfig,
+    RolePreviewPasswordValidator,
+    RolePreviewService,
+  ],
   exports: [RolePreviewFeatureConfig, RolePreviewService],
 })
 export class RolePreviewModule {}
