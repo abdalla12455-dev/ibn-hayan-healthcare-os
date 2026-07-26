@@ -358,7 +358,7 @@ describe('ClinicAdminController', () => {
     expect(controllerMetadata).toBe('clinic-admin');
 
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    const handler: unknown = ClinicAdminController.prototype.getOverview;
+    const handler: object = ClinicAdminController.prototype.getOverview;
     const getOverviewMetadata = Reflect.getMetadata('path', handler) as unknown;
     expect(getOverviewMetadata).toBe('overview');
 
@@ -379,7 +379,9 @@ describe('ClinicAdminController', () => {
     // authorization decision. This test verifies the exact permission
     // and mode are attached to the getOverview method.
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    const handler: unknown = ClinicAdminController.prototype.getOverview;
+    const handler = ClinicAdminController.prototype.getOverview as unknown as (
+      target: object,
+    ) => unknown;
     const reflector = new Reflector();
     const permission = reflector.get<string>(
       AUTHORIZATION_PERMISSION_METADATA,
