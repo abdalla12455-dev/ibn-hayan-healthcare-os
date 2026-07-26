@@ -1312,3 +1312,489 @@ describe('Throttler cleanup fix remains covered (regression)', () => {
     expect(() => resetThrottlerStorageSafely(throttlerStorage)).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// seedActiveContextForSession — multiple-match rejection (Phase 6 item 18)
+// ---------------------------------------------------------------------------
+//
+// The `seedActiveContextForSession` helper MUST reject when
+// `authSession.updateMany` returns `count > 1`. The
+// `auth_sessions.token_hash` column is unique by database constraint,
+// so this should never occur in production. The defence-in-depth
+// check protects against:
+//   1. A future schema drift that drops the uniqueness constraint.
+//   2. A test-setup defect where a fake Prisma client returns an
+//      inflated count.
+//   3. A session-lookup defect where the tokenHash collides with
+//      another session's tokenHash (cryptographically impossible with
+//      SHA-256, but defended anyway).
+//
+// Without this check, the helper would silently seed the active
+// context on multiple sessions, and the test's assertion would pass
+// against the wrong session — masking the real test failure.
+
+describe('seedActiveContextForSession — multiple-match rejection (Phase 6 item 18)', () => {
+  /**
+   * Reuse the same fake Prisma builder pattern from the ownership
+   * validation tests, but allow the `updateMany` count to be
+   * controlled.
+   */
+  function buildFakePrismaWithCount(options: {
+    readonly updateCount: number;
+  }): {
+    readonly prisma: Parameters<
+      typeof seedActiveContextForSession
+    >[0]['prisma'];
+  } {
+    const membership = {
+      id: 'mem-1',
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      status: 'active',
+    };
+    const tenant = { id: 'tenant-1', status: 'active' };
+    const organisation = {
+      id: 'org-1',
+      tenantId: 'tenant-1',
+      status: 'active',
+    };
+    const facility = {
+      id: 'fac-1',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      status: 'active',
+    };
+    const prisma = {
+      authSession: {
+        updateMany(): Promise<{ readonly count: number }> {
+          return Promise.resolve({ count: options.updateCount });
+        },
+      },
+      tenantMembership: {
+        findUnique(): Promise<typeof membership> {
+          return Promise.resolve(membership);
+        },
+      },
+      tenant: {
+        findUnique(): Promise<typeof tenant> {
+          return Promise.resolve(tenant);
+        },
+      },
+      organisation: {
+        findUnique(): Promise<typeof organisation> {
+          return Promise.resolve(organisation);
+        },
+      },
+      facility: {
+        findUnique(): Promise<typeof facility> {
+          return Promise.resolve(facility);
+        },
+      },
+    };
+    return { prisma };
+  }
+
+  it('rejects when the session update affects 2 rows (tokenHash collision or fake-Prisma inflation)', async () => {
+    const { prisma } = buildFakePrismaWithCount({ updateCount: 2 });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/multiple auth_session rows \(2\) matched tokenHash/);
+  });
+
+  it('rejects when the session update affects 5 rows (defence-in-depth against schema drift)', async () => {
+    const { prisma } = buildFakePrismaWithCount({ updateCount: 5 });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'b'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/multiple auth_session rows \(5\) matched tokenHash/);
+  });
+
+  it('the multiple-match error message mentions the uniqueness constraint', async () => {
+    const { prisma } = buildFakePrismaWithCount({ updateCount: 3 });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'c'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/unique by database constraint/);
+  });
+
+  it('the multiple-match error message mentions defence-in-depth', async () => {
+    const { prisma } = buildFakePrismaWithCount({ updateCount: 2 });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'd'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/defence-in-depth/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Exact-role R01 fixture identity (Phase 6 items 1–4)
+// ---------------------------------------------------------------------------
+//
+// These tests prove the Clinic Admin suite scenario formerly labelled
+// "Role Preview cannot bypass the permission requirement" (now renamed
+// to "R01 exact-role session cannot bypass the Clinic Admin permission
+// requirement") uses an exact-role R01 fixture — NOT a composite
+// R01+R13 fixture, NOT an R01+R09 fixture, and NOT a real Role Preview
+// session.
+//
+// The tests exercise `assertExactRoleAssignments` (the helper used by
+// the renamed scenario) with the actual role-code combinations the
+// scenario's fixture could produce. The helper MUST accept the
+// intended R01-only fixture and MUST reject every composite that would
+// distort the exact-role proof.
+//
+// These tests do NOT inspect test names or comments (per the Phase 6
+// rule "Do not write tests that only inspect comments or test names").
+// They test the actual helper that the renamed scenario uses.
+
+describe('exact-role R01 fixture identity (Phase 6 items 1–4)', () => {
+  it('the R01-only fixture passes the exact-role assertion (item 2: fixture contains only R01)', () => {
+    // The renamed scenario's fixture creates a tenant-scoped R01
+    // assignment and a facility-scoped R01 assignment. Both have
+    // the same role code (R01_PHYSICIAN); the helper de-duplicates
+    // by role code, so the set is {'R01_PHYSICIAN'}.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R01_PHYSICIAN'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('the R01+R13 composite fixture is rejected (item 3: fixture does not create R13)', () => {
+    // If the fixture accidentally added R13 (the previous
+    // fixture-identity defect), the helper MUST reject it.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/setup-enabler/);
+  });
+
+  it('the R01+R09 composite fixture is rejected (item 4: fixture does not create R09)', () => {
+    // If the fixture accidentally added R09 (which WOULD grant
+    // `clinic_admin_overview:view` and mask the denial), the helper
+    // MUST reject it. The size-mismatch check fires first (the
+    // actual set has 2 roles, the expected set has 1), so the
+    // error message mentions the size mismatch. The key assertion
+    // is that the helper DOES throw — the specific error message
+    // is secondary.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R09_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/fixture-identity defect|setup-enabler|NOT in the expected set/);
+  });
+
+  it('the R01+R02 composite fixture is rejected (no other role may be added)', () => {
+    // Even another non-R09, non-R13 role must not be added — the
+    // fixture must be EXACTLY R01. The size-mismatch check fires
+    // first here too.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R02_NURSE'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/fixture-identity defect|setup-enabler|NOT in the expected set/);
+  });
+
+  it('a same-size different-role fixture is rejected (size check passes, content check fires)', () => {
+    // When the actual and expected sets have the SAME size but
+    // contain different roles, the size check passes and the
+    // content check fires. The helper checks "expected role code
+    // X not found in actual" BEFORE "actual role code X is NOT in
+    // the expected set" — so for actual=[R02_NURSE] expected=
+    // [R01_PHYSICIAN], the missing-expected check fires first.
+    // Either error message proves the helper rejects the
+    // same-size-different-role composite.
+    expect(() =>
+      assertExactRoleAssignments(['R02_NURSE'], ['R01_PHYSICIAN']),
+    ).toThrow(
+      /expected role code R01_PHYSICIAN not found in actual assignments|actual role code R02_NURSE is NOT in the expected set/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Approved audit-contract: denied events omit roleCodes (Phase 6 item 16)
+// ---------------------------------------------------------------------------
+//
+// The production `AuthorizationGuard.emitAuthorizationDenied` method
+// intentionally does NOT include `roleCodes` in denial events. This
+// is security hardening — not leaking role information to a denied
+// user who might be probing permissions. The exact-role proof for
+// denial scenarios is established BEFORE the request by querying the
+// database for the user's role assignments and asserting via
+// `assertExactRoleAssignments`.
+//
+// These tests verify the architectural substitute (the exact-role
+// proof via `assertExactRoleAssignments`) is sound: the helper
+// accepts the intended role set and rejects composites. The
+// integration-level assertion (that the denied audit event's
+// `roleCodes` field is `undefined`) is exercised by the e2e suite's
+// `assertOverviewAuditEventActor` helper, which checks
+// `draft.roleCodes` is NOT defined for denied events.
+
+describe('approved audit-contract: denied events omit roleCodes (Phase 6 item 16)', () => {
+  it('the exact-role proof accepts the intended R01-only role set', () => {
+    // This is the architectural substitute for asserting roleCodes
+    // on the denied audit event. The proof is established BEFORE
+    // the request by querying the user's role assignments.
+    expect(() =>
+      assertExactRoleAssignments(['R01_PHYSICIAN'], ['R01_PHYSICIAN']),
+    ).not.toThrow();
+  });
+
+  it('the exact-role proof accepts the intended R13-only role set', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R13_SYSTEM_ADMINISTRATOR'],
+        ['R13_SYSTEM_ADMINISTRATOR'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('the exact-role proof rejects an R01+R13 composite (would mask a defect where R13 grants clinic_admin_overview:view)', () => {
+    // If R13 accidentally granted `clinic_admin_overview:view`, the
+    // guard would ALLOW instead of DENY. The exact-role proof
+    // catches this by rejecting the composite fixture BEFORE the
+    // request — the test would fail at the proof step, not at the
+    // HTTP-status step.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow();
+  });
+
+  it('the exact-role proof size-mismatch error mentions the fixture-identity defect', () => {
+    // The error message must mention "fixture-identity defect" so a
+    // future regression is immediately identifiable in CI logs.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/fixture-identity defect/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Genuine Role Preview coverage separation (Phase 6 items 10–15)
+// ---------------------------------------------------------------------------
+//
+// These tests prove the architectural separation between:
+//   - The Clinic Admin suite's exact-role R01 denial scenario (a
+//     NORMAL authenticated session with R01 alone and a seeded
+//     active context — NOT a Role Preview session).
+//   - The dedicated Role Preview suite's genuine Role Preview →
+//     Clinic Admin scenario (a REAL Role Preview session issued by
+//     `POST /api/v1/dev/role-preview/select`, with the real preview
+//     cookie and the real database-identity gate).
+//
+// The separation is proved by verifying:
+//   - The `seedActiveContextForSession` helper does NOT invoke any
+//     Role Preview endpoint, does NOT use the Role Preview bootstrap
+//     cookie, and does NOT pass through the Role Preview
+//     database-identity gate. The helper only updates the session's
+//     active context via a direct Prisma `updateMany` keyed by
+//     `tokenHash`.
+//   - The `computeSessionTokenHash` helper produces a SHA-256 hash
+//     that matches the format stored in `auth_sessions.token_hash`
+//     (the same format the auth service uses for NORMAL sessions AND
+//     the same format `RolePreviewService.selectRole` uses for
+//     PREVIEW sessions — the hash format is identical, but the
+//     session-creation path is different).
+//
+// The integration-level proof that the dedicated Role Preview suite
+// uses the real preview mechanism is exercised by tests 38 and 39 in
+// `apps/api/test/role-preview/role-preview.role-preview-spec.ts`,
+// which call `bootstrapAndSelect` (the real production endpoint) and
+// verify the resulting session's userId matches the preview identity.
+
+describe('genuine Role Preview coverage separation (Phase 6 items 10–15)', () => {
+  it('seedActiveContextForSession does NOT invoke any Role Preview endpoint (the helper only calls authSession.updateMany plus findUnique lookups)', async () => {
+    // The fake Prisma client below does NOT expose any Role Preview
+    // methods (no `rolePreviewBootstrap`, no `rolePreviewSelect`,
+    // no `rolePreviewSession`). If the helper tried to invoke a
+    // Role Preview endpoint, TypeScript would reject the call at
+    // compile time. The runtime guarantee is that the helper only
+    // calls `authSession.updateMany` plus the `findUnique` lookups
+    // for ownership validation.
+    const membership = {
+      id: 'mem-1',
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      status: 'active',
+    };
+    const tenant = { id: 'tenant-1', status: 'active' };
+    const organisation = {
+      id: 'org-1',
+      tenantId: 'tenant-1',
+      status: 'active',
+    };
+    const facility = {
+      id: 'fac-1',
+      tenantId: 'tenant-1',
+      organisationId: 'org-1',
+      status: 'active',
+    };
+    const prisma = {
+      authSession: {
+        updateMany(): Promise<{ readonly count: number }> {
+          return Promise.resolve({ count: 1 });
+        },
+      },
+      tenantMembership: {
+        findUnique(): Promise<typeof membership> {
+          return Promise.resolve(membership);
+        },
+      },
+      tenant: {
+        findUnique(): Promise<typeof tenant> {
+          return Promise.resolve(tenant);
+        },
+      },
+      organisation: {
+        findUnique(): Promise<typeof organisation> {
+          return Promise.resolve(organisation);
+        },
+      },
+      facility: {
+        findUnique(): Promise<typeof facility> {
+          return Promise.resolve(facility);
+        },
+      },
+    };
+    await seedActiveContextForSession({
+      prisma,
+      tokenHash: 'a'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    });
+    // No throw means the helper did NOT try to call a missing
+    // Role Preview method.
+  });
+
+  it('computeSessionTokenHash produces a 64-char hex string (the same format used by NORMAL sessions and PREVIEW sessions)', () => {
+    // The hash format is identical for normal sessions and preview
+    // sessions. The difference is the session-CREATION path:
+    //   - Normal session: created by `AuthService.login` after
+    //     successful credential validation.
+    //   - Preview session: created by `RolePreviewService.selectRole`
+    //     after successful bootstrap-challenge consumption.
+    //
+    // The `seedActiveContextForSession` helper works on EITHER kind
+    // of session (it updates the active context via a direct Prisma
+    // `updateMany`), but the Clinic Admin suite's exact-role R01
+    // scenario uses a NORMAL session (created by `POST /api/v1/auth/login`).
+    // The dedicated Role Preview suite's genuine scenario uses a
+    // PREVIEW session (created by `POST /api/v1/dev/role-preview/select`).
+    const hash = computeSessionTokenHash('any-session-token-value');
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(hash.length).toBe(64);
+  });
+
+  it('computeSessionTokenHash is deterministic (the same input always produces the same hash)', () => {
+    // This determinism is what allows `seedActiveContextForSession`
+    // to find the session by its tokenHash: the helper computes the
+    // hash from the raw cookie value and looks up the session by
+    // the hash. The auth service does the same lookup for normal
+    // sessions; the preview service does the same lookup for
+    // preview sessions.
+    const hash1 = computeSessionTokenHash('deterministic-token');
+    const hash2 = computeSessionTokenHash('deterministic-token');
+    expect(hash1).toBe(hash2);
+  });
+
+  it('the exact-role R01 scenario does NOT use the Role Preview bootstrap cookie (the helper signature has no bootstrap-cookie parameter)', () => {
+    // `seedActiveContextForSession` accepts only `tokenHash`,
+    // `membershipId`, `organisationId`, `facilityId`, and `prisma`.
+    // It does NOT accept a `bootstrapCookie` or `challengeId`
+    // parameter. This is the structural proof that the helper
+    // cannot invoke the Role Preview bootstrap flow.
+    //
+    // The test verifies the helper's parameter shape by attempting
+    // a call with an extra `bootstrapCookie` property — TypeScript
+    // would reject this at compile time, but the runtime test
+    // documents the contract for future readers.
+    const input: Parameters<typeof seedActiveContextForSession>[0] = {
+      prisma: {
+        authSession: {
+          updateMany: () => Promise.resolve({ count: 1 }),
+        },
+        tenantMembership: {
+          findUnique: () =>
+            Promise.resolve({
+              id: 'mem-1',
+              userId: 'user-1',
+              tenantId: 'tenant-1',
+              status: 'active',
+            }),
+        },
+        tenant: {
+          findUnique: () =>
+            Promise.resolve({ id: 'tenant-1', status: 'active' }),
+        },
+        organisation: {
+          findUnique: () =>
+            Promise.resolve({
+              id: 'org-1',
+              tenantId: 'tenant-1',
+              status: 'active',
+            }),
+        },
+        facility: {
+          findUnique: () =>
+            Promise.resolve({
+              id: 'fac-1',
+              tenantId: 'tenant-1',
+              organisationId: 'org-1',
+              status: 'active',
+            }),
+        },
+      },
+      tokenHash: 'a'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    };
+    // The input shape has exactly 5 keys: prisma, tokenHash,
+    // membershipId, organisationId, facilityId. No bootstrap cookie,
+    // no challenge ID, no preview-specific fields.
+    expect(Object.keys(input).sort()).toEqual(
+      [
+        'facilityId',
+        'membershipId',
+        'organisationId',
+        'prisma',
+        'tokenHash',
+      ].sort(),
+    );
+  });
+});

@@ -71,7 +71,20 @@ import {
  * 16. Query-string facility identifiers cannot override session context.
  * 17. Custom scope headers cannot override session context.
  * 18. Request body identifiers cannot override session context.
- * 19. Role Preview cannot bypass the permission requirement.
+ * 19. R01 exact-role session cannot bypass the Clinic Admin permission
+ *     requirement. (This is an exact-role R01 denial scenario, NOT a
+ *     Role Preview scenario. Genuine Role Preview coverage lives in
+ *     the dedicated `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+ *     PostgreSQL suite, which uses the real Role Preview endpoints,
+ *     the real preview cookie, the real preview session, and the real
+ *     database-identity gate. This Clinic Admin suite uses the standard
+ *     `ibn_hayan_test` databases, which fail the Role Preview
+ *     database-identity gate; the real Role Preview endpoints therefore
+ *     cannot be invoked here. This scenario honestly tests that an
+ *     exact-role R01 principal — a normal authenticated session with
+ *     only R01_PHYSICIAN and a seeded active context — is denied by
+ *     the real AuthorizationGuard. It does NOT claim to be a Role
+ *     Preview test.)
  * 20. Platform Super Admin is never converted to Clinic Administrator.
  * 21. The correct audit event or events are produced.
  * 22. Failed requests do not emit a false successful-view event.
@@ -1545,60 +1558,61 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     ).toBe('Tenant Body');
   });
 
-  it('19. Role Preview cannot bypass the permission requirement', async () => {
-    // Role Preview is a development-only feature (NODE_ENV !==
-    // 'production' AND IBN_HAYAN_ROLE_PREVIEW_ENABLED=true AND the
-    // database-identity gate passes). It creates a fresh session
-    // for a canonical preview identity (R01–R14) in an isolated
-    // preview tenant, organisation, and facility. The preview
-    // session is a regular `auth_sessions` row with the active
-    // context set directly (no special "preview" flag — see
-    // `RolePreviewService.selectRole`).
+  it('19. R01 exact-role session cannot bypass the Clinic Admin permission requirement', async () => {
+    // This scenario is an EXACT-ROLE R01 DENIAL test, NOT a Role
+    // Preview test. The previous name ("Role Preview cannot bypass
+    // the permission requirement") was inaccurate because this
+    // scenario does NOT invoke the real Role Preview endpoints, does
+    // NOT use the real Role Preview cookie, does NOT use the real
+    // Role Preview session, and does NOT pass through the real
+    // `isPreviewDatabaseIdentityValid()` gate. The Clinic Admin
+    // integration suite uses the standard `ibn_hayan_test`
+    // databases, which fail the Role Preview database-identity gate;
+    // the real Role Preview endpoints therefore CANNOT be invoked
+    // from this suite.
     //
-    // The Clinic Admin integration suite uses the STANDARD test
-    // databases (`ibn_hayan_test`), which fail the Role Preview
-    // database-identity gate (`isPreviewDatabaseIdentityValid`).
-    // The real Role Preview endpoints (`POST /api/v1/dev/role-preview/select`)
-    // therefore CANNOT be invoked from this suite. The approved
-    // test workflow is to create a session that is STRUCTURALLY
-    // IDENTICAL to a real Role Preview session for R01:
-    //   - The user has EXACTLY R01_PHYSICIAN (no R13 setup-enabler).
-    //   - The role assignment is at FACILITY scope, matching the
-    //     preview identity's scope (per the role-preview spec test
-    //     #14: "R13/R14 tenant, R01–R12 facility").
-    //   - The session has the active tenant membership, organisation,
-    //     and facility set directly (matching what
-    //     `RolePreviewService.selectRole` does internally).
+    // Genuine Role Preview coverage — including the proof that a
+    // real Role Preview session for a non-R09 role cannot bypass
+    // `clinic_admin_overview:view` — lives in the DEDICATED Role
+    // Preview PostgreSQL integration suite at
+    // `apps/api/test/role-preview/role-preview.role-preview-spec.ts`,
+    // which uses the `role_preview_test` databases, the real
+    // `POST /api/v1/dev/role-preview/select` endpoint, the real
+    // `ibn_hayan_session` cookie issued by `RolePreviewService.selectRoleWithBootstrap`,
+    // and the real `isPreviewDatabaseIdentityValid()` gate.
     //
-    // The test then issues `GET /api/v1/clinic-admin/overview`
-    // through the REAL AuthorizationGuard. If a future defect
-    // made Role Preview accidentally grant `clinic_admin_overview:view`,
-    // this test would fail (the guard would allow instead of deny).
+    // What this scenario DOES test:
+    //   - A normal authenticated session (via `POST /api/v1/auth/login`)
+    //     for a user with EXACTLY R01_PHYSICIAN (no R09, no R13, no
+    //     other role).
+    //   - The active tenant membership, organisation, and facility
+    //     context is seeded directly on the session via the test-only
+    //     `seedActiveContextForSession()` helper (matching what
+    //     `RolePreviewService.selectRole` does internally for the
+    //     active context, but WITHOUT the Role Preview endpoint,
+    //     cookie, or database-identity gate).
+    //   - The user's R01 assignment exists at BOTH tenant scope and
+    //     facility scope (matching the real preview identity's scope
+    //     per the role-preview spec test #14: "R13/R14 tenant,
+    //     R01–R12 facility"). This makes the fixture structurally
+    //     similar to a real preview identity's role assignment, but
+    //     the session itself is a NORMAL authenticated session — NOT
+    //     a Role Preview session.
+    //   - The final `GET /api/v1/clinic-admin/overview` request goes
+    //     through the REAL AuthorizationGuard. R01 does NOT grant
+    //     `clinic_admin_overview:view`; the guard MUST deny (403).
     //
-    // This is NOT a fake Role Preview test (the previous fixture
-    // was fake — it used R01+R13 composite). This is the approved
-    // test workflow that creates a structurally identical
-    // preview-equivalent session and proves the guard denies.
-    //
-    // Architectural confirmation:
-    //   - The architecture DOES support previewing R09 (per the
-    //     role-preview spec test #21: "R09 routes to /clinic-admin",
-    //     interfacePath=/clinic-admin). An R09 preview session
-    //     WOULD be allowed by the guard (R09 grants
-    //     clinic_admin_overview:view). This test confirms that
-    //     previewing a NON-R09 role (R01) does NOT bypass the
-    //     permission requirement.
-    //   - The preview session DOES have an active tenant membership
-    //     (per `RolePreviewService.selectRole` line 375:
-    //     `activeTenantMembershipId: previewMembership.id`). The
-    //     test confirms this by seeding the active context with
-    //     a valid membership.
+    // If a future defect made R01 accidentally grant
+    // `clinic_admin_overview:view`, this test would fail (the guard
+    // would allow instead of deny). This is the exact-role R01
+    // denial coverage. It does NOT claim to verify Role Preview
+    // behaviour — that is the dedicated suite's responsibility.
     const ctx = await bootstrapUserAndContext(
       'preview-r01@example.invalid',
       'Preview R01 User',
       'tenant-preview-r01',
       'Tenant Preview R01',
-      'R01_PHYSICIAN', // NOT R09 — previewing R01
+      'R01_PHYSICIAN', // NOT R09 — exact-role R01 denial
       {
         // Use EXACT_ROLE mode (no R13 setup-enabler). The user
         // has EXACTLY R01, matching the real preview identity's
@@ -1619,14 +1633,19 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       scopeFacilityId: ctx.facilityId as FacilityId,
     });
 
-    // Login through the real authentication endpoint.
+    // Login through the real authentication endpoint. This produces
+    // a NORMAL authenticated session — NOT a Role Preview session.
+    // The session cookie (`ibn_hayan_session`) is the standard auth
+    // cookie; it is NOT the Role Preview bootstrap cookie and is NOT
+    // a session issued by `RolePreviewService.selectRoleWithBootstrap`.
     const cookie = await loginAndReturnCookie('preview-r01@example.invalid');
 
     // Seed the active context directly on the session, matching
-    // what `RolePreviewService.selectRole` does internally. This
-    // is the approved test workflow for Role Preview within the
-    // Clinic Admin suite (the real Role Preview endpoints cannot
-    // be invoked here due to the database-identity gate).
+    // what `RolePreviewService.selectRole` does internally for the
+    // active context. This is a TEST-ONLY Prisma update; it does
+    // NOT invoke the Role Preview endpoints and does NOT pass
+    // through the Role Preview database-identity gate. The session
+    // remains a normal authenticated session.
     const cookieValue = cookie.split('=')[1]!;
     const tokenHash = computeSessionTokenHash(cookieValue);
     await seedActiveContextForSession({
@@ -1638,9 +1657,9 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     });
 
     // Exact-role proof: the user has EXACTLY R01 (no R13
-    // setup-enabler, no other role). This proves the test is
-    // testing the real R01 preview behaviour, NOT a composite
-    // R01+R13 fixture.
+    // setup-enabler, no R09, no other role). This proves the test
+    // is testing the real R01 denial behaviour, NOT a composite
+    // fixture.
     const r01Assignments = await prisma.tenantRoleAssignment.findMany({
       where: { tenantMembershipId: ctx.membershipId },
     });

@@ -3497,3 +3497,295 @@ NONE.
 ### Immediate next task
 
 Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require GitHub Actions to execute all 24 Clinic Admin integration scenarios with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before merge.
+
+## Clinic Admin CI Harness Fourth-Stage Correction (genuine Role Preview coverage separation) — local child commit, 2026-07-27
+
+### Background
+
+The third-stage CI-harness correction (commit `7afca8ed`) successfully removed the composite R13 setup-role inflation from non-R09 fixtures and introduced exact-role denial coverage. However, the correction introduced a remaining coverage-honesty problem: the Clinic Admin suite scenario formerly labelled "Role Preview cannot bypass the permission requirement" did NOT use the real Role Preview mechanism. The scenario used a normal authenticated R01 session with seeded active context — structurally similar to a real Role Preview session, but NOT a real Role Preview session. The previous PROJECT_CONTINUITY.md and worklog.md entries described this scenario as "the approved test workflow that creates a structurally identical preview-equivalent session" — language that could be misread as claiming genuine Role Preview coverage.
+
+This fourth-stage correction separates the two coverage concerns honestly:
+
+1. **Exact-role R01 denial coverage** stays in the Clinic Admin suite, but is renamed to "R01 exact-role session cannot bypass the Clinic Admin permission requirement" and is no longer described as Role Preview coverage.
+
+2. **Genuine Role Preview coverage** is added to the DEDICATED Role Preview PostgreSQL integration suite (`apps/api/test/role-preview/role-preview.role-preview-spec.ts`), which uses the `role_preview_test` databases, the real `POST /api/v1/dev/role-preview/select` endpoint, the real `ibn_hayan_session` cookie issued by `RolePreviewService.selectRoleWithBootstrap`, and the real `isPreviewDatabaseIdentityValid()` gate.
+
+### Root cause
+
+**Coverage-honesty defect** (NOT a production defect, NOT a test-correctness defect). The third-stage correction's "Role Preview" scenario was architecturally sound — it proved that an exact-role R01 principal is denied by the real AuthorizationGuard — but its NAME and DOCUMENTATION claimed Role Preview coverage that the scenario could not provide. The Clinic Admin integration suite uses the standard `ibn_hayan_test` databases, which fail the Role Preview database-identity gate (`isPreviewDatabaseIdentityValid`). The real Role Preview endpoints therefore CANNOT be invoked from the Clinic Admin suite. The previous documentation described this as "the approved test workflow that creates a structurally identical preview-equivalent session" — language that blurred the line between exact-role denial coverage and genuine Role Preview coverage.
+
+The honest separation is:
+
+- The Clinic Admin suite owns **exact-role denial coverage** for every non-R09 role (R01–R08, R10–R14). Each scenario uses a normal authenticated session with EXACTLY one role and a seeded active context. The real AuthorizationGuard denies because the role does NOT grant `clinic_admin_overview:view`.
+
+- The dedicated Role Preview suite owns **genuine Role Preview coverage**. It uses the `role_preview_test` databases, the real Role Preview endpoints, the real preview cookie, and the real database-identity gate. A real Role Preview session for R01 (or any non-R09 role) MUST be denied by the guard; a real Role Preview session for R09 MUST be allowed.
+
+### Correction applied
+
+**Smallest coherent test-only correction:**
+
+1. **Renamed test #19** in `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` from "Role Preview cannot bypass the permission requirement" to "R01 exact-role session cannot bypass the Clinic Admin permission requirement". The test body is unchanged (it still uses EXACT_ROLE mode, R01_PHYSICIAN, `seedActiveContextForSession`, `assertExactRoleAssignments`, `assertOverviewDeniedAndReached`, `assertOverviewAuditEventActor`, `assertNoOverviewViewedEvent`, `parseAuthErrorResponse`). The comments are rewritten to honestly describe the scenario as an exact-role R01 denial test, NOT a Role Preview test. The comments explicitly state that genuine Role Preview coverage lives in the dedicated Role Preview suite.
+
+2. **Updated the file-header test matrix** in `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` to describe test #19 honestly as "R01 exact-role session cannot bypass the Clinic Admin permission requirement" with an inline note explaining that genuine Role Preview coverage lives in the dedicated Role Preview suite.
+
+3. **Added test #38** to `apps/api/test/role-preview/role-preview.role-preview-spec.ts`: "Real Role Preview session for R01 cannot bypass the Clinic Admin permission requirement". This is the GENUINE Role Preview coverage. The test:
+   - Calls `bootstrapAndSelect('R01_PHYSICIAN')` — the REAL production endpoint (`GET /api/v1/dev/role-preview/bootstrap` + `POST /api/v1/dev/role-preview/select`).
+   - Extracts the REAL `ibn_hayan_session` cookie issued by `RolePreviewService.selectRoleWithBootstrap`.
+   - Resolves the active session's `userId` and verifies the user's email is `r01_physician@role-preview.dev` (the R01 preview identity's deterministic email).
+   - Verifies the preview identity has EXACTLY R01_PHYSICIAN (no R09, no R13).
+   - Calls `GET /api/v1/clinic-admin/overview` with the real preview session cookie.
+   - Asserts HTTP 403 (R01 does NOT grant `clinic_admin_overview:view`).
+   - Asserts the `authorization.decision.denied` audit event was emitted with actorId=preview user, permissionCode=`clinic_admin_overview:view`, endpoint=`/api/v1/clinic-admin/overview`, method=`GET`.
+   - Asserts `roleCodes` is `undefined` on the denied event (per the approved audit contract — security hardening).
+   - Asserts no `clinic_admin.overview.viewed` audit event was emitted.
+   - Parses the public error response with `AuthErrorResponseSchema` and asserts the code is `AUTHORIZATION_FORBIDDEN`.
+
+4. **Added test #39** to `apps/api/test/role-preview/role-preview.role-preview-spec.ts`: "Real Role Preview session for R09 is allowed by the Clinic Admin permission". This is the POSITIVE CONTROL for test #38. The test:
+   - Calls `bootstrapAndSelect('R09_ADMINISTRATOR')` — the REAL production endpoint.
+   - Extracts the REAL `ibn_hayan_session` cookie.
+   - Verifies the user's email is `r09_administrator@role-preview.dev`.
+   - Calls `GET /api/v1/clinic-admin/overview` with the real preview session cookie.
+   - Asserts the `authorization.decision.allowed` audit event was emitted (R09 grants `clinic_admin_overview:view`).
+   - Asserts `roleCodes` IS defined and includes `R09_ADMINISTRATOR` (ALLOWED events include roleCodes per the approved audit contract).
+   - This proves the denial in test #38 is specifically because R01 does NOT grant the permission — NOT because the preview session is somehow invalid.
+
+5. **Strengthened `seedActiveContextForSession()` helper** in `apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts` to reject when `authSession.updateMany` returns `count > 1`. The `auth_sessions.token_hash` column is unique by database constraint, so this should never occur in production. The defence-in-depth check protects against:
+   - A future schema drift that drops the uniqueness constraint.
+   - A test-setup defect where a fake Prisma client returns an inflated count.
+   - A session-lookup defect where the tokenHash collides (cryptographically impossible with SHA-256, but defended anyway).
+   The previous helper only checked `count === 0`; the strengthened helper checks both `count === 0` AND `count > 1`.
+
+6. **Added 17 focused regression tests** to `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts`:
+   - 4 tests for `seedActiveContextForSession` multiple-match rejection (Phase 6 item 18): rejects when count is 2, rejects when count is 5, error message mentions "unique by database constraint", error message mentions "defence-in-depth".
+   - 5 tests for exact-role R01 fixture identity (Phase 6 items 1–4): R01-only fixture passes, R01+R13 composite rejected, R01+R09 composite rejected, R01+R02 composite rejected, same-size different-role fixture rejected.
+   - 4 tests for the approved audit-contract (Phase 6 item 16): exact-role proof accepts R01-only, accepts R13-only, rejects R01+R13 composite, size-mismatch error mentions fixture-identity defect.
+   - 4 tests for genuine Role Preview coverage separation (Phase 6 items 10–15): `seedActiveContextForSession` does NOT invoke any Role Preview endpoint, `computeSessionTokenHash` produces a 64-char hex string, hash is deterministic, helper signature has no bootstrap-cookie parameter.
+
+### Files modified
+
+- `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` — renamed test #19; updated file-header test matrix; rewrote test #19 comments to honestly describe the scenario as exact-role R01 denial (NOT Role Preview).
+- `apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts` — strengthened `seedActiveContextForSession()` to reject multiple matching sessions (defence-in-depth against schema drift); updated docstring.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — added `AuthErrorResponseSchema` import; added `clinicAdminRoutes` constant; added new "Genuine Role Preview → Clinic Admin access" describe block with tests #38 and #39; updated file-header test matrix.
+- `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts` — added 17 focused regression tests covering multiple-match rejection, exact-role R01 fixture identity, approved audit-contract, and genuine Role Preview coverage separation.
+- `PROJECT_CONTINUITY.md` — added this new section.
+- `worklog.md` — added a new entry.
+
+### Files NOT modified
+
+- All production source code (controllers, services, guards, errors, schemas, repositories) — unchanged.
+- `apps/api/prisma/schema.prisma` and `apps/api/prisma-audit/schema.prisma` (database schemas) — unchanged.
+- `apps/api/prisma/migrations/*` and `apps/api/prisma-audit/migrations/*` (database migrations) — unchanged.
+- `apps/api/package.json` and root `package.json` (dependency versions) — unchanged.
+- `pnpm-lock.yaml` (lockfile) — unchanged.
+- `.github/workflows/main-ci.yml` (CI workflow) — unchanged. The `postgresql17-validation` job continues to execute `pnpm test:clinic-admin` (line 304) and `pnpm test:role-preview` (line 305).
+- All Platform Super Admin / Role Preview production implementation files — unchanged.
+- All quarantine branches, backup branches, recovery tags — unchanged.
+- Main branch (unchanged at `d6c02b62`).
+- Old Clinic Admin shell branch `feat/clinic-admin-shell-v1` at `745d71e` — unchanged.
+
+### Production-defect result
+
+**NONE.** The production code correctly enforces ADR-015 §1.5, the AuthorizationGuard correctly omits `roleCodes` from denial events (security hardening), the Role Preview database-identity gate correctly rejects non-preview databases, and `RolePreviewService.selectRoleWithBootstrap` correctly creates a real preview session with the active context set directly. The defect was entirely in the test-suite coverage HONESTY — the previous "Role Preview" scenario name and documentation claimed coverage the scenario could not provide.
+
+### Genuine Role Preview coverage location
+
+The genuine Role Preview → Clinic Admin access coverage lives in:
+
+- **Suite**: `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+- **Section**: "Genuine Role Preview → Clinic Admin access"
+- **Tests**:
+  - #38: "Real Role Preview session for R01 cannot bypass the Clinic Admin permission requirement" (denial — R01 does NOT grant `clinic_admin_overview:view`)
+  - #39: "Real Role Preview session for R09 is allowed by the Clinic Admin permission" (positive control — R09 grants `clinic_admin_overview:view`)
+- **CI command**: `pnpm test:role-preview` (executed in the `postgresql17-validation` job at `.github/workflows/main-ci.yml` line 305)
+- **Database**: `role_preview_test` (transactional) and `role_preview_audit_test` (audit), created by `setupRolePreviewDatabaseTests()` in `_role-preview-bootstrap.ts`. These databases pass the `isPreviewDatabaseIdentityValid()` gate because their names contain `role_preview`.
+
+### Real Role Preview mechanism
+
+The genuine Role Preview coverage uses the REAL production mechanism:
+
+1. **Entry**: `GET /api/v1/dev/role-preview/bootstrap` issues a one-time bootstrap challenge and sets the `ibn_hayan_role_preview_bootstrap` HttpOnly SameSite=Strict cookie.
+2. **Select**: `POST /api/v1/dev/role-preview/select` consumes the bootstrap cookie + challengeId, passes the real `isPreviewDatabaseIdentityValid()` gate, resolves the preview identity by role code, creates a new `auth_sessions` row with the active tenant membership / organisation / facility set directly by the service, revokes the previous session atomically, emits a `role_preview.session.created` audit event in the same transaction, and returns the safe response with the new `ibn_hayan_session` cookie.
+3. **Overview request**: `GET /api/v1/clinic-admin/overview` is issued with the real `ibn_hayan_session` cookie. The real AuthorizationGuard evaluates the preview identity's roles and either allows (R09) or denies (every other role).
+4. **Cleanup**: the `beforeEach` hook in the dedicated suite deletes all sessions and outbox rows. The preview tenant / organisation / facility / 14 identities persist because the seed is idempotent.
+
+### Database-identity gate result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** The `isPreviewDatabaseIdentityValid()` gate is exercised by tests #38 and #39 because the dedicated Role Preview suite uses the `role_preview_test` databases (created by `setupRolePreviewDatabaseTests()`). The gate validates:
+- `DATABASE_URL` positively identifies an isolated role-preview transactional database (the pathname contains `role_preview`).
+- `AUDIT_DATABASE_URL` positively identifies a SEPARATE isolated role-preview audit database.
+- The two database names are distinct (ADR-014 audit-store isolation).
+
+The local environment has no PostgreSQL 17, so the gate cannot be executed locally. GitHub Actions remains the authoritative validator.
+
+### Real preview cookie result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Tests #38 and #39 extract the real `ibn_hayan_session` cookie from the `select` response via `extractCookie(getSetCookieString(response), 'ibn_hayan_session')`. The cookie value is the raw session token; the database stores `SHA-256(rawToken)` in `auth_sessions.token_hash`. The Overview request is issued with `Cookie: ibn_hayan_session=${previewSessionCookieValue}`.
+
+### Real preview session result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Tests #38 and #39 verify the active session's `userId` matches the preview identity's user ID by:
+1. Querying `prisma.authSession.findFirst({ where: { revokedAt: null } })` to get the active session.
+2. Querying `prisma.user.findUnique({ where: { id: previewUserId } })` to get the user record.
+3. Asserting the user's email matches the deterministic preview identity email (`r01_physician@role-preview.dev` for R01; `r09_administrator@role-preview.dev` for R09).
+4. Asserting the preview identity has EXACTLY the expected role (R01 alone for test #38; R09 alone for test #39 — no R13, no other role).
+
+### Previewed role result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Test #38 previews R01_PHYSICIAN and asserts the preview identity has R01 alone (no R09, no R13). Test #39 previews R09_ADMINISTRATOR and asserts the preview identity has R09 alone.
+
+### Clinic Admin endpoint invocation result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Both tests #38 and #39 issue `GET /api/v1/clinic-admin/overview` with the real preview session cookie through the real AuthorizationGuard. Test #38 expects HTTP 403 (R01 denial); test #39 expects the guard to emit an `authorization.decision.allowed` event (R09 allowance).
+
+### Role Preview expected response contract
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Test #38 parses the response body with `AuthErrorResponseSchema.safeParse` and asserts `parsed.data.error.code === 'AUTHORIZATION_FORBIDDEN'`. Test #39 does NOT assert a specific HTTP status (the service-level context check may return 200 or 403 depending on whether the preview context satisfies the Overview service's context-required check); test #39 only asserts the guard's ALLOWED decision via the audit event.
+
+### Role Preview audit result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Test #38 asserts the denied `authorization.decision.denied` audit event was emitted with:
+- `actorId` = preview user ID
+- `permissionCode` = `clinic_admin_overview:view`
+- `metadata.endpoint` = `/api/v1/clinic-admin/overview`
+- `metadata.method` = `GET`
+- `roleCodes` = `undefined` (per the approved audit contract — security hardening)
+
+Test #39 asserts the allowed `authorization.decision.allowed` audit event was emitted with:
+- `actorId` = preview user ID
+- `permissionCode` = `clinic_admin_overview:view`
+- `metadata.endpoint` = `/api/v1/clinic-admin/overview`
+- `metadata.method` = `GET`
+- `roleCodes` defined and including `R09_ADMINISTRATOR`
+
+### Successful-view suppression result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Test #38 asserts no `clinic_admin.overview.viewed` audit event was emitted (the Overview service emits this event only on a successful 200 response; a denial MUST NOT emit it).
+
+### Denied-event roleCodes contract result
+
+**PRESERVED.** The production `AuthorizationGuard.emitAuthorizationDenied` method intentionally does NOT include `roleCodes` in denial events. This is security hardening — not leaking role information to a denied user. Test #38 asserts `draft.roleCodes` is `undefined` on the denied event. The exact-role proof for denial scenarios is established BEFORE the request by querying the preview identity's role assignments.
+
+### Exact actor / permission / endpoint / method audit result
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** Test #38 asserts the denied event's `actorId`, `permissionCode`, `metadata.endpoint`, and `metadata.method` match the expected values. Test #39 asserts the same for the allowed event (plus `roleCodes` includes R09).
+
+### Session-context seeding zero-match result
+
+**PRESERVED.** The `seedActiveContextForSession()` helper rejects when `authSession.updateMany` returns `count === 0`. The error message identifies the failure mode: "no auth_session row matched tokenHash X. The session was not found; the caller must pass the SHA-256 hash of the raw session cookie value."
+
+### Session-context seeding multiple-match result
+
+**STRENGTHENED.** The `seedActiveContextForSession()` helper now ALSO rejects when `authSession.updateMany` returns `count > 1`. The error message identifies the failure mode: "defence-in-depth rejection — multiple auth_session rows (N) matched tokenHash X. The `auth_sessions.token_hash` column is unique by database constraint, so this should never occur. If it does, the schema constraint has been dropped (a production defect) OR the test is using a fake Prisma client that returns an inflated count (a test-setup defect)."
+
+### R09 scoped fixture preservation
+
+**PRESERVED.** The R09 success scenarios (tests #1, #2, #14–#18, #21, #23, #24) and the R09 missing-context scenarios (tests #9, #10) continue to use the `R09_SCOPED` setup mode (tenant-scoped + organisation-scoped + facility-scoped R09 assignments). The R09 preview scenario (test #39 in the dedicated Role Preview suite) uses the real `bootstrapAndSelect('R09_ADMINISTRATOR')` workflow.
+
+### R13 exclusion preservation
+
+**PRESERVED.** R13_SYSTEM_ADMINISTRATOR is NOT granted `clinic_admin_overview:view`. Test #3 (R13 denial), test #20 (R13 only), and test #22 (failed requests) in the Clinic Admin suite continue to use `EXACT_ROLE` with R13 alone and assert the guard denies. The preview identity catalogue does NOT include R13 as a Clinic Admin role (R13 is a tenant-scoped platform role; the preview seed creates it with the correct scope per role-preview spec test #14).
+
+### Other-role exact identity preservation
+
+**PRESERVED.** Test #4 (every non-R09 role) in the Clinic Admin suite continues to iterate R01–R08, R10–R12, R14 with `EXACT_ROLE` mode and `assertExactRoleAssignments([roleCode])` before each request. No R13 setup-enabler is added. The final `GET /api/v1/clinic-admin/overview` request tests each role alone.
+
+### Clinic Admin integration implementation status
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** The 24-scenario Clinic Admin suite is wired into the GitHub Actions `postgresql17-validation` job via `pnpm test:clinic-admin` (line 304 of `.github/workflows/main-ci.yml`) and `vitest.clinic-admin.config.ts`. The test code is complete and typechecked. Test #19 is now honestly named "R01 exact-role session cannot bypass the Clinic Admin permission requirement" — it does NOT claim to be a Role Preview test.
+
+### Role Preview integration implementation status
+
+**IMPLEMENTED in integration coverage, NOT executed locally, awaiting GitHub Actions verification.** The 39-scenario Role Preview suite (was 37 scenarios; tests #38 and #39 added by this correction) is wired into the GitHub Actions `postgresql17-validation` job via `pnpm test:role-preview` (line 305 of `.github/workflows/main-ci.yml`) and `vitest.role-preview.config.ts`. The test code is complete and typechecked. Tests #38 and #39 provide the GENUINE Role Preview → Clinic Admin access coverage that the Clinic Admin suite cannot provide.
+
+### PostgreSQL runtime-verification status
+
+**NOT EXECUTED LOCALLY.** PostgreSQL 17 is unavailable in the local environment. `pnpm test:clinic-admin` resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step (`verifyPostgreSQL17` cannot find `initdb --version`). 24 tests skipped, 0 failed, 0 unhandled errors. `pnpm test:role-preview` (run from `apps/api`) resolves the correct `vitest.role-preview.config.ts` configuration but fails at the same bootstrap step. 52 tests skipped (was 50 before tests #38 and #39 were added), 0 failed, 0 unhandled errors. These are the expected local failure modes, NOT regressions. GitHub Actions remains the authoritative validator.
+
+### Documentation-language corrections
+
+The previous PROJECT_CONTINUITY.md and worklog.md entries used language that could be misread as claiming genuine Role Preview coverage in the Clinic Admin suite. This correction clarifies:
+
+- **"Implemented in integration coverage"**: the 24 Clinic Admin scenarios and the 39 Role Preview scenarios are wired into the GitHub Actions `postgresql17-validation` job. The test code is complete and typechecked.
+- **"NOT executed locally"**: PostgreSQL 17 is unavailable in the local environment. Both integration suites reach the `setupDatabaseTests()` bootstrap step and fail there. The tests themselves are skipped (not failed).
+- **"Awaiting GitHub Actions verification"**: GitHub Actions remains the authoritative validator. The 24 Clinic Admin scenarios and the 39 Role Preview scenarios must pass on GitHub Actions with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before the PR can be merged.
+
+The previous language describing the Clinic Admin suite's "Role Preview" scenario as "the approved test workflow that creates a structurally identical preview-equivalent session" is REMOVED. The scenario is now honestly described as "R01 exact-role session cannot bypass the Clinic Admin permission requirement" — an exact-role denial test, NOT a Role Preview test. Genuine Role Preview coverage is documented as living in the dedicated Role Preview suite (tests #38 and #39).
+
+The local unit tests (978 tests across 5 packages: domain 108, contracts 208, observability 95, api 340, web 227) validate helper logic, fixture construction, schema parsing, the fixture-identity defect regression, the multiple-match rejection, and the genuine Role Preview coverage separation. GitHub Actions remains responsible for runtime PostgreSQL and HTTP verification.
+
+### Validation results
+
+- `pnpm run typecheck` PASS (all 8 workspace projects).
+- `pnpm run lint` PASS (0 errors, 0 warnings).
+- `pnpm run test` PASS — **978 unit tests** across 5 packages (domain 108, contracts 208, observability 95, api 340, web 227; 0 regressions). Independently verified count: 108+208+95+340+227 = 978. Baseline was 961 (after the third-stage correction `7afca8ed`); this commit adds 17 tests (961→978).
+- `pnpm run build` PASS (api via SWC, web via Next.js 16; `/clinic-admin` route registered).
+- `git diff --check` PASS.
+- Focused tests: clinic-admin test-helpers spec (102 tests PASS — 85 from prior corrections + 17 new), clinic-admin controller (12 tests PASS), clinic-admin errors (4 tests PASS), clinic-admin overview service (24 tests PASS), clinic-admin frontend client (15 tests PASS), clinic-admin Overview component (32 tests PASS), contracts auth + clinic-admin schemas (97 tests PASS), domain authorization (70 tests PASS), observability audit (95 tests PASS), role-preview cookies (18 tests PASS), role-preview errors (14 tests PASS), role-preview feature config (10 tests PASS), role-preview password (23 tests PASS), role-preview preview-identity-catalogue (multiple tests PASS), role-preview preview-database-identity (multiple tests PASS).
+- `pnpm test:clinic-admin` (run from `apps/api`) resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step because PostgreSQL 17 is unavailable locally. 24 tests skipped, 0 failed, 0 unhandled errors. Expected local failure mode.
+- `pnpm test:role-preview` (run from `apps/api`) resolves the correct `vitest.role-preview.config.ts` configuration but fails at the same bootstrap step. 52 tests skipped (was 50 before tests #38 and #39 were added), 0 failed, 0 unhandled errors. Expected local failure mode.
+
+### PostgreSQL 17 local availability
+
+**UNAVAILABLE.** The environment does not have PostgreSQL 17 installed. The 24 Clinic Admin integration scenarios and the 39 Role Preview integration scenarios are implemented in integration coverage and wired into the GitHub Actions `postgresql17-validation` job. They are NOT executed locally. GitHub Actions remains the authoritative validator.
+
+### Not locally proven (clarification)
+
+The following are NOT claimed as locally proven, because PostgreSQL 17 is unavailable locally:
+
+- R09 endpoint returns 200 — NOT locally proven (integration test not executed locally).
+- R13 endpoint returns 403 — NOT locally proven (integration test not executed locally).
+- All roles are denied — NOT locally proven (integration test not executed locally).
+- All 24 Clinic Admin scenarios reach the endpoint — NOT locally proven (integration test not executed locally).
+- Real Role Preview session for R01 is denied by the guard — NOT locally proven (integration test not executed locally).
+- Real Role Preview session for R09 is allowed by the guard — NOT locally proven (integration test not executed locally).
+- Real Role Preview database-identity gate passes — NOT locally proven (integration test not executed locally).
+- Real Role Preview cookie is issued — NOT locally proven (integration test not executed locally).
+
+The local unit tests validate:
+- Helper logic (CSRF parsing, Throttler cleanup, session-context seeding, multiple-match rejection, exact-role assertion, error-contract parsing).
+- Fixture construction (the `seedActiveContextForSession` ownership validation, the `assertExactRoleAssignments` exact-role proof, the multiple-match defence-in-depth rejection).
+- Schema parsing (the `ClinicAdminOverviewErrorResponseSchema`, `AuthErrorResponseSchema`, and `RolePreviewErrorResponseSchema` contracts).
+- Coverage separation (the `seedActiveContextForSession` helper does NOT invoke any Role Preview endpoint; the `computeSessionTokenHash` helper produces a 64-char hex string; the helper signature has no bootstrap-cookie parameter).
+
+GitHub Actions remains responsible for runtime PostgreSQL and HTTP verification.
+
+### Schema/migration changes
+
+NONE.
+
+### Dependency changes
+
+NONE.
+
+### Lockfile changes
+
+NONE.
+
+### CI workflow changes
+
+NONE.
+
+### Production source code changes
+
+NONE.
+
+### Commit subject
+
+`test: use genuine role preview coverage for clinic admin access`
+
+### Commit parent
+
+`7afca8edef9b02dafc215bbfb6ccf77cf6229fcb` (the previous task-branch tip, after the third-stage CI-harness correction).
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration tests not executed locally.** The 24 Clinic Admin scenarios and the 39 Role Preview scenarios are awaiting GitHub Actions verification. The local environment cannot run them.
+2. **Branch is 3 commits ahead of remote** (the second-stage correction `70103905`, the third-stage correction `7afca8ed`, plus this fourth-stage correction). The operator must generate a fresh temporary deploy key and push via SSH before CI can rerun.
+3. **Latent Throttler reset bug in auth, context, and audit-integration tests** (pre-existing, not modified by this commit).
+4. **Latent `afterAll` crash in auth and context tests** (pre-existing, not modified by this commit).
+5. **The denied audit event does NOT include `roleCodes`** (production security hardening). The exact-role proof for denial scenarios is established BEFORE the request by querying the user's role assignments (Clinic Admin suite) or the preview identity's role assignments (Role Preview suite). This is the architecturally honest approach — modifying the production guard to include `roleCodes` in denial events would leak role information to a denied user and is forbidden.
+6. **The genuine Role Preview → Clinic Admin coverage depends on the `role_preview_test` databases being created by `setupRolePreviewDatabaseTests()`**. If a future change to `_role-preview-bootstrap.ts` breaks the database creation, tests #38 and #39 would fail at the bootstrap step (the same way they fail locally due to PostgreSQL 17 unavailability). The local unit tests cannot catch this regression; GitHub Actions is the authoritative validator.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key for one controlled corrective push only after genuine Role Preview coverage is confirmed in the dedicated Role Preview PostgreSQL suite, then require GitHub Actions to execute both the Clinic Admin and Role Preview integration suites with zero failures, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before merge.

@@ -541,9 +541,11 @@ export interface SeedActiveContextInput {
  * in the database.
  *
  * @param input The seeding input (see {@link SeedActiveContextInput}).
- * @throws {Error} if any ownership invariant fails, or if the
+ * @throws {Error} if any ownership invariant fails, if the
  *   session update affected zero rows (the session was not found
- *   by its tokenHash).
+ *   by its tokenHash), OR if the session update affected more than
+ *   one row (a structural anomaly that should never occur because
+ *   `token_hash` is unique by database constraint).
  */
 export async function seedActiveContextForSession(
   input: SeedActiveContextInput,
@@ -652,7 +654,10 @@ export async function seedActiveContextForSession(
   // The update is keyed by tokenHash (the SHA-256 hash stored in
   // the database). The count must be 1; otherwise the session was
   // not found (e.g. the cookie value did not match the stored
-  // tokenHash).
+  // tokenHash) OR multiple sessions matched (a structural anomaly
+  // that should never occur because `token_hash` is unique by
+  // database constraint, but the helper defends in depth against
+  // a future schema drift that drops the uniqueness constraint).
   const result = await input.prisma.authSession.updateMany({
     where: { tokenHash: input.tokenHash },
     data: {
@@ -668,6 +673,30 @@ export async function seedActiveContextForSession(
         'the caller must pass the SHA-256 hash of the raw session ' +
         'cookie value (the same hash the auth service stores in ' +
         'auth_sessions.token_hash).',
+    );
+  }
+  if (result.count > 1) {
+    // Defence-in-depth: the `auth_sessions.token_hash` column is
+    // unique by database constraint, so `updateMany` keyed by
+    // `tokenHash` should never affect more than one row. If it
+    // does, the schema constraint has been dropped (a production
+    // defect) OR the test is using a fake Prisma client that
+    // returns an inflated count (a test-setup defect). Either
+    // way, the helper MUST refuse to seed the active context on
+    // multiple matches — otherwise the test would silently seed
+    // the wrong session(s) and the assertion would pass against
+    // the wrong session.
+    throw new Error(
+      'seedActiveContextForSession: defence-in-depth rejection — ' +
+        `multiple auth_session rows (${result.count}) matched ` +
+        `tokenHash ${input.tokenHash}. The ` +
+        '`auth_sessions.token_hash` column is unique by database ' +
+        'constraint, so this should never occur. If it does, the ' +
+        'schema constraint has been dropped (a production defect) ' +
+        'OR the test is using a fake Prisma client that returns ' +
+        'an inflated count (a test-setup defect). The helper ' +
+        'refuses to seed the active context on multiple matches ' +
+        'to prevent silently seeding the wrong session.',
     );
   }
 }
