@@ -34,6 +34,11 @@ import {
   AuthErrorResponseSchema,
 } from '@ibn-hayan/contracts';
 import { getPsqlBin, getDatabaseUrl } from '../database/_pg-bootstrap.js';
+import {
+  fetchCsrfToken,
+  assertCsrfToken,
+  resetThrottlerStorageSafely,
+} from './_clinic-admin-test-helpers.js';
 
 /**
  * Clinic Admin Overview HTTP integration tests.
@@ -216,11 +221,15 @@ async function selectTenantContext(
   cookie: string,
   membershipId: string,
 ): Promise<void> {
-  const csrfResponse = await request(server)
-    .get('/api/v1/auth/csrf')
-    .set('Cookie', cookie)
-    .expect(200);
-  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  // Acquire a real CSRF token via the strict-schema-validated helper.
+  // The helper NEVER returns undefined — it throws a precise
+  // diagnostic at the point of acquisition if the response does not
+  // match CsrfResponseSchema. This prevents the previous defect
+  // where reading `body.csrfToken` (wrong field name; the endpoint
+  // returns `{ token }`) yielded undefined and crashed inside
+  // Superagent's header setter before the request reached the app.
+  const csrfToken = await fetchCsrfToken(server, cookie);
+  assertCsrfToken(csrfToken, 'selectTenantContext');
   await request(server)
     .put('/api/v1/context/tenant')
     .set('Cookie', cookie)
@@ -234,11 +243,8 @@ async function selectOrganisationContext(
   cookie: string,
   organisationId: string,
 ): Promise<void> {
-  const csrfResponse = await request(server)
-    .get('/api/v1/auth/csrf')
-    .set('Cookie', cookie)
-    .expect(200);
-  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  const csrfToken = await fetchCsrfToken(server, cookie);
+  assertCsrfToken(csrfToken, 'selectOrganisationContext');
   await request(server)
     .put('/api/v1/context/organisation')
     .set('Cookie', cookie)
@@ -252,11 +258,8 @@ async function selectFacilityContext(
   cookie: string,
   facilityId: string,
 ): Promise<void> {
-  const csrfResponse = await request(server)
-    .get('/api/v1/auth/csrf')
-    .set('Cookie', cookie)
-    .expect(200);
-  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  const csrfToken = await fetchCsrfToken(server, cookie);
+  assertCsrfToken(csrfToken, 'selectFacilityContext');
   await request(server)
     .put('/api/v1/context/facility')
     .set('Cookie', cookie)
@@ -306,22 +309,59 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  await app.close();
+  // Defensive teardown: if `beforeAll` failed partially (e.g. PG17
+  // unavailable, AppModule bootstrap failed, etc.), `app` may be
+  // undefined. Calling `app.close()` on undefined would throw a
+  // TypeError that masks the original `beforeAll` failure in the
+  // test output. The optional chaining + `if (app)` guard matches
+  // the established defensive teardown pattern in
+  // `apps/api/test/audit/audit-atomicity.audit-atomicity-spec.ts`
+  // and `apps/api/test/role-preview/role-preview.role-preview-spec.ts`.
+  //
+  // When `app` IS defined, `app.close()` is called exactly once.
+  // NestJS's `close()` triggers `onApplicationShutdown()` on every
+  // module — including the `ThrottlerStorageService.onApplicationShutdown()`
+  // which clears all pending `setTimeout` handles. This is the
+  // redundant safety net for the `resetThrottlerStorageSafely()`
+  // helper: even if a between-test reset missed a handle (e.g.
+  // because a timer was scheduled between the reset and `app.close()`),
+  // `onApplicationShutdown()` will clear it during teardown.
+  if (app) {
+    await app.close();
+  }
 });
 
 beforeEach(() => {
   truncateAll();
-  resetThrottlerStorage();
+  // Safely reset the ThrottlerStorageService between tests.
+  //
+  // The previous `resetThrottlerStorage()` only cleared the storage
+  // Map but left the pending `setTimeout` handles active. When a
+  // delayed callback fired against the now-empty storage Map, it
+  // crashed with `TypeError: Cannot destructure property 'totalHits'
+  // of 'this.storage.get(...)' as it is undefined`. The unhandled
+  // exception corrupted the test process state, preventing
+  // `app.close()` from completing and causing the `afterAll` hook
+  // to time out at 60s.
+  //
+  // The safe helper clears timeout handles FIRST (calling
+  // `clearTimeout` on each pending handle), THEN clears the storage
+  // entries Map. This matches the `onApplicationShutdown()`
+  // semantics that NestJS calls during `app.close()`.
+  resetThrottlerStorageSafely(throttlerStorage);
 });
 
-function resetThrottlerStorage(): void {
-  const storage = throttlerStorage as unknown as {
-    storage?: Map<string, unknown>;
-  };
-  if (storage.storage instanceof Map) {
-    storage.storage.clear();
-  }
-}
+// NOTE: The previous inline `resetThrottlerStorage()` function has
+// been removed. It is replaced by the typed, schema-guarded
+// `resetThrottlerStorageSafely()` helper imported from
+// `./_clinic-admin-test-helpers.js`. The helper:
+//   1. Iterates `timeoutIds` (keyed by throttler name) and calls
+//      `clearTimeout` on each pending handle.
+//   2. Clears the `timeoutIds` Map.
+//   3. Clears the `storage` entries Map.
+// The order is critical: clearing storage first would leave pending
+// timeout callbacks pointing at missing entries, reproducing the
+// original destructuring crash.
 
 // ---------------------------------------------------------------------------
 // Test scenarios
@@ -427,7 +467,11 @@ describe('GET /api/v1/clinic-admin/overview', () => {
 
     for (const roleCode of nonR09Roles) {
       truncateAll();
-      resetThrottlerStorage();
+      // Use the safe throttler reset (clears timeout handles FIRST,
+      // then storage entries). The previous `resetThrottlerStorage()`
+      // only cleared storage and left timeout handles active,
+      // causing the destructuring crash on delayed callbacks.
+      resetThrottlerStorageSafely(throttlerStorage);
       const slug = `tenant-${roleCode.toLowerCase()}`;
       const ctx = await bootstrapUserAndContext(
         `user-${roleCode.toLowerCase()}@example.invalid`,

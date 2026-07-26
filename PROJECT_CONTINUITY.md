@@ -3042,3 +3042,112 @@ Generate a fresh temporary deploy key only after request isolation is independen
 > 1. Verify the client is stateless: `pnpm --filter @ibn-hayan/web test src/lib/api/clinic-admin/clinic-admin.client.spec.ts` should pass 15 tests including the 2 stateless-behaviour tests (every call performs a fresh fetch; concurrent calls perform separate fetches with no Promise sharing).
 > 2. Verify the component-scoped ref: `pnpm --filter @ibn-hayan/web test src/components/clinic-admin/clinic-admin-overview.spec.tsx` should pass 32 tests including the Strict Mode test (3), the genuine-unmount test (4), the multiple-component tests (5, 6), and the authenticated-context isolation tests (27–32).
 > 3. Verify no backend/CI/schema/migration/package changes: `git diff dd91e12..HEAD --stat` should show ONLY 4 files under `apps/web/src/`.
+
+### Clinic Admin CI Harness Correction (CSRF fixture + Throttler teardown) — local child commit, 2026-07-26
+
+**Date:** 2026-07-26
+
+**Repository:** `/home/z/clinic-admin-overview-live-data-v1` (worktree of `/home/z/my-project`).
+
+**Branch:** `feat/clinic-admin-overview-live-data-v1`.
+
+**Task ID:** `clinic-admin-ci-harness-correction-v23`.
+
+**Trigger:** GitHub Actions `postgresql17-validation` job FAILED on commit `fff72d5745e73f59176159d9f7e159b09a3c4252` (the task-branch tip after the controlled push). The Clinic Admin integration suite `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` reported 22 failed / 2 passed out of 24 tests. The dominant failure was `TypeError: Invalid value "undefined" for header "X-CSRF-Token"` (thrown inside Supertest/Superagent BEFORE most HTTP requests reached the application). The suite also reported a 60-second `afterAll` hook timeout at `await app.close()` and two unhandled NestJS Throttler exceptions: `TypeError: Cannot destructure property 'totalHits' of 'this.storage.get(...)' as it is undefined`.
+
+**Goal:** Correct the integration-test harness locally, create one new child commit, and leave the corrected branch ready for a later controlled push. Do NOT push during this task. Do NOT generate a deploy key during this task.
+
+**Root cause #1 — Undefined CSRF header (22 of 24 test failures):**
+
+The Clinic Admin e2e suite's three context-selection helpers (`selectTenantContext`, `selectOrganisationContext`, `selectFacilityContext`) read the CSRF token from the wrong response field:
+
+- Previous code: `const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;`
+- Correct code (per the CSRF controller at `apps/api/src/modules/auth/auth.controller.ts` line 388, the OpenAPI schema at line 368, the `CsrfResponseSchema` in `@ibn-hayan/contracts`, and the proven pattern in `auth.e2e.auth-spec.ts`, `context.e2e.context-spec.ts`, and `role-preview.role-preview-spec.ts`): `body.token`
+
+The CSRF endpoint returns `{ token: string }`, NOT `{ csrfToken: string }`. Reading the wrong field name yielded `undefined`, which was then passed to `supertest.Request#set('X-CSRF-Token', undefined)`. Superagent's header validator throws `TypeError: Invalid value "undefined" for header "X-CSRF-Token"` BEFORE any HTTP request is sent. The server-side AuthorizationGuard, ThrottlerGuard, and ClinicAdminOverviewService were NEVER invoked for the 22 failing tests.
+
+**Did failed requests reach the server?** NO. The TypeError is thrown by Superagent's header validator before any HTTP request is sent. The 2 passing tests were #5 (missing session, no setup needed) and #24 (cross-test cleanup, after the test that crashed).
+
+**CSRF policy for GET /api/v1/clinic-admin/overview:** The AuthorizationGuard (at `apps/api/src/modules/authorization/authorization.guard.ts` lines 188-225) only applies CSRF checks to `PUT` and `DELETE` methods. GET requests are exempt. The Clinic Admin test correctly does NOT attach `X-CSRF-Token` to the GET overview request — that part is NOT the bug. The bug is ONLY in the three setup helpers (which use PUT /context/* and DO need a real CSRF token, but read the wrong response field).
+
+**Root cause #2 — Throttler timer-callback crash + afterAll hook timeout:**
+
+The previous `resetThrottlerStorage()` helper (inline in the e2e spec) only called `storage.storage.clear()` on the default `@nestjs/throttler@6.5.0` `ThrottlerStorageService`. That service stores rate-limit entries in a `Map<string, ThrottlerStorageRecord>` (keyed by rate-limit key, exposed via `get storage()`) AND stores pending `setTimeout` handles in a SEPARATE `Map<string, NodeJS.Timeout[]>` (keyed by throttler name, stored in the private `timeoutIds` field). The `setExpirationTime()` method schedules a `setTimeout` whose callback destructures `this.storage.get(key)`:
+
+```js
+setExpirationTime(key, ttlMilliseconds, throttlerName) {
+  const timeoutId = setTimeout(() => {
+    const { totalHits } = this.storage.get(key);  // <-- crashes if entry was cleared
+    totalHits.set(throttlerName, totalHits.get(throttlerName) - 1);
+    // ...
+  }, ttlMilliseconds);
+  this.timeoutIds.get(throttlerName).push(timeoutId);
+}
+```
+
+Clearing only the storage Map left the timeout handles active. When a delayed callback fired against the now-empty storage Map, `this.storage.get(key)` returned `undefined`, and `const { totalHits } = undefined` threw `TypeError: Cannot destructure property 'totalHits' of 'this.storage.get(...)' as it is undefined`. The unhandled exception in the timer callback corrupted the test process state, preventing `app.close()` from completing → `afterAll` hook times out at 60s.
+
+The `ThrottlerStorageService` DOES implement `onApplicationShutdown()` (called by NestJS during `app.close()`), which iterates `timeoutIds` and calls `clearTimeout` on each handle. This is the proper teardown mechanism. The `resetThrottlerStorage()` helper failed to replicate this semantics for between-test isolation.
+
+**Latent bug in auth, context, and audit-integration tests:** The same broken `resetThrottlerStorage()` pattern is duplicated inline in `apps/api/test/auth/auth.e2e.auth-spec.ts`, `apps/api/test/context/context.e2e.context-spec.ts`, and `apps/api/test/audit/audit-integration.audit-integration-spec.ts`. These tests have NOT manifested the bug because they make fewer HTTP requests per test (their throttler TTL timers don't fire during the test). The bug is latent in those tests and could manifest if they are extended to make more requests. This commit does NOT modify those tests (to keep the change limited and focused on the failing clinic-admin suite). A follow-up commit could migrate them to use the same typed helper.
+
+**Correction applied:**
+
+1. **Typed CSRF helper** (`apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts`):
+   - `parseCsrfResponseBody(body: unknown): string` — pure function, validates with `CsrfResponseSchema`, returns the `token` field, throws a precise diagnostic if validation fails. NEVER returns `undefined`.
+   - `fetchCsrfToken(server: Server, cookie: string): Promise<string>` — supertest wrapper around `parseCsrfResponseBody`. Calls `GET /api/v1/auth/csrf` with the session cookie, asserts HTTP 200, delegates to `parseCsrfResponseBody`.
+   - `assertCsrfToken(value: unknown, context: string): string` — defence-in-depth assertion. Used at call sites where the token has been stored in a variable and there is a risk of accidental reassignment or session-replacement reuse. Throws a precise diagnostic mentioning session replacement, logout/login transition, and Role Preview principal replacement.
+   - The helpers NEVER return `undefined`. If acquisition fails, they throw — stopping test setup at the precise point of failure rather than letting an undefined value propagate into a Supertest header setter.
+
+2. **Typed Throttler reset helper** (same file):
+   - `resetThrottlerStorageSafely(throttlerStorage: ThrottlerStorage): void` — clears timeout handles FIRST (calling `clearTimeout` on each pending handle in `timeoutIds`), THEN clears the storage entries Map. This matches the `onApplicationShutdown()` semantics that NestJS calls during `app.close()`.
+   - The helper uses runtime guards (`instanceof Map`) to detect whether the supplied `ThrottlerStorage` matches the expected internal shape. If the shape does not match (e.g. a future `@nestjs/throttler` release changes the implementation), the helper skips the reset rather than crashing. The test will then fail loudly when the throttler triggers across tests, alerting the operator that the helper needs updating.
+   - The helper is idempotent and safe to call when `beforeAll` fails partially.
+
+3. **Updated e2e spec** (`apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts`):
+   - Replaced the three inline `(csrfResponse.body as { csrfToken: string }).csrfToken` reads with `fetchCsrfToken(server, cookie)` + `assertCsrfToken(csrfToken, '<context>')` calls.
+   - Replaced the broken inline `resetThrottlerStorage()` function with `resetThrottlerStorageSafely(throttlerStorage)` (imported from the helper file).
+   - Updated the inline `resetThrottlerStorage()` call in test #4 (the non-R09 roles loop) to use `resetThrottlerStorageSafely(throttlerStorage)`.
+   - Made `afterAll` defensive: `if (app) { await app.close(); }` — prevents the `Cannot read properties of undefined (reading 'close')` TypeError when `beforeAll` fails partially (e.g. PG17 unavailable). Matches the established defensive teardown pattern in `audit-atomicity.audit-atomicity-spec.ts` and `role-preview.role-preview-spec.ts`.
+
+4. **Focused unit tests** (`apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts`, 29 tests):
+   - `parseCsrfResponseBody` (12 tests): returns validated token for well-formed body; NEVER returns undefined; throws precise diagnostic for null, undefined, wrong field name (`csrfToken` instead of `token`), missing field, too-short token, non-string token, array body, primitive body; includes received body in error message.
+   - `assertCsrfToken` (6 tests): returns value for non-empty string; throws for undefined, null, empty string, number; includes context name and mentions session replacement / logout-login / Role Preview in error message.
+   - `resetThrottlerStorageSafely` (9 tests): clears both Maps; clears timeout handles BEFORE storage (regression guard using a 50ms TTL timer that should NOT fire after reset); idempotent; safe when storage missing; safe when timeoutIds missing; safe when both missing; safe for unrelated object shape; clears multiple timeout handles across multiple throttler names; handles non-array values in timeoutIds gracefully.
+   - Helper composition (2 tests): successfully-acquired token passes assertion; acquisition failure stops test setup before any header setter is called.
+
+**Files modified (1):** `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts`.
+
+**Files created (2):** `apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts`, `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts`.
+
+**Files deleted:** 0.
+
+**Schema/migration changes:** NONE. **Dependency version changes:** NONE. **pnpm-lock.yaml changes:** NONE. **CI workflow changes:** NONE. **Production source code changes:** NONE. **Production CSRF policy changes:** NONE. **Production Throttler configuration changes:** NONE. **Clinic Admin permission policy changes:** NONE. **Tenant/organisation/facility isolation changes:** NONE. **Audit action / category changes:** NONE. **Platform Super Admin changes:** NONE. **Old Clinic Admin worktree changes:** NONE. **Quarantine branch changes:** NONE. **Recovery tag changes:** NONE. **Main changes:** NONE.
+
+**Local validation:**
+- `pnpm run typecheck` PASS (all 8 workspace projects).
+- `pnpm run lint` PASS (0 errors, 0 warnings).
+- `pnpm run test` PASS — 905 unit tests across 5 packages (domain 108, contracts 208, observability 95, api 267, web 227; 0 regressions). Independently verified count: 108+208+95+267+227 = 905. Baseline was 874 (before the request-isolation commit `fff72d5`); the request-isolation commit added 2 tests (874→876); this commit adds 29 tests (876→905).
+- `pnpm run build` PASS (api via SWC, web via Next.js; `/clinic-admin` route registered).
+- `git diff --check` PASS.
+- Focused tests: clinic-admin test-helpers spec (29 tests PASS), clinic-admin controller (12 tests PASS), clinic-admin errors (4 tests PASS), clinic-admin overview service (24 tests PASS), clinic-admin frontend client (15 tests PASS), clinic-admin Overview component (32 tests PASS), contracts auth schema incl. CsrfResponseSchema (37 tests PASS), observability audit action-codes / event builder (95 tests PASS).
+- `pnpm test:clinic-admin` resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step because PostgreSQL 17 is unavailable locally (error: `Failed to execute PostgreSQL binary 'initdb --version'. Ensure PG_BINDIR or PATH points at PostgreSQL 17 executables.`). 24 tests skipped. This is the expected failure mode, NOT a regression. The `afterAll` hook no longer crashes with `Cannot read properties of undefined (reading 'close')` — the defensive `if (app)` guard prevents the secondary TypeError. The 24 HTTP integration scenarios are implemented in test coverage, NOT executed locally, and awaiting GitHub Actions verification (the suite remains wired into the `postgresql17-validation` job from the previous commit, which is unchanged).
+- Auth, context, audit-integration, and role-preview PostgreSQL suites: same expected PG17-bootstrap failure mode (NOT executed locally). No regression introduced — those test files are untouched by this commit. They have the same latent `resetThrottlerStorage()` bug and the same latent `afterAll` crash pattern (bare `await app.close()`), but those are pre-existing issues not introduced by this commit. A follow-up commit could migrate them to use the same typed helper.
+
+**Secret scan:** PASS. No private keys, deploy-key material, tokens, cookie values, real CSRF tokens, database credentials, generated output, dependency caches, accidental deletions, or unrelated refactoring in the diff. The `TEST_PASSWORD = 'sufficiently-long-password'` literal is a non-secret test fixture (not a real credential), unchanged by this commit.
+
+**Commit subject:** `test: fix clinic admin csrf fixture and throttler teardown`.
+
+**Commit parent:** `fff72d5745e73f59176159d9f7e159b09a3c4252` (the previous task-branch tip).
+
+**New commit SHA:** (to be filled in after the commit is created.)
+
+**Branch state after commit:** 7 commits ahead of `main` (67802eb + ee95c8c + 524bd39 + 9877bce + dd91e12 + fff72d5 + new commit), 1 commit ahead of `origin/feat/clinic-admin-overview-live-data-v1`.
+
+**Remaining risks:**
+1. **PostgreSQL 17 integration tests not executed locally.** The 24 integration scenarios are implemented in test coverage and wired into the GitHub Actions `postgresql17-validation` job. They are NOT executed locally (no PostgreSQL 17 in the development environment). They are awaiting GitHub Actions verification.
+2. **Branch is 1 commit ahead of remote.** No authenticated deploy key available. The operator must generate a fresh temporary deploy key and push via SSH.
+3. **Latent Throttler reset bug in auth, context, and audit-integration tests.** The same broken `resetThrottlerStorage()` pattern is duplicated inline in those three test files. They have NOT manifested the bug because they make fewer HTTP requests per test. This commit does NOT modify them (to keep the change limited). A follow-up commit could migrate them to use `resetThrottlerStorageSafely()`.
+4. **Latent `afterAll` crash in auth and context tests.** The bare `await app.close()` pattern crashes when `beforeAll` fails (e.g. PG17 unavailable). This commit fixes the clinic-admin test's `afterAll` but does NOT modify the auth/context tests. A follow-up commit could apply the same `if (app)` guard.
+
+**Immediate next task:** Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require the updated PostgreSQL 17 GitHub Actions job to pass with all 24 Clinic Admin integration scenarios and zero unhandled errors before merge.
