@@ -63,7 +63,116 @@
 import type { Server } from 'node:http';
 import type { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
-import { CsrfResponseSchema } from '@ibn-hayan/contracts';
+import {
+  CsrfResponseSchema,
+  ClinicAdminOverviewErrorResponseSchema,
+  AuthErrorResponseSchema,
+  type ClinicAdminOverviewErrorResponse,
+  type AuthErrorResponse,
+} from '@ibn-hayan/contracts';
+
+/**
+ * Parse a 403 response body produced by the Clinic Admin Overview
+ * endpoint when the active context is missing or invalid.
+ *
+ * The Overview service (`ClinicAdminOverviewService.loadOverview`)
+ * throws `clinicAdminOverviewContextRequired()` (HTTP 403 with code
+ * `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`) when:
+ *   - the session has no active tenant membership;
+ *   - the session has no active organisation;
+ *   - the session has no active facility;
+ *   - the active tenant, organisation, or facility no longer exists
+ *     or is no longer active (defence-in-depth against session
+ *     tampering);
+ *   - the active facility does not belong to the active organisation.
+ *
+ * The code `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` is NOT included
+ * in `AuthErrorResponseSchema`'s enum (which is the auth/context
+ * error contract). It IS included in
+ * `ClinicAdminOverviewErrorResponseSchema`'s enum (the Clinic Admin
+ * Overview error contract). Tests that exercise the Overview
+ * endpoint's missing-context 403 MUST parse with
+ * `ClinicAdminOverviewErrorResponseSchema`, NOT with
+ * `AuthErrorResponseSchema` — otherwise `safeParse` returns
+ * `success=false` and the test fails for the wrong reason (a
+ * contract mismatch rather than the asserted HTTP status).
+ *
+ * This helper centralises the correct parser so the contract
+ * correction is structural: future tests that need to assert a
+ * missing-context 403 from the Overview endpoint import this helper
+ * instead of reaching for `AuthErrorResponseSchema` directly.
+ *
+ * @param body The parsed JSON response body.
+ * @returns The validated `ClinicAdminOverviewErrorResponse`.
+ * @throws {Error} if the body does not match
+ *   `ClinAdminOverviewErrorResponseSchema`.
+ */
+export function parseClinicAdminOverviewErrorResponse(
+  body: unknown,
+): ClinicAdminOverviewErrorResponse {
+  const parsed = ClinicAdminOverviewErrorResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(
+      'Clinic Admin Overview 403 response does not match ' +
+        'ClinicAdminOverviewErrorResponseSchema. The Overview service ' +
+        'throws clinicAdminOverviewContextRequired() (code ' +
+        'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED) when the active ' +
+        'tenant, organisation, or facility context is missing or ' +
+        'invalid. This code is NOT in AuthErrorResponseSchema; tests ' +
+        'that assert a missing-context 403 from the Overview endpoint ' +
+        'MUST use ClinicAdminOverviewErrorResponseSchema (via this ' +
+        'helper) rather than AuthErrorResponseSchema. ' +
+        `Validation error: ${parsed.error.message}. ` +
+        `Received body: ${JSON.stringify(body)}.`,
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Parse a 401/403 response body produced by the auth, context, or
+ * authorisation layers (NOT by the Clinic Admin Overview service's
+ * context-required guard).
+ *
+ * Use this helper for:
+ *   - 401 missing/expired/revoked session responses (code
+ *     `AUTH_SESSION_REQUIRED`);
+ *   - 403 CSRF-invalid responses (code `AUTH_CSRF_INVALID`);
+ *   - 403 origin-disallowed responses (code `AUTH_ORIGIN_DISALLOWED`);
+ *   - 403 context-selection-forbidden responses from the
+ *     session-context module (code `CONTEXT_SELECTION_FORBIDDEN`);
+ *   - 403 context-request-invalid responses (code
+ *     `CONTEXT_REQUEST_INVALID`);
+ *   - 403 authorisation-forbidden responses from the
+ *     AuthorizationGuard when the active membership's roles do not
+ *     grant the required permission (code
+ *     `AUTHORIZATION_FORBIDDEN`).
+ *
+ * Do NOT use this helper for 403 responses from the Clinic Admin
+ * Overview service's context-required guard — use
+ * {@link parseClinicAdminOverviewErrorResponse} instead. The
+ * `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` code is not in
+ * `AuthErrorResponseSchema`'s enum.
+ *
+ * @param body The parsed JSON response body.
+ * @returns The validated `AuthErrorResponse`.
+ * @throws {Error} if the body does not match `AuthErrorResponseSchema`.
+ */
+export function parseAuthErrorResponse(body: unknown): AuthErrorResponse {
+  const parsed = AuthErrorResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(
+      'Auth/context/authorisation error response does not match ' +
+        'AuthErrorResponseSchema. If the response is a 403 from the ' +
+        'Clinic Admin Overview endpoint with code ' +
+        'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED, use ' +
+        'parseClinicAdminOverviewErrorResponse() instead. ' +
+        `Validation error: ${parsed.error.message}. ` +
+        `Received body: ${JSON.stringify(body)}.`,
+    );
+  }
+  return parsed.data;
+}
 
 /**
  * Parse the JSON body of `GET /api/v1/auth/csrf` and return the

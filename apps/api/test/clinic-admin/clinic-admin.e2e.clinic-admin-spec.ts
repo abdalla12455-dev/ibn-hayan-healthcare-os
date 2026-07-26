@@ -17,6 +17,7 @@ import type {
   FacilityRepository,
   TenantId,
   OrganisationId,
+  FacilityId,
   PlatformRoleCode,
 } from '@ibn-hayan/domain';
 import {
@@ -29,15 +30,14 @@ import {
 } from '../../src/infrastructure/database/database.module.js';
 import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
 import { execFileSync } from 'node:child_process';
-import {
-  ClinicAdminOverviewResponseSchema,
-  AuthErrorResponseSchema,
-} from '@ibn-hayan/contracts';
+import { ClinicAdminOverviewResponseSchema } from '@ibn-hayan/contracts';
 import { getPsqlBin, getDatabaseUrl } from '../database/_pg-bootstrap.js';
 import {
   fetchCsrfToken,
   assertCsrfToken,
   resetThrottlerStorageSafely,
+  parseClinicAdminOverviewErrorResponse,
+  parseAuthErrorResponse,
 } from './_clinic-admin-test-helpers.js';
 
 /**
@@ -105,6 +105,68 @@ interface BootstrapResult {
   facilityId: string;
 }
 
+/**
+ * The setup strategy for the test fixture.
+ *
+ * Per ADR-015 §1.5 (Scope-authorisation Semantics), the production
+ * session-context service enforces scope-aware role-assignment
+ * checks at `PUT /api/v1/context/organisation` and
+ * `PUT /api/v1/context/facility`:
+ *
+ * - A tenant-scoped R09_ADMINISTRATOR assignment does NOT authorise
+ *   organisation or facility selection. R09 must be assigned at
+ *   organisation scope (or facility scope) to select that
+ *   organisation (or facility).
+ * - A tenant-scoped R13_SYSTEM_ADMINISTRATOR assignment DOES
+ *   authorise tenant-wide organisation and facility selection
+ *   (the single ADR-015 §1.5 exception for R13).
+ * - R01–R12 (non-R09, non-R13) tenant-scoped assignments do NOT
+ *   authorise organisation or facility selection.
+ * - R14_INTEGRATION_ACCOUNT has no context permissions at all.
+ *
+ * The previous fixture created ONLY a tenant-scoped assignment for
+ * the nominal role. For R09, that tenant-scoped assignment is
+ * insufficient to select organisation or facility context — the
+ * `selectOrganisationContext` setup step returns 403
+ * `CONTEXT_SELECTION_FORBIDDEN` (the production enforcement), and
+ * the test fails during setup before reaching the asserted Overview
+ * endpoint. For R01–R08, R10–R12, and R14, the tenant-scoped
+ * assignment is similarly insufficient — setup also 403s.
+ *
+ * The fixture now creates additional scoped assignments so setup
+ * completes legitimately:
+ *
+ * - `R09_SCOPED`: the R09 success scenarios. Creates a
+ *   tenant-scoped R09 assignment PLUS an organisation-scoped R09
+ *   assignment for the test organisation PLUS a facility-scoped
+ *   R09 assignment for the test facility. R09 alone authorises
+ *   tenant, organisation, and facility context selection through
+ *   its scoped assignments — no R13 backdoor. The Overview
+ *   endpoint's AuthorizationGuard sees R09's
+ *   `clinic_admin_overview:view` permission and returns 200.
+ *
+ * - `R13_SETUP`: the non-R09 denial scenarios (R01–R08, R10–R14).
+ *   Creates a tenant-scoped assignment for the nominal role PLUS a
+ *   tenant-scoped R13 assignment to authorise setup. Per ADR-015
+ *   §1.5, R13 at tenant scope grants organisation and facility
+ *   selection for every org/facility under the tenant. The final
+ *   Overview request still returns 403 because R13 (and the
+ *   nominal role) do NOT grant `clinic_admin_overview:view`.
+ *
+ * - `R13_ONLY`: the R13-only denial scenarios. Creates only a
+ *   tenant-scoped R13 assignment. R13 alone authorises setup, and
+ *   the Overview request returns 403 (R13 does not grant
+ *   `clinic_admin_overview:view`).
+ *
+ * - `R09_TENANT_ONLY`: the missing-context scenarios (tests #9,
+ *   #10) where setup deliberately stops before selecting the
+ *   missing dimension. Creates the same scoped R09 assignments as
+ *   `R09_SCOPED` so the available setup steps succeed; the test
+ *   then skips the relevant select call to leave the dimension
+ *   unset.
+ */
+type SetupMode = 'R09_SCOPED' | 'R13_SETUP' | 'R13_ONLY' | 'R09_TENANT_ONLY';
+
 async function bootstrapUserAndContext(
   userEmail: string,
   userDisplayName: string,
@@ -117,8 +179,20 @@ async function bootstrapUserAndContext(
     readonly createOrganisation?: boolean;
     readonly createFacility?: boolean;
     readonly facilityOrganisationId?: OrganisationId;
+    readonly setupMode?: SetupMode;
   } = {},
 ): Promise<BootstrapResult> {
+  // Determine the setup mode. The default depends on the nominal
+  // role: R09 uses scoped assignments; R13 uses R13 alone; every
+  // other role adds an R13 setup enabler.
+  const setupMode: SetupMode =
+    options.setupMode ??
+    (roleCode === 'R09_ADMINISTRATOR'
+      ? 'R09_SCOPED'
+      : roleCode === 'R13_SYSTEM_ADMINISTRATOR'
+        ? 'R13_ONLY'
+        : 'R13_SETUP');
+
   const tenant = await tenants.create({
     slug: tenantSlug,
     displayName: tenantDisplayName,
@@ -139,6 +213,11 @@ async function bootstrapUserAndContext(
     userId: user.id,
     status: options.membershipStatus ?? 'active',
   });
+
+  // Create the nominal role assignment at tenant scope. This is
+  // the user's "real" role for the test scenario. The setup-mode
+  // specific assignments below are ADDITIONAL assignments that
+  // enable context selection (per ADR-015 §1.5).
   await roleAssignments.create({
     tenantMembershipId: membership.id,
     roleCode,
@@ -166,6 +245,52 @@ async function bootstrapUserAndContext(
     });
     facilityId = fac.id;
   }
+
+  // Per ADR-015 §1.5, create additional scoped assignments so
+  // setup (tenant, organisation, facility context selection)
+  // completes legitimately. The nominal role assignment above is
+  // the "real" role for the test scenario; these additional
+  // assignments are the structural enablers that satisfy the
+  // production scope-authorisation rules.
+  if (setupMode === 'R09_SCOPED' || setupMode === 'R09_TENANT_ONLY') {
+    // R09 success scenarios and missing-context scenarios: create
+    // organisation-scoped and facility-scoped R09 assignments so
+    // R09 alone can select organisation and facility context
+    // (per ADR-015 §1.5 condition 1 for organisation selection
+    // and condition 1 for facility selection). No R13 backdoor.
+    if (organisationId !== '') {
+      await roleAssignments.create({
+        tenantMembershipId: membership.id,
+        roleCode: 'R09_ADMINISTRATOR',
+        scopeLevel: 'organisation',
+        scopeOrganisationId: organisationId,
+      });
+    }
+    if (organisationId !== '' && facilityId !== '') {
+      await roleAssignments.create({
+        tenantMembershipId: membership.id,
+        roleCode: 'R09_ADMINISTRATOR',
+        scopeLevel: 'facility',
+        scopeOrganisationId: organisationId,
+        scopeFacilityId: facilityId as FacilityId,
+      });
+    }
+  } else if (setupMode === 'R13_SETUP') {
+    // Non-R09 denial scenarios: add a tenant-scoped R13 assignment
+    // to authorise setup. Per ADR-015 §1.5 condition 3, a
+    // tenant-scoped R13 assignment grants organisation and facility
+    // selection for every org/facility under the tenant. The final
+    // Overview request returns 403 because the union of R13 and
+    // the nominal role does NOT grant `clinic_admin_overview:view`
+    // (only R09 grants that permission, per the role-permission
+    // matrix).
+    await roleAssignments.create({
+      tenantMembershipId: membership.id,
+      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
+    });
+  }
+  // R13_ONLY: no additional assignments. R13 at tenant scope
+  // already authorises setup per ADR-015 §1.5 condition 3.
 
   return {
     userId: user.id,
@@ -282,6 +407,110 @@ async function loginAndSelectContext(
   return cookie;
 }
 
+/**
+ * Endpoint-reach proof for `GET /api/v1/clinic-admin/overview`.
+ *
+ * Per the second-stage CI-harness correction task Phase 7, every
+ * scenario must prove that the Overview endpoint was actually
+ * issued — a setup 403 must never masquerade as the endpoint's
+ * expected 403. The structural proof is an audit-outbox row-count
+ * delta: the AuthorizationGuard emits a direct (non-transactional)
+ * audit event for every authorization decision (allowed OR denied)
+ * it makes on the Overview route. If the row count does not change,
+ * the request never reached the guard.
+ *
+ * Usage:
+ *   const before = await countOverviewAuditEvents();
+ *   const response = await request(server).get('/api/v1/clinic-admin/overview')...
+ *   const after = await countOverviewAuditEvents();
+ *   expect(after).toBeGreaterThan(before);   // endpoint was reached
+ *
+ * The helper counts rows whose `canonicalEventDraft` carries an
+ * `authorization.decision.allowed` or `authorization.decision.denied`
+ * action with `metadata.endpoint === '/api/v1/clinic-admin/overview'`.
+ * The metadata is set by the AuthorizationGuard's
+ * `emitAuthorizationAllowed` / `emitAuthorizationDenied` methods
+ * (which use `request.path` for the endpoint). The count is exact
+ * for the current test because `beforeEach` truncates
+ * `audit_outbox_events`.
+ *
+ * For tests #5 (no session) and #8 (no active membership) the guard
+ * short-circuits to 401 (`AUTH_SESSION_REQUIRED`) before emitting
+ * an authorization-decision event; for those tests the proof is
+ * the HTTP status itself (401 cannot come from the Overview service,
+ * which only emits 403 `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` or
+ * 200). The endpoint-reach assertion for those tests is therefore
+ * the `.expect(401)` call.
+ */
+async function countOverviewAuthorizationAuditEvents(): Promise<number> {
+  const rows = await prisma.auditOutboxEvent.findMany({
+    where: { deliveredAt: null },
+  });
+  let count = 0;
+  for (const row of rows) {
+    const draft = row.canonicalEventDraft as {
+      action?: string;
+      metadata?: { endpoint?: string };
+    };
+    if (
+      (draft.action === 'authorization.decision.allowed' ||
+        draft.action === 'authorization.decision.denied') &&
+      draft.metadata?.endpoint === '/api/v1/clinic-admin/overview'
+    ) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Assert that the Overview endpoint was actually reached for a
+ * denial scenario. The guard emits an `authorization.decision.denied`
+ * event for every 403 it returns; the count must increase by
+ * exactly one. Use this for tests #3, #4, #19, #20, #22 (guard
+ * denial with `AUTHORIZATION_FORBIDDEN`).
+ *
+ * For tests #9, #10, #11, #12, #13 the guard ALLOWS the request
+ * (R09 has `clinic_admin_overview:view`) and emits
+ * `authorization.decision.allowed`; the service then throws
+ * `clinicAdminOverviewContextRequired()`. Use
+ * {@link assertOverviewAllowedAndReached} for those tests.
+ */
+async function assertOverviewDeniedAndReached(
+  beforeCount: number,
+): Promise<void> {
+  const afterCount = await countOverviewAuthorizationAuditEvents();
+  expect(afterCount).toBe(beforeCount + 1);
+}
+
+/**
+ * Assert that the Overview endpoint was actually reached for a
+ * service-level denial scenario (the guard allowed the request;
+ * the service threw `clinicAdminOverviewContextRequired()`). The
+ * guard emits an `authorization.decision.allowed` event; the count
+ * must increase by exactly one.
+ */
+async function assertOverviewAllowedAndReached(
+  beforeCount: number,
+): Promise<void> {
+  const afterCount = await countOverviewAuthorizationAuditEvents();
+  expect(afterCount).toBe(beforeCount + 1);
+}
+
+/**
+ * Assert that the Overview endpoint was actually reached for a
+ * success scenario. The guard emits an
+ * `authorization.decision.allowed` event; the service then emits
+ * a `clinic_admin.overview.viewed` event. The count of
+ * authorization-decision events must increase by exactly one.
+ */
+async function assertOverviewSucceededAndReached(
+  beforeCount: number,
+): Promise<void> {
+  const afterCount = await countOverviewAuthorizationAuditEvents();
+  expect(afterCount).toBe(beforeCount + 1);
+}
+
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -383,10 +612,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(response.body).toMatchObject({
       activeContext: {
@@ -415,10 +646,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     const parsed = ClinicAdminOverviewResponseSchema.safeParse(response.body);
     expect(parsed.success).toBe(true);
@@ -439,13 +672,16 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewDeniedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    // R13 lacks `clinic_admin_overview:view`; the guard denies with
+    // AUTHORIZATION_FORBIDDEN (which IS in AuthErrorResponseSchema).
+    parseAuthErrorResponse(response.body);
   });
 
   it('4. every tested non-R09 role returns HTTP 403', async () => {
@@ -487,23 +723,38 @@ describe('GET /api/v1/clinic-admin/overview', () => {
         ctx.facilityId,
       );
 
+      const before = await countOverviewAuthorizationAuditEvents();
       const response = await request(server)
         .get('/api/v1/clinic-admin/overview')
         .set('Cookie', cookie)
         .expect(403);
+      await assertOverviewDeniedAndReached(before);
 
-      const parsed = AuthErrorResponseSchema.safeParse(response.body);
-      expect(parsed.success).toBe(true);
+      // None of these roles grant `clinic_admin_overview:view`; the
+      // guard denies with AUTHORIZATION_FORBIDDEN.
+      parseAuthErrorResponse(response.body);
     }
   });
 
   it('5. missing session returns HTTP 401', async () => {
+    // No session cookie. The guard short-circuits at session
+    // validation with AUTH_SESSION_REQUIRED (401). The guard does
+    // NOT emit an authorization.decision.* audit event because the
+    // session was never validated. The endpoint-reach proof for
+    // this test is the HTTP 401 status itself — 401 cannot come
+    // from the Overview service (which only emits 200 or 403 with
+    // CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED), so a 401 proves the
+    // request reached the auth layer.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .expect(401);
+    const after = await countOverviewAuthorizationAuditEvents();
+    // No authorization-decision event was emitted (session never
+    // validated). The endpoint-reach proof is the 401 status.
+    expect(after).toBe(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
   });
 
   it('6. expired session returns HTTP 401', async () => {
@@ -540,13 +791,17 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       });
     }
 
+    // The guard short-circuits at session validation (expired
+    // session). Same endpoint-reach proof as test #5.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(401);
+    const after = await countOverviewAuthorizationAuditEvents();
+    expect(after).toBe(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
   });
 
   it('7. revoked session returns HTTP 401', async () => {
@@ -570,13 +825,17 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       data: { revokedAt: new Date() },
     });
 
+    // The guard short-circuits at session validation (revoked
+    // session). Same endpoint-reach proof as test #5.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(401);
+    const after = await countOverviewAuthorizationAuditEvents();
+    expect(after).toBe(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
   });
 
   it('8. missing active membership returns HTTP 403', async () => {
@@ -589,18 +848,18 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     );
     const cookie = await loginAndReturnCookie('no-membership@example.invalid');
     // Do NOT select tenant context — activeTenantMembershipId remains null.
-    // But we need organisation and facility to be set to test the
-    // membership check specifically. Actually, without selecting tenant
-    // context, we can't select organisation or facility. So this test
-    // verifies that without an active membership, the endpoint returns 403.
+    // The Overview guard's `authorizeForActiveMembership` rejects with
+    // AUTHORIZATION_FORBIDDEN when activeMembershipId is null. The guard
+    // emits an `authorization.decision.denied` event for this 403.
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewDeniedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
     // The response must NOT leak which dimension is missing.
     expect(JSON.stringify(response.body)).not.toContain(ctx.membershipId);
   });
@@ -615,15 +874,22 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     );
     const cookie = await loginAndReturnCookie('no-org@example.invalid');
     await selectTenantContext(cookie, ctx.membershipId);
-    // Do NOT select organisation context.
+    // Do NOT select organisation context. The Overview guard ALLOWS
+    // the request (R09 has `clinic_admin_overview:view`); the service
+    // throws `clinicAdminOverviewContextRequired()` because
+    // `activeOrganisationId === null`. The response code is
+    // CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED (NOT in
+    // AuthErrorResponseSchema; IS in
+    // ClinicAdminOverviewErrorResponseSchema).
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewAllowedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseClinicAdminOverviewErrorResponse(response.body);
   });
 
   it('10. missing active facility returns HTTP 403', async () => {
@@ -637,15 +903,18 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     const cookie = await loginAndReturnCookie('no-facility@example.invalid');
     await selectTenantContext(cookie, ctx.membershipId);
     await selectOrganisationContext(cookie, ctx.organisationId);
-    // Do NOT select facility context.
+    // Do NOT select facility context. Same as test #9: the guard
+    // allows, the service throws `clinicAdminOverviewContextRequired()`
+    // because `activeFacilityId === null`.
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewAllowedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseClinicAdminOverviewErrorResponse(response.body);
   });
 
   it('11. organisation from another tenant fails closed', async () => {
@@ -684,13 +953,19 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       data: { activeOrganisationId: ctx2.organisationId },
     });
 
+    // The Overview guard ALLOWS (R09 has the permission); the
+    // service's tenant-scoped organisation lookup returns null
+    // (cross-tenant), so the service throws
+    // `clinicAdminOverviewContextRequired()`. The response code is
+    // CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewAllowedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseClinicAdminOverviewErrorResponse(response.body);
   });
 
   it('12. facility from another tenant fails closed', async () => {
@@ -721,13 +996,17 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       data: { activeFacilityId: ctx2.facilityId },
     });
 
+    // Same as test #11: the guard allows, the service's
+    // tenant-scoped facility lookup returns null (cross-tenant),
+    // the service throws `clinicAdminOverviewContextRequired()`.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewAllowedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseClinicAdminOverviewErrorResponse(response.body);
   });
 
   it('13. facility belonging to another organisation in the same tenant fails closed', async () => {
@@ -766,13 +1045,18 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       data: { activeFacilityId: fac2.id },
     });
 
+    // The service resolves the facility (it belongs to the same
+    // tenant, so the tenant-scoped lookup succeeds) but then
+    // verifies `facility.organisationId !== organisation.id`. The
+    // service throws `clinicAdminOverviewContextRequired()`.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewAllowedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseClinicAdminOverviewErrorResponse(response.body);
   });
 
   it('14. query-string tenant identifiers cannot override session context', async () => {
@@ -799,11 +1083,13 @@ describe('GET /api/v1/clinic-admin/overview', () => {
 
     // Pass ctx2's tenantId as a query parameter. The server MUST
     // ignore it and return ctx's data (not ctx2's).
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .query({ tenantId: ctx2.tenantId })
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (
@@ -851,11 +1137,13 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .query({ organisationId: ctx2.organisationId })
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (
@@ -892,11 +1180,13 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .query({ facilityId: ctx2.facilityId })
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (
@@ -933,6 +1223,7 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
@@ -940,6 +1231,7 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .set('X-Organisation-Id', ctx2.organisationId)
       .set('X-Facility-Id', ctx2.facilityId)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (
@@ -978,6 +1270,7 @@ describe('GET /api/v1/clinic-admin/overview', () => {
 
     // GET requests typically don't have a body, but supertest allows
     // sending one. The server MUST ignore it.
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
@@ -987,6 +1280,7 @@ describe('GET /api/v1/clinic-admin/overview', () => {
         facilityId: ctx2.facilityId,
       })
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (
@@ -1011,6 +1305,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     // NOTE: Role Preview is a development-only feature gated by
     // NODE_ENV !== 'production' and IBN_HAYAN_ROLE_PREVIEW_ENABLED.
     // This test verifies the permission check is not bypassed.
+    //
+    // The fixture uses R01_PHYSICIAN with the `R13_SETUP` mode: a
+    // tenant-scoped R13 assignment is added alongside R01 so setup
+    // (organisation/facility selection) can complete. The final
+    // Overview request still denies because R01+R13 does NOT grant
+    // `clinic_admin_overview:view`.
     const ctx = await bootstrapUserAndContext(
       'no-r09@example.invalid',
       'No R09 User',
@@ -1025,13 +1325,14 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewDeniedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
   });
 
   it('20. Platform Super Admin is never converted to Clinic Administrator', async () => {
@@ -1053,13 +1354,14 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewDeniedAndReached(before);
 
-    const parsed = AuthErrorResponseSchema.safeParse(response.body);
-    expect(parsed.success).toBe(true);
+    parseAuthErrorResponse(response.body);
   });
 
   it('21. the correct audit event or events are produced', async () => {
@@ -1077,10 +1379,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     // Verify the audit outbox contains the expected events.
     // The guard emits `authorization.decision.allowed` (category
@@ -1130,10 +1434,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
+    await assertOverviewDeniedAndReached(before);
 
     // Verify the audit outbox does NOT contain a
     // `clinic_admin.overview.viewed` event (because the service was
@@ -1173,10 +1479,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     const outboxRows = await prisma.auditOutboxEvent.findMany({
       where: { deliveredAt: null },
@@ -1222,10 +1530,12 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
+    await assertOverviewSucceededAndReached(before);
 
     expect(
       (

@@ -3151,3 +3151,170 @@ The `ThrottlerStorageService` DOES implement `onApplicationShutdown()` (called b
 4. **Latent `afterAll` crash in auth and context tests.** The bare `await app.close()` pattern crashes when `beforeAll` fails (e.g. PG17 unavailable). This commit fixes the clinic-admin test's `afterAll` but does NOT modify the auth/context tests. A follow-up commit could apply the same `if (app)` guard.
 
 **Immediate next task:** Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require the updated PostgreSQL 17 GitHub Actions job to pass with all 24 Clinic Admin integration scenarios and zero unhandled errors before merge.
+
+---
+
+## Clinic Admin CI Harness Second-Stage Correction (organisation-selection 403 + endpoint-reach proof) — local child commit, 2026-07-26
+
+### Background
+
+The first-stage CI-harness correction (commit `b2a92f28`) successfully removed the `TypeError: Invalid value "undefined" for header "X-CSRF-Token"` defect and the Throttler timer-callback crash + `afterAll` teardown timeout. After that commit was pushed and GitHub Actions ran the `postgresql17-validation` job, the suite reported a **second-stage failure**: 24 tests total, 19 failed, 5 passed. The dominant failure was `expected 200 "OK", got 403 "Forbidden"` inside the `selectOrganisationContext` setup helper at `PUT /api/v1/context/organisation`. A separate failure occurred in the missing-organisation scenario where `AuthErrorResponseSchema.safeParse(response.body)` returned `success=false`.
+
+### Root cause #1 (organisation-selection 403, dominant)
+
+**Test-only fixture defect** (NOT a production defect). The Clinic Admin e2e fixture's `bootstrapUserAndContext` helper created only a tenant-scoped role assignment for the nominal role (`roleAssignments.create({ tenantMembershipId, roleCode })` with no `scopeLevel`). Per **ADR-015 §1.5 (Scope-authorisation Semantics)**, the production `SessionContextService.selectOrganisationContext` calls `roleAssignments.listForMembershipAtOrganisation(activeMembership.id, organisation.id)` and throws `contextSelectionForbidden()` (HTTP 403, code `CONTEXT_SELECTION_FORBIDDEN`) when the result is empty. Per ADR-015 §1.5:
+
+> A tenant-scoped assignment for any role in R01–R12 does NOT grant organisation selection. In particular, a tenant-scoped R09 Administrator assignment does NOT grant tenant-wide organisation selection.
+
+The repository method `listForMembershipAtOrganisation` returns:
+- organisation-scoped assignments matching the supplied organisationId;
+- facility-scoped assignments whose `scopeOrganisationId` matches;
+- tenant-scoped assignments **ONLY when the role code is `R13_SYSTEM_ADMINISTRATOR`**.
+
+R09 tenant-scoped is therefore structurally insufficient. The same applies to facility selection via `listForMembershipAtFacility`.
+
+The established repository convention in `apps/api/test/context/context.e2e.context-spec.ts` for selecting organisation context with R09 is to create an organisation-scoped assignment: `roleAssignments.create({ tenantMembershipId, roleCode: 'R09_ADMINISTRATOR', scopeLevel: 'organisation', scopeOrganisationId: org.id })`.
+
+### Root cause #2 (test #9, #10, #11, #12, #13 schema parse failure)
+
+**Test-only contract-defect** (NOT a production defect). The Clinic Admin Overview service's `loadOverview` method throws `clinicAdminOverviewContextRequired()` (HTTP 403, code `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`) when any of `activeTenantMembershipId`, `activeOrganisationId`, or `activeFacilityId` is null, or when the active tenant/organisation/facility no longer exists or is inactive, or when the active facility does not belong to the active organisation. The error code `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` is NOT in `AuthErrorResponseSchema`'s enum; it IS in `ClinicAdminOverviewErrorResponseSchema`'s enum (already exported from `@ibn-hayan/contracts`). The tests for #9, #10, #11, #12, #13 parsed the response body with `AuthErrorResponseSchema.safeParse`, which returned `success=false` because the code is not in the enum.
+
+### Correction applied
+
+**Smallest coherent test-only correction:**
+
+1. **Updated `bootstrapUserAndContext` in the e2e spec** to support a `SetupMode` enum (`R09_SCOPED` | `R13_SETUP` | `R13_ONLY` | `R09_TENANT_ONLY`). For R09 success scenarios, the fixture now creates an organisation-scoped AND a facility-scoped R09 assignment (no R13 backdoor). For non-R09 denial scenarios (R01–R08, R10–R14), the fixture adds a tenant-scoped R13 assignment to authorise setup; the final Overview request still denies because R13 (and the union of R13 + the nominal role) does NOT grant `clinic_admin_overview:view`. For R13-only denial scenarios, R13 alone authorises setup per ADR-015 §1.5 condition 3 (the single R13 tenant-scope exception). The default mode is chosen automatically based on the nominal role code; callers can override via `options.setupMode`.
+
+2. **Updated the e2e spec to use the correct error-contract parser.** Tests #9, #10, #11, #12, #13 now use `parseClinicAdminOverviewErrorResponse` (which uses `ClinicAdminOverviewErrorResponseSchema`) instead of `AuthErrorResponseSchema.safeParse`. Tests #3, #4, #5, #6, #7, #8, #19, #20, #22 use `parseAuthErrorResponse` (which uses `AuthErrorResponseSchema`) for the auth/context/guard-denial responses.
+
+3. **Added two typed helpers to `_clinic-admin-test-helpers.ts`:**
+   - `parseClinicAdminOverviewErrorResponse(body)` — validates the body with `ClinicAdminOverviewErrorResponseSchema`; throws a precise diagnostic on failure that directs the caller to use the correct parser for setup-403 responses.
+   - `parseAuthErrorResponse(body)` — validates the body with `AuthErrorResponseSchema`; throws a precise diagnostic on failure that directs the caller to `parseClinicAdminOverviewErrorResponse` for Overview-context-required responses.
+
+4. **Added an endpoint-reach proof mechanism** to the e2e spec. Every scenario that calls `GET /api/v1/clinic-admin/overview` now asserts that the audit outbox's `authorization.decision.allowed` or `authorization.decision.denied` row count for the `/api/v1/clinic-admin/overview` endpoint increased by exactly one. This structurally proves the request reached the AuthorizationGuard. A setup 403 can no longer masquerade as the endpoint's expected 403 because the audit-outbox delta would be zero. For tests #5, #6, #7 (401 short-circuit at session validation), the endpoint-reach proof is the HTTP 401 status itself (401 cannot come from the Overview service, which only emits 200 or 403 `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`).
+
+5. **Added 16 focused regression tests** to `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts`:
+   - 6 tests for `parseClinicAdminOverviewErrorResponse` (accepts the canonical code; accepts AUTH_SESSION_REQUIRED; accepts AUTHORIZATION_FORBIDDEN; rejects CONTEXT_SELECTION_FORBIDDEN; throws precise diagnostic; never returns undefined).
+   - 6 tests for `parseAuthErrorResponse` (accepts AUTH_SESSION_REQUIRED; accepts AUTHORIZATION_FORBIDDEN; accepts CONTEXT_SELECTION_FORBIDDEN; rejects CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED; throws precise diagnostic; never returns undefined).
+   - 4 cross-helper disambiguation tests (setup 403 vs Overview 403 vs guard-denial 403 vs session-required 401).
+
+### Files modified
+
+- `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` — updated `bootstrapUserAndContext` to support `SetupMode`; updated tests #1–#24 to use the correct error-contract parser and the endpoint-reach proof; added three new helpers (`countOverviewAuthorizationAuditEvents`, `assertOverviewDeniedAndReached`, `assertOverviewAllowedAndReached`, `assertOverviewSucceededAndReached`).
+- `apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts` — added `parseClinicAdminOverviewErrorResponse` and `parseAuthErrorResponse` typed helpers.
+- `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts` — added 16 focused regression tests for the new helpers.
+
+### Files NOT modified
+
+- `apps/api/src/modules/clinic-admin/clinic-admin.controller.ts` (production controller — unchanged)
+- `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.ts` (production service — unchanged)
+- `apps/api/src/modules/clinic-admin/clinic-admin.errors.ts` (production error helper — unchanged)
+- `apps/api/src/modules/authorization/authorization.guard.ts` (production guard — unchanged)
+- `apps/api/src/modules/authorization/authorization.service.ts` (production service — unchanged)
+- `apps/api/src/modules/session-context/session-context.controller.ts` (production controller — unchanged)
+- `apps/api/src/modules/session-context/session-context.service.ts` (production service — unchanged)
+- `packages/domain/src/authorization/role-permissions.ts` (production permission matrix — unchanged)
+- `packages/contracts/src/auth/auth.schema.ts` (AuthErrorResponseSchema — unchanged)
+- `packages/contracts/src/clinic-admin/clinic-admin.schema.ts` (ClinicAdminOverviewErrorResponseSchema — unchanged)
+- `apps/api/prisma/schema.prisma` and `apps/api/prisma-audit/schema.prisma` (database schemas — unchanged)
+- `apps/api/prisma/migrations/*` and `apps/api/prisma-audit/migrations/*` (database migrations — unchanged)
+- `apps/api/package.json` and root `package.json` (dependency versions — unchanged)
+- `pnpm-lock.yaml` (lockfile — unchanged)
+- `.github/workflows/main-ci.yml` (CI workflow — unchanged)
+- All Platform Super Admin / Role Preview implementation files (unchanged)
+- All quarantine branches, backup branches, recovery tags (unchanged)
+- Main branch (unchanged at `d6c02b62`)
+- Old Clinic Admin shell branch `feat/clinic-admin-shell-v1` at `745d71e` (unchanged)
+
+### Production-defect result
+
+**NONE.** The production code correctly enforces ADR-015 §1.5. The defects were entirely in the test fixture and the test's error-contract assertions.
+
+### Cookie-rotation result
+
+NOT the root cause. The session-context controller does not rotate the session cookie on `PUT /context/organisation` (it does not use `@Res` and does not call `res.cookie`). The auth service's `getSessionFromCookie` may rotate the cookie on a 30-minute interval, but the session-context controller ignores the rotation result and the test's cookie value remains valid for subsequent requests within the same test. The dominant failure was the scope-authorisation check, not cookie staleness.
+
+### CSRF-rotation result
+
+NOT the root cause. The CSRF token is session-bound and does not rotate between context-selection calls within a test. The first-stage correction already proved the CSRF helper correctly acquires a fresh token for each setup call via `fetchCsrfToken(server, cookie)`.
+
+### Permission result
+
+NOT the root cause. R09 already holds `context:select_organisation` and `context:select_facility` per the role-permission matrix. The guard's `authorizeForActiveMembership` correctly allowed the request. The denial came from the service-level `listForMembershipAtOrganisation` / `listForMembershipAtFacility` check, which is a scope-authorisation check (ADR-015 §1.5), NOT a permission check.
+
+### Fixture result
+
+**Root cause #1.** The fixture did not create the organisation-scoped and facility-scoped R09 assignments required by ADR-015 §1.5 for organisation and facility selection. Corrected by the `SetupMode` mechanism.
+
+### Error-contract correction
+
+**Root cause #2.** Tests #9, #10, #11, #12, #13 used `AuthErrorResponseSchema` to parse `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` responses. Corrected by using `parseClinicAdminOverviewErrorResponse` (which uses `ClinicAdminOverviewErrorResponseSchema`).
+
+### Endpoint-reach proof
+
+Every scenario now structurally proves the Overview endpoint was actually issued:
+- Tests #1, #2, #14–#18, #21, #23, #24 (R09 success): `assertOverviewSucceededAndReached` asserts the audit outbox's `authorization.decision.allowed` count for the Overview endpoint increased by exactly one.
+- Tests #3, #4, #8, #19, #20, #22 (guard denial): `assertOverviewDeniedAndReached` asserts the audit outbox's `authorization.decision.denied` count for the Overview endpoint increased by exactly one.
+- Tests #9, #10, #11, #12, #13 (service-level denial): `assertOverviewAllowedAndReached` asserts the audit outbox's `authorization.decision.allowed` count for the Overview endpoint increased by exactly one (the guard allowed; the service then threw).
+- Tests #5, #6, #7 (session validation short-circuit): the endpoint-reach proof is the HTTP 401 status itself (401 cannot come from the Overview service).
+
+A setup 403 (from `selectOrganisationContext` / `selectFacilityContext`) would NOT increment the Overview-endpoint audit-outbox count; the test would fail at the `assertOverview*AndReached` step rather than at the `.expect(403)` step, making the setup failure clearly distinguishable from an endpoint failure.
+
+### Validation results
+
+- `pnpm run typecheck` PASS (all 8 workspace projects).
+- `pnpm run lint` PASS (0 errors, 0 warnings).
+- `pnpm run test` PASS — **921 unit tests** across 5 packages (domain 108, contracts 208, observability 95, api 283, web 227; 0 regressions). Independently verified count: 108+208+95+283+227 = 921. Baseline was 905 (after the first-stage correction `b2a92f28`); this commit adds 16 tests (905→921).
+- `pnpm run build` PASS (api via SWC, web via Next.js 16; `/clinic-admin` route registered).
+- `git diff --check` PASS.
+- Focused tests: clinic-admin test-helpers spec (45 tests PASS — 29 from the first-stage correction + 16 new), clinic-admin controller (12 tests PASS), clinic-admin errors (4 tests PASS), clinic-admin overview service (24 tests PASS), clinic-admin frontend client (15 tests PASS), clinic-admin Overview component (32 tests PASS), contracts auth + clinic-admin schemas (97 tests PASS), domain authorization (70 tests PASS), observability audit (95 tests PASS).
+- `pnpm test:clinic-admin` resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step because PostgreSQL 17 is unavailable locally (error: `Failed to execute PostgreSQL binary 'initdb --version'. Ensure PG_BINDIR or PATH points at PostgreSQL 17 executables.`). 24 tests skipped, 0 failed tests, 0 unhandled errors. This is the expected failure mode, NOT a regression.
+
+### PostgreSQL 17 local availability
+
+**UNAVAILABLE.** The environment does not have PostgreSQL 17 installed. The 24 integration scenarios are implemented in test coverage and wired into the GitHub Actions `postgresql17-validation` job. They are NOT executed locally. GitHub Actions remains the authoritative validator.
+
+### Schema/migration changes
+
+NONE.
+
+### Dependency changes
+
+NONE.
+
+### Lockfile changes
+
+NONE.
+
+### CI workflow changes
+
+NONE.
+
+### Production source code changes
+
+NONE.
+
+### Documentation updates
+
+- This `PROJECT_CONTINUITY.md` section.
+- `worklog.md` entry for this commit.
+
+### Commit subject
+
+`test: fix clinic admin context setup and endpoint reachability`
+
+### Commit parent
+
+`b2a92f28de0f5a91185f017ebc9a22fc40a322c8` (the previous task-branch tip, after the first-stage CI-harness correction).
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration tests not executed locally.** The 24 integration scenarios are awaiting GitHub Actions verification. The local environment cannot run them.
+2. **Branch is 1 commit ahead of remote** (the new child commit). The operator must generate a fresh temporary deploy key and push via SSH before CI can rerun.
+3. **Latent Throttler reset bug in auth, context, and audit-integration tests** (pre-existing, not modified by this commit).
+4. **Latent `afterAll` crash in auth and context tests** (pre-existing, not modified by this commit).
+5. **The previous inaccurate claim that all 24 scenarios were genuine and verified** (made in the first-stage correction's worklog entry) is corrected by this commit. The first-stage correction proved the CSRF and Throttler defects were fixed, but it did NOT prove the 24 scenarios reached the Overview endpoint — GitHub Actions disproved that claim by showing 19/24 failures during `selectOrganisationContext` setup. This second-stage correction adds the endpoint-reach proof and the fixture corrections that make the 24 scenarios genuinely reach the Overview endpoint.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require GitHub Actions to execute all 24 Clinic Admin integration scenarios with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before merge.

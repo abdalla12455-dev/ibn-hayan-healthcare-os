@@ -44,6 +44,8 @@ import {
   parseCsrfResponseBody,
   assertCsrfToken,
   resetThrottlerStorageSafely,
+  parseClinicAdminOverviewErrorResponse,
+  parseAuthErrorResponse,
 } from '../../../test/clinic-admin/_clinic-admin-test-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -422,5 +424,283 @@ describe('helper composition (CSRF acquisition + assertion)', () => {
     // If we had reached the assertion, it would have thrown too —
     // but the test-setup failure happens at acquisition, which is
     // the desired behaviour.
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseClinicAdminOverviewErrorResponse
+// ---------------------------------------------------------------------------
+//
+// These tests prove the second-stage CI-harness correction: the
+// Clinic Admin Overview service throws `clinicAdminOverviewContextRequired()`
+// (HTTP 403 with code `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`) when
+// the active tenant, organisation, or facility context is missing
+// or invalid. This code is NOT in `AuthErrorResponseSchema`'s enum
+// (the auth/context error contract). It IS in
+// `ClinicAdminOverviewErrorResponseSchema`'s enum (the Clinic Admin
+// Overview error contract). Tests that assert a missing-context 403
+// from the Overview endpoint MUST use
+// `parseClinicAdminOverviewErrorResponse` (which uses
+// `ClinicAdminOverviewErrorResponseSchema`), NOT `parseAuthErrorResponse`
+// (which uses `AuthErrorResponseSchema`).
+//
+// The regression guard: a setup 403 must NOT be confused with the
+// Overview endpoint's 403. The two have different codes:
+//   - Setup 403 (from PUT /context/organisation): CONTEXT_SELECTION_FORBIDDEN
+//     (parseable by BOTH helpers — it's in both enums).
+//   - Overview endpoint 403 (missing/invalid context):
+//     CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED (parseable ONLY by
+//     parseClinicAdminOverviewErrorResponse).
+//   - Overview endpoint 403 (guard denial): AUTHORIZATION_FORBIDDEN
+//     (parseable by BOTH helpers).
+//   - Overview endpoint 401 (missing/expired/revoked session):
+//     AUTH_SESSION_REQUIRED (parseable by parseAuthErrorResponse).
+
+describe('parseClinicAdminOverviewErrorResponse', () => {
+  it('accepts the canonical CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED response', () => {
+    // The Overview service's `clinicAdminOverviewContextRequired()`
+    // helper produces this exact response shape.
+    const body = {
+      error: {
+        code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED',
+        message:
+          'An active tenant, organisation, and facility context is required to view the Clinic Administrator Overview.',
+      },
+    };
+    const parsed = parseClinicAdminOverviewErrorResponse(body);
+    expect(parsed.error.code).toBe('CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED');
+    expect(typeof parsed.error.message).toBe('string');
+    expect(parsed.error.message.length).toBeGreaterThan(0);
+  });
+
+  it('accepts the AUTH_SESSION_REQUIRED response (401 case)', () => {
+    // ClinicAdminOverviewErrorResponseSchema's enum includes
+    // AUTH_SESSION_REQUIRED for the 401 case (missing/expired/
+    // revoked session at the Overview endpoint).
+    const body = {
+      error: {
+        code: 'AUTH_SESSION_REQUIRED',
+        message: 'A valid session is required.',
+      },
+    };
+    const parsed = parseClinicAdminOverviewErrorResponse(body);
+    expect(parsed.error.code).toBe('AUTH_SESSION_REQUIRED');
+  });
+
+  it('accepts the AUTHORIZATION_FORBIDDEN response (guard denial case)', () => {
+    // ClinicAdminOverviewErrorResponseSchema's enum includes
+    // AUTHORIZATION_FORBIDDEN for the 403 case where the guard
+    // denies (no clinic_admin_overview:view permission).
+    const body = {
+      error: {
+        code: 'AUTHORIZATION_FORBIDDEN',
+        message: 'The request is not authorized.',
+      },
+    };
+    const parsed = parseClinicAdminOverviewErrorResponse(body);
+    expect(parsed.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+  });
+
+  it('rejects the CONTEXT_SELECTION_FORBIDDEN code (setup 403, NOT an Overview response)', () => {
+    // This is the structural regression guard against the second-stage
+    // defect: a setup 403 from PUT /context/organisation must NOT be
+    // mistaken for the Overview endpoint's 403. The setup 403 has code
+    // CONTEXT_SELECTION_FORBIDDEN; the Overview 403 has code
+    // CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED.
+    // ClinicAdminOverviewErrorResponseSchema's enum does NOT include
+    // CONTEXT_SELECTION_FORBIDDEN — it's a session-context module code,
+    // not a Clinic Admin Overview code.
+    const setupBody = {
+      error: {
+        code: 'CONTEXT_SELECTION_FORBIDDEN',
+        message: 'The selected context is not available.',
+      },
+    };
+    expect(() => parseClinicAdminOverviewErrorResponse(setupBody)).toThrow();
+  });
+
+  it('throws a precise diagnostic mentioning the correct schema to use', () => {
+    // The error message must guide the developer: if the response is
+    // actually a setup 403, the developer should look at the setup
+    // helper (selectOrganisationContext / selectFacilityContext), not
+    // at the Overview endpoint.
+    expect(() =>
+      parseClinicAdminOverviewErrorResponse({ wrong: 'shape' }),
+    ).toThrowError(
+      /Clinic Admin Overview 403 response does not match ClinicAdminOverviewErrorResponseSchema/,
+    );
+  });
+
+  it('NEVER returns undefined — throws on invalid input (regression guard)', () => {
+    // The structural guarantee: the helper NEVER returns undefined.
+    // It either returns a validated response or throws. This prevents
+    // the "undefined header" defect class from recurring in a new form.
+    expect(() => parseClinicAdminOverviewErrorResponse(null)).toThrow();
+    expect(() => parseClinicAdminOverviewErrorResponse(undefined)).toThrow();
+    expect(() => parseClinicAdminOverviewErrorResponse({})).toThrow();
+    expect(() =>
+      parseClinicAdminOverviewErrorResponse({ error: {} }),
+    ).toThrow();
+    expect(() =>
+      parseClinicAdminOverviewErrorResponse({
+        error: { code: 'UNKNOWN_CODE', message: 'x' },
+      }),
+    ).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseAuthErrorResponse
+// ---------------------------------------------------------------------------
+
+describe('parseAuthErrorResponse', () => {
+  it('accepts the canonical AUTH_SESSION_REQUIRED response', () => {
+    const body = {
+      error: {
+        code: 'AUTH_SESSION_REQUIRED',
+        message: 'A valid session is required.',
+      },
+    };
+    const parsed = parseAuthErrorResponse(body);
+    expect(parsed.error.code).toBe('AUTH_SESSION_REQUIRED');
+  });
+
+  it('accepts the AUTHORIZATION_FORBIDDEN response (guard denial)', () => {
+    const body = {
+      error: {
+        code: 'AUTHORIZATION_FORBIDDEN',
+        message: 'The request is not authorized.',
+      },
+    };
+    const parsed = parseAuthErrorResponse(body);
+    expect(parsed.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+  });
+
+  it('accepts the CONTEXT_SELECTION_FORBIDDEN response (setup 403)', () => {
+    // This is the setup 403 from PUT /context/organisation when the
+    // principal lacks an applicable scoped role assignment. The code
+    // IS in AuthErrorResponseSchema's enum.
+    const body = {
+      error: {
+        code: 'CONTEXT_SELECTION_FORBIDDEN',
+        message: 'The selected context is not available.',
+      },
+    };
+    const parsed = parseAuthErrorResponse(body);
+    expect(parsed.error.code).toBe('CONTEXT_SELECTION_FORBIDDEN');
+  });
+
+  it('rejects the CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED code (regression guard)', () => {
+    // This is the structural regression guard for the second-stage
+    // defect: a missing-context 403 from the Overview endpoint must
+    // NOT be parsed with AuthErrorResponseSchema. The Overview 403
+    // has code CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED; this code is
+    // NOT in AuthErrorResponseSchema's enum. The helper must reject
+    // it loudly and direct the caller to
+    // parseClinicAdminOverviewErrorResponse.
+    const overviewBody = {
+      error: {
+        code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED',
+        message: 'An active context is required.',
+      },
+    };
+    expect(() => parseAuthErrorResponse(overviewBody)).toThrowError(
+      /use parseClinicAdminOverviewErrorResponse\(\) instead/,
+    );
+  });
+
+  it('throws a precise diagnostic mentioning the correct schema to use', () => {
+    expect(() => parseAuthErrorResponse({ wrong: 'shape' })).toThrowError(
+      /AuthErrorResponseSchema/,
+    );
+  });
+
+  it('NEVER returns undefined — throws on invalid input', () => {
+    expect(() => parseAuthErrorResponse(null)).toThrow();
+    expect(() => parseAuthErrorResponse(undefined)).toThrow();
+    expect(() => parseAuthErrorResponse({})).toThrow();
+    expect(() => parseAuthErrorResponse({ error: {} })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-helper regression: setup 403 vs Overview 403 disambiguation
+// ---------------------------------------------------------------------------
+
+describe('setup 403 vs Overview endpoint 403 disambiguation', () => {
+  // These tests prove the second-stage CI-harness correction's
+  // structural guarantee: a setup 403 (from PUT /context/organisation)
+  // CANNOT be confused with the Overview endpoint's 403 (missing
+  // active context). The two responses have different error codes;
+  // the two helpers accept different (overlapping but distinct) sets
+  // of codes. A test that asserts the wrong code with the wrong
+  // helper fails loudly at the parse step, BEFORE the HTTP-status
+  // assertion can mask the setup failure as an endpoint failure.
+
+  it('a setup 403 (CONTEXT_SELECTION_FORBIDDEN) parses with parseAuthErrorResponse but NOT parseClinicAdminOverviewErrorResponse', () => {
+    const setupBody = {
+      error: {
+        code: 'CONTEXT_SELECTION_FORBIDDEN',
+        message: 'The selected context is not available.',
+      },
+    };
+    // parseAuthErrorResponse accepts it (it's in AuthErrorResponseSchema).
+    const parsed = parseAuthErrorResponse(setupBody);
+    expect(parsed.error.code).toBe('CONTEXT_SELECTION_FORBIDDEN');
+    // parseClinicAdminOverviewErrorResponse REJECTS it (not in
+    // ClinicAdminOverviewErrorResponseSchema's enum).
+    expect(() => parseClinicAdminOverviewErrorResponse(setupBody)).toThrowError(
+      /Clinic Admin Overview 403 response does not match/,
+    );
+  });
+
+  it('an Overview endpoint 403 (CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED) parses with parseClinicAdminOverviewErrorResponse but NOT parseAuthErrorResponse', () => {
+    const overviewBody = {
+      error: {
+        code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED',
+        message: 'An active context is required.',
+      },
+    };
+    // parseClinicAdminOverviewErrorResponse accepts it.
+    const parsed = parseClinicAdminOverviewErrorResponse(overviewBody);
+    expect(parsed.error.code).toBe('CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED');
+    // parseAuthErrorResponse REJECTS it.
+    expect(() => parseAuthErrorResponse(overviewBody)).toThrowError(
+      /use parseClinicAdminOverviewErrorResponse\(\) instead/,
+    );
+  });
+
+  it('an Overview endpoint 403 (AUTHORIZATION_FORBIDDEN, guard denial) parses with BOTH helpers', () => {
+    // The guard denial code AUTHORIZATION_FORBIDDEN is in BOTH
+    // enums (it's a shared code that applies to any guarded
+    // endpoint). Both helpers accept it. This is intentional: the
+    // caller can use whichever helper is most convenient for the
+    // test's assertion context.
+    const guardDeniedBody = {
+      error: {
+        code: 'AUTHORIZATION_FORBIDDEN',
+        message: 'The request is not authorized.',
+      },
+    };
+    const parsedAuth = parseAuthErrorResponse(guardDeniedBody);
+    expect(parsedAuth.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+    const parsedOverview =
+      parseClinicAdminOverviewErrorResponse(guardDeniedBody);
+    expect(parsedOverview.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+  });
+
+  it('an Overview endpoint 401 (AUTH_SESSION_REQUIRED) parses with BOTH helpers', () => {
+    // The session-required code is in BOTH enums.
+    const sessionRequiredBody = {
+      error: {
+        code: 'AUTH_SESSION_REQUIRED',
+        message: 'A valid session is required.',
+      },
+    };
+    const parsedAuth = parseAuthErrorResponse(sessionRequiredBody);
+    expect(parsedAuth.error.code).toBe('AUTH_SESSION_REQUIRED');
+    const parsedOverview =
+      parseClinicAdminOverviewErrorResponse(sessionRequiredBody);
+    expect(parsedOverview.error.code).toBe('AUTH_SESSION_REQUIRED');
   });
 });
