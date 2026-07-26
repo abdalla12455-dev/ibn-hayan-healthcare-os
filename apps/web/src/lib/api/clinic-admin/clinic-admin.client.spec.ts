@@ -64,7 +64,7 @@ function mockFetchSuccess(body: unknown, status = 200): void {
       ok: true,
       status,
       json: () => Promise.resolve(body),
-    } satisfies Response),
+    } as unknown as Response),
   );
 }
 
@@ -75,7 +75,7 @@ function mockFetchHttpError(status: number): void {
       ok: false,
       status,
       json: () => Promise.resolve({}),
-    } satisfies Response),
+    } as unknown as Response),
   );
 }
 
@@ -90,7 +90,7 @@ function mockFetchInvalidJson(): void {
       ok: true,
       status: 200,
       json: () => Promise.reject(new Error('invalid json')),
-    } satisfies Response),
+    } as unknown as Response),
   );
 }
 

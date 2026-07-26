@@ -2441,3 +2441,110 @@ Generate a fresh temporary GitHub deploy key (v23 or later), push the single `fe
 - **To inspect the implementation without checking out the branch:** `git worktree add /tmp/clinic-admin-overview-review feat/clinic-admin-overview-live-data-v1` (the local branch is reachable from the primary worktree)
 - **To discard the branch and start over:** `git worktree remove /home/z/clinic-admin-overview-live-data-v1` then `git branch -D feat/clinic-admin-overview-live-data-v1` (only with explicit operator authorisation; the work is local-only and has not been pushed, so this would lose the implementation)
 - **To re-run validation in the worktree:** `cd /home/z/clinic-admin-overview-live-data-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+
+---
+
+## Clinic Admin Overview pre-push audit and audit-category correction
+
+**Date:** 2026-07-26
+**Task:** Independent pre-push audit and correction of the local Clinic Admin Overview live-data implementation (commit `67802eb1475e6acca3dc8afbdde8b9e4d9068386`).
+**Branch:** `feat/clinic-admin-overview-live-data-v1`
+**Worktree:** `/home/z/clinic-admin-overview-live-data-v1`
+**Original task commit:** `67802eb1475e6acca3dc8afbdde8b9e4d9068386` (parent: `d6c02b62eaeba930e8e6c18676e1659e30550b11`)
+**Correction commit:** created as a new child of `67802eb` (not amended, not squashed).
+
+### Risk identified and closed
+
+The original live-data commit introduced a new audit category `clinic_admin` and a new action code `clinic_admin.overview.viewed` in the TypeScript catalogues (`packages/observability/src/audit/categories.ts` and `action-codes.ts`), but did NOT add a corresponding database migration to extend the `audit_events_category_check` CHECK constraint in the dedicated audit database. The constraint (defined in `apps/api/prisma-audit/migrations/20260719130000_audit_store_foundation/migration.sql` and extended by `20260726000000_audit_category_extend_for_role_preview/migration.sql`) allows only eight categories: `security`, `authorization`, `tenant_context`, `organisation_context`, `facility_context`, `rbac`, `audit`, `role_preview`. The `clinic_admin` category is NOT in this list.
+
+**Failure mode:** The service called `AuditHelperService.emitDirect({ action: 'clinic_admin.overview.viewed', ... })`. The builder accepted the action code and inferred category `clinic_admin` (TypeScript-accepted). The emitter inserted into the transactional `audit_outbox_events` table (JSONB `canonical_event_draft`, no category CHECK) — INSERT succeeded. The dispatcher later read the outbox row and tried to project into `audit_events` in the dedicated audit database. The `audit_events_category_check` CHECK constraint REJECTED `clinic_admin`. The dispatcher caught the failure, recorded it as `transient_failure` with `failureCode: 'audit_store_unavailable'`, and scheduled a retry. The outbox row remained pending forever. From the user's perspective: HTTP 200 OK. From the operator's perspective: silent audit trail breakage plus accumulating pending outbox rows.
+
+This is the exact bug pattern that migration `20260726000000_audit_category_extend_for_role_preview` fixed for `role_preview` — but this task forbade schema/migration changes.
+
+### Correction selected
+
+Per Phase 2 correction principles 1, 4, 5, 7, 8 (no new database category; reuse existing approved action code when semantically correct; no weakening of category validation; no silent swallowing; add regression tests):
+
+1. **Removed `clinic_admin` category** from `packages/observability/src/audit/categories.ts` (`AuditEventCategory` union and `AUDIT_EVENT_CATEGORIES` list).
+2. **Removed `clinic_admin.overview.viewed` action code** from `packages/observability/src/audit/action-codes.ts` (`CLINIC_ADMIN_ACTION_CODES`, `ClinicAdminActionCode`, the `clinic_admin.` branch in `inferCategoryFromAction`, and the spread in `AUDIT_ACTION_CODES`).
+3. **Removed the explicit audit emission** from `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.ts` (removed the `AuditHelperService` constructor dependency and the `emitDirect({ action: 'clinic_admin.overview.viewed', ... })` call).
+4. **Removed `AuditModule` import** from `apps/api/src/modules/clinic-admin/clinic-admin.module.ts` (no longer needed).
+5. **Relied on the `AuthorizationGuard`'s existing `authorization.decision.allowed` event** (category `authorization`, which IS in the database CHECK constraint) as the audit trail for `/api/v1/clinic-admin/overview`. The guard emits this event for every authorized request with `permissionCode='clinic_admin_overview:view'`, the endpoint path, the HTTP method, the actor, the session, the tenant, and the role codes. This is MORE metadata than the removed explicit emission carried (which only had `endpoint: 'clinic_admin_overview_view'` in metadata, no `permissionCode`, no `roleCodes`, no `method`).
+
+### Frontend correction
+
+Per Phase 6 ("Prefer removing misleading state rather than hardcoding it when the existing shell already guarantees mount readiness"):
+
+1. **Removed the `contextReady` prop** from `ClinicAdminOverview` component and `ClinicAdminPage`. The shell's render gate (`if (loading || session === null || context === null || redirecting)`) already guarantees that children only mount after the authenticated session AND the active tenant + organisation + facility context are confirmed. The hardcoded `contextReady={true}` was redundant (the page always passed `true`) and misleading (it suggested the parent might pass `false`). The component now fetches on mount unconditionally; the shell guarantees mount readiness.
+
+### Tests added
+
+1. **`apps/api/src/modules/clinic-admin/clinic-admin.errors.spec.ts`** (4 tests): Helper-contract regression tests for `clinicAdminOverviewContextRequired()`. Verifies HTTP 403 status, `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED` error code, non-revealing generic message, and exact error envelope shape.
+
+2. **`apps/api/src/modules/clinic-admin/clinic-admin-overview.service.spec.ts`** (18 tests): Focused service unit tests covering: valid R09 session with full context returns payload; missing session returns null (401); missing active tenant/organisation/facility throws (403); active membership not in user's list throws (403); tenant/organisation/facility not found (cross-tenant) throws (403); facility belonging to another organisation throws (403); response passes `ClinicAdminOverviewResponseSchema` validation; exactly 9 regions with approved availability declarations; response carries no raw UUIDs; **regression: service does NOT emit `clinic_admin.overview.viewed` audit event**; **regression: constructor does NOT accept `AuditHelperService` dependency** (arity is 4, not 5); repository `findById` calls use session-derived tenantId (no caller-supplied scope).
+
+3. **`packages/observability/src/audit/audit-event-builder.spec.ts`** (2 regression tests replacing 4 obsolete tests): Proves `clinic_admin.overview.viewed` is now rejected with `unknown_action_code`; proves `clinic_admin` is NOT in `AUDIT_EVENT_CATEGORIES` and the list contains exactly the eight database-approved categories.
+
+### Validation results
+
+- `pnpm run typecheck`: PASS
+- `pnpm run lint`: PASS (0 errors, 0 warnings)
+- `pnpm run test`: PASS — **812 unit tests** (103 domain + 205 contracts + 91 observability + 220 api + 193 web; 0 regressions; independently verified count)
+- `pnpm run build`: PASS
+- `git diff --check`: PASS (no whitespace errors)
+- Secret scan: no secrets, no DB URLs, no integrity keys in diff
+- Schema/migration changes: NONE
+- Dependency/lockfile changes: NONE
+- CI workflow changes: NONE
+- Platform Super Admin implementation: unchanged
+- Role Preview implementation: unchanged (no focused regression tests required)
+- Clinic Admin shell branch (`feat/clinic-admin-shell-v1` @ `745d71e`): unchanged
+- Quarantine branches: unchanged (4 branches)
+- Recovery tags: unchanged (2 tags)
+
+### PostgreSQL 17 integration tests
+
+The following integration tests were NOT run locally (no PostgreSQL 17 in the development environment; per task constraints, no PostgreSQL or Docker installation was authorised):
+- `pnpm test:context` (session-context integration tests)
+- `pnpm test:database` (database integration tests)
+- `pnpm test:auth` (auth integration tests)
+- `pnpm test:role-preview` (role-preview integration tests)
+- `pnpm audit:test:atomicity` (audit atomicity tests)
+- `pnpm audit:test:integration` (audit integration tests)
+- `pnpm audit:test:database` (audit database tests)
+- `pnpm audit:test:concurrency` (audit concurrency tests)
+- `pnpm audit:test:verify` (audit verification CLI tests)
+- `pnpm audit:test:configuration` (audit configuration tests)
+
+A dedicated Clinic Admin Overview PostgreSQL 17 integration test (covering the full HTTP path: R09 valid context → 200; R13 → 403; missing context → 403; cross-tenant → 403; cross-organisation facility → 403; no caller-supplied scope override) was NOT added in this correction because the existing test architecture requires a new vitest config file (`vitest.clinic-admin.config.ts`) and a `_pg-bootstrap.ts` setup, which would expand the scope beyond the "smallest coherent correction" mandate. The focused service unit tests (18 tests) cover the same logic at the service layer. GitHub Actions remains authoritative for the PostgreSQL 17 integration suite.
+
+### Files modified (9)
+
+1. `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.ts` — removed `AuditHelperService` injection + `clinic_admin.overview.viewed` emission; updated docstrings.
+2. `apps/api/src/modules/clinic-admin/clinic-admin.controller.ts` — updated docstring (audit trail is from guard).
+3. `apps/api/src/modules/clinic-admin/clinic-admin.module.ts` — removed `AuditModule` import; updated docstring.
+4. `apps/web/src/app/clinic-admin/page.tsx` — removed `contextReady={true}` prop; updated docstring.
+5. `apps/web/src/components/clinic-admin/clinic-admin-overview.tsx` — removed `contextReady` prop + dead code; updated docstring.
+6. `packages/contracts/src/clinic-admin/clinic-admin.schema.ts` — updated docstring (audit trail is from guard).
+7. `packages/observability/src/audit/action-codes.ts` — removed `CLINIC_ADMIN_ACTION_CODES`, `ClinAdminActionCode`, `clinic_admin.` prefix handling; added explanatory comment block.
+8. `packages/observability/src/audit/audit-event-builder.spec.ts` — replaced 4 obsolete `clinic_admin` acceptance tests with 2 regression tests proving removal.
+9. `packages/observability/src/audit/categories.ts` — removed `clinic_admin` from union + list; added explanatory comment block.
+
+### Files created (2)
+
+1. `apps/api/src/modules/clinic-admin/clinic-admin.errors.spec.ts` — 4 helper-contract tests.
+2. `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.spec.ts` — 18 focused service unit tests.
+
+### Files deleted: 0. Schema/migration changes: NONE. Dependency/lockfile changes: NONE. CI workflow changes: NONE.
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration coverage gap.** The Clinic Admin Overview endpoint does not have a dedicated PostgreSQL 17 integration test. The focused service unit tests cover the service-layer logic (context resolution, cross-tenant/cross-organisation defence-in-depth, response contract), but the full HTTP path (session-cookie validation → AuthorizationGuard permission check → CSRF check → service → response → audit outbox projection) is only covered by the existing `pnpm test:context` and `pnpm test:auth` suites for OTHER endpoints. A dedicated `vitest.clinic-admin.config.ts` + `apps/api/test/clinic-admin/*.clinic-admin-spec.ts` should be added in a follow-up task when the operator authorises the scope expansion.
+
+2. **`audit:dispatch` CLI tsx incompatibility.** The `audit:dispatch.ts` script still uses `NestFactory.createApplicationContext(AppModule)` which fails under tsx (same root cause as the `audit:verify` CLI fixed in commit `40d15dd`). This is a pre-existing risk documented in the previous PROJECT_CONTINUITY entry; it is NOT introduced or worsened by this correction.
+
+3. **Remote push auth unavailable.** No HTTPS credential helper is configured in this environment. The correction commit is local-only. The operator must generate a fresh temporary deploy key (after independent verification) and push the branch via SSH, then require both GitHub Actions jobs (`static-and-build` and `postgresql17-validation`) to pass before merge.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key only after this correction is independently verified, then perform one controlled push of the complete Clinic Admin Overview branch (`feat/clinic-admin-overview-live-data-v1`) and require both GitHub Actions jobs to pass before merge.

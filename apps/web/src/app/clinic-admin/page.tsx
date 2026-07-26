@@ -39,6 +39,18 @@ import { getClinicAdminCopy } from '@/components/clinic-admin/clinic-admin-copy'
  * for all user-facing strings. The shell receives `sectionTitle`
  * from the copy module so the header's section-title affordance
  * remains bilingual.
+ *
+ * NOTE: the page does NOT pass a `contextReady` prop to the
+ * Overview component. The shell's render gate (see
+ * `clinic-admin-shell.tsx` line `if (loading || session === null
+ * || context === null || redirecting)`) guarantees that children
+ * only mount after the authenticated session AND the active
+ * tenant + organisation + facility context are confirmed. Passing
+ * a hardcoded `contextReady={true}` would be misleading (it
+ * suggests the parent might pass `false`, but the page never does)
+ * and would duplicate the shell's existing mount-readiness gate.
+ * The Overview component fetches on mount unconditionally; the
+ * shell guarantees mount readiness.
  */
 export default function ClinicAdminPage(): ReactElement {
   const { lang } = useLanguage();
@@ -46,7 +58,7 @@ export default function ClinicAdminPage(): ReactElement {
 
   return (
     <ClinicAdminShell sectionTitle={copy.overviewTitle}>
-      <ClinicAdminOverview contextReady={true} />
+      <ClinicAdminOverview />
     </ClinicAdminShell>
   );
 }

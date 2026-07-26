@@ -58,6 +58,17 @@ import { ClinicAdminOverviewService } from './clinic-admin-overview.service.js';
  * Every authorisation failure returns the same generic
  * `AUTHORIZATION_FORBIDDEN` (or `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`)
  * code with a non-revealing message.
+ *
+ * Audit trail: the controller does NOT emit an explicit Clinic-Admin-
+ * specific audit event. The `AuthorizationGuard` (applied via
+ * `@UseGuards(AuthorizationGuard)`) emits an
+ * `authorization.decision.allowed` event for every authorized request
+ * (category `authorization`, accepted by the database CHECK
+ * constraint) with `permissionCode='clinic_admin_overview:view'`, the
+ * endpoint path, the HTTP method, the actor, the session, the tenant,
+ * and the role codes. This is the audit trail for the Overview
+ * endpoint. See `packages/observability/src/audit/categories.ts` for
+ * the rationale on why no `clinic_admin`-specific event is emitted.
  */
 @ApiTags('clinic-admin')
 @Controller('clinic-admin')

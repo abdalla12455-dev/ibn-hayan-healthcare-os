@@ -297,8 +297,13 @@ export type AdministratorIdentity = z.infer<
  *   permission, which is granted ONLY to R09_ADMINISTRATOR.
  * - The endpoint does NOT accept tenant, organisation, or facility
  *   identifiers from the request body or query string.
- * - The endpoint emits an audit event `clinic_admin.overview.viewed`
- *   on every successful response.
+ * - The audit trail for the endpoint is provided by the
+ *   `AuthorizationGuard`'s `authorization.decision.allowed` event
+ *   (emitted for every authorized request with
+ *   `permissionCode='clinic_admin_overview:view'`). The endpoint
+ *   does NOT emit a `clinic_admin`-specific audit event because
+ *   that category is not accepted by the database CHECK constraint;
+ *   see `packages/observability/src/audit/categories.ts`.
  *
  * Per the live-data task specification Phase 6, the frontend uses
  * the response to render:

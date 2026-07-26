@@ -71,17 +71,19 @@ import type {
  * the existing localisation system (`getClinicAdminCopy`) for all
  * user-facing strings. No translated text is hardcoded inside the
  * business component.
+ *
+ * NOTE: the component does NOT accept a `contextReady` prop. The
+ * parent shell (`ClinicAdminShell`) enforces a render gate that
+ * guarantees children only mount after the authenticated session
+ * AND the active tenant + organisation + facility context are
+ * confirmed. The component fetches on mount unconditionally; the
+ * shell guarantees mount readiness. A previous version of this
+ * component accepted a `contextReady` prop that the page hardcoded
+ * to `true`; that prop was misleading (it suggested the parent
+ * might pass `false`, but the page never did) and duplicated the
+ * shell's existing gate. The prop was removed to keep the
+ * component's contract honest.
  */
-export interface ClinicAdminOverviewProps {
-  /**
-   * Whether the parent shell has confirmed the active context
-   * (tenant + organisation + facility). The component fetches the
-   * overview only after this is `true`. The parent (the shell)
-   * passes this flag to avoid fetching before the context is
-   * established.
-   */
-  readonly contextReady: boolean;
-}
 
 type LoadState =
   | { readonly kind: 'idle' }
@@ -93,11 +95,10 @@ type LoadState =
   | { readonly kind: 'error'; readonly error: ApiError };
 
 /**
- * Overview content component. See {@link ClinicAdminOverviewProps}.
+ * Overview content component. Fetches the Clinic Admin Overview
+ * payload on mount and renders the approved regions.
  */
-export function ClinicAdminOverview({
-  contextReady,
-}: ClinicAdminOverviewProps): ReactElement {
+export function ClinicAdminOverview(): ReactElement {
   const { lang } = useLanguage();
   const copy = getClinicAdminCopy(lang);
   const overviewCopy = getClinicAdminOverviewCopy(lang);
@@ -106,9 +107,6 @@ export function ClinicAdminOverview({
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
 
   useEffect(() => {
-    if (!contextReady) {
-      return;
-    }
     if (fetchedRef.current) {
       return;
     }
@@ -129,9 +127,9 @@ export function ClinicAdminOverview({
     return () => {
       cancelled = true;
     };
-  }, [contextReady]);
+  }, []);
 
-  if (!contextReady || state.kind === 'idle' || state.kind === 'loading') {
+  if (state.kind === 'idle' || state.kind === 'loading') {
     return (
       <div
         className="ih-clinic-admin-overview__state ih-clinic-admin-overview__state--loading"

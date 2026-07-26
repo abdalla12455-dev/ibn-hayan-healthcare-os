@@ -41,18 +41,33 @@
  * transaction, which (per the `emitOrFail` atomicity contract)
  * rolls back the session creation and surfaces as an HTTP 500.
  *
- * `clinic_admin` is the category for Clinic Administrator surface
- * audit events (per DESIGN_BIBLE.md §12/§13). It is inferred by
- * `inferCategoryFromAction` for any action whose prefix is
- * `clinic_admin.` (e.g. `clinic_admin.overview.viewed`). The
- * category is added in the Clinic Admin Overview live-data batch
- * alongside the `/api/v1/clinic-admin/overview` endpoint. The
- * audit event carries only non-sensitive metadata: the endpoint
- * path, the tenant scope, and the actor identity. It does NOT
- * carry dashboard values, region availability declarations, or
- * display names (per the live-data task specification Phase 7
- * item 12: "Audit events do not expose sensitive dashboard
- * values").
+ * NOTE on the absence of a `clinic_admin` category: the Clinic
+ * Admin Overview live-data batch originally introduced a
+ * `clinic_admin` category and a `clinic_admin.overview.viewed`
+ * action code. The category was added to this TypeScript union
+ * but NO corresponding database migration was added to extend
+ * the `audit_events_category_check` CHECK constraint in the
+ * dedicated audit database (which allows only the eight categories
+ * listed below). The result would have been: outbox INSERT
+ * succeeds (the transactional `audit_outbox_events` table stores
+ * the event as JSONB with no category CHECK), but the dispatcher's
+ * projection into `audit_events` fails with a CHECK constraint
+ * violation, leaving the outbox row pending forever and silently
+ * breaking the audit trail. This is the exact bug pattern that
+ * migration `20260726000000_audit_category_extend_for_role_preview`
+ * fixed for `role_preview` — but the live-data task specification
+ * forbade schema/migration changes. The correction removed the
+ * `clinic_admin` category and the `clinic_admin.overview.viewed`
+ * action code from the TypeScript catalogues and removed the
+ * explicit audit emission from the Clinic Admin Overview service.
+ * The audit trail for `/api/v1/clinic-admin/overview` is now
+ * provided by the `AuthorizationGuard`'s existing
+ * `authorization.decision.allowed` event (category `authorization`,
+ * which IS in the database CHECK constraint), which is emitted for
+ * every authorized request with `permissionCode='clinic_admin_overview:view'`,
+ * the endpoint path, the HTTP method, the actor, the session, the
+ * tenant, and the role codes. This is MORE metadata than the
+ * removed explicit emission carried, so no audit signal is lost.
  */
 export type AuditEventCategory =
   | 'security'
@@ -62,8 +77,7 @@ export type AuditEventCategory =
   | 'facility_context'
   | 'rbac'
   | 'audit'
-  | 'role_preview'
-  | 'clinic_admin';
+  | 'role_preview';
 
 /**
  * The complete list of audit event categories implemented in this
@@ -79,7 +93,6 @@ export const AUDIT_EVENT_CATEGORIES: readonly AuditEventCategory[] = [
   'rbac',
   'audit',
   'role_preview',
-  'clinic_admin',
 ] as const;
 
 /**

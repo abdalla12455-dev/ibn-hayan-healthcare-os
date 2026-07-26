@@ -225,32 +225,34 @@ export type RolePreviewActionCode =
 // ---------------------------------------------------------------------------
 // Clinic Admin (Clinic Administrator Overview — live-data batch)
 // ---------------------------------------------------------------------------
-
-/**
- * Clinic Admin action codes.
- *
- * Emitted by the clinic-admin module
- * (`apps/api/src/modules/clinic-admin/`) for the Clinic
- * Administrator Overview surface at
- * `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12 Arabic
- * RTL and §13 English LTR).
- *
- * The `clinic_admin.overview.viewed` action code is emitted on every
- * successful overview response. The audit event is direct (non-
- * transactional) because viewing the overview is not a state
- * mutation. The audit event carries only non-sensitive metadata:
- * the endpoint path (`clinic_admin_overview_view`), the tenant
- * scope, and the actor identity. Per the live-data task
- * specification Phase 7 item 12, the audit event does NOT expose
- * dashboard values, region availability declarations, or display
- * names.
- */
-export const CLINIC_ADMIN_ACTION_CODES = [
-  'clinic_admin.overview.viewed',
-] as const;
-
-export type ClinicAdminActionCode =
-  (typeof CLINIC_ADMIN_ACTION_CODES)[number];
+//
+// NOTE: The Clinic Admin Overview live-data batch originally introduced
+// a `clinic_admin.overview.viewed` action code under a `clinic_admin`
+// category. The category was NOT accepted by the
+// `audit_events_category_check` CHECK constraint in the dedicated audit
+// database (which allows only: security, authorization, tenant_context,
+// organisation_context, facility_context, rbac, audit, role_preview).
+// The outbox INSERT would succeed (JSONB, no category CHECK), but the
+// dispatcher's projection into `audit_events` would fail with a CHECK
+// constraint violation, leaving the outbox row pending forever and
+// silently breaking the audit trail. This is the exact bug pattern
+// that migration `20260726000000_audit_category_extend_for_role_preview`
+// fixed for `role_preview` — but the live-data task specification
+// forbade schema/migration changes.
+//
+// The correction removed the `clinic_admin` category and the
+// `clinic_admin.overview.viewed` action code. The audit trail for
+// `/api/v1/clinic-admin/overview` is now provided by the
+// `AuthorizationGuard`'s existing `authorization.decision.allowed`
+// event (category `authorization`, which IS in the database CHECK
+// constraint), emitted for every authorized request with
+// `permissionCode='clinic_admin_overview:view'`, the endpoint path,
+// the HTTP method, the actor, the session, the tenant, and the role
+// codes. This is MORE metadata than the removed explicit emission
+// carried, so no audit signal is lost. No `CLINIC_ADMIN_ACTION_CODES`
+// block is defined below; the Clinic Admin Overview surface relies
+// entirely on the guard's existing audit emission.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Complete catalogue
@@ -272,7 +274,6 @@ export const AUDIT_ACTION_CODES = [
   ...RBAC_ACTION_CODES,
   ...AUDIT_SYSTEM_ACTION_CODES,
   ...ROLE_PREVIEW_ACTION_CODES,
-  ...CLINIC_ADMIN_ACTION_CODES,
 ] as const;
 
 /**
@@ -331,9 +332,6 @@ export function inferCategoryFromAction(
   }
   if (action.startsWith('role_preview.')) {
     return 'role_preview';
-  }
-  if (action.startsWith('clinic_admin.')) {
-    return 'clinic_admin';
   }
   return null;
 }

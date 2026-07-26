@@ -4,6 +4,9 @@ import {
   MAX_USER_AGENT_LENGTH,
 } from './audit-event-builder.js';
 import {
+  AUDIT_EVENT_CATEGORIES,
+} from './categories.js';
+import {
   validateAuditKey,
   validateAuditKeyPair,
   AUDIT_INTEGRITY_HMAC_KEY_PLACEHOLDER,
@@ -244,87 +247,75 @@ describe('buildAuditEventDraft', () => {
   // -------------------------------------------------------------------------
   // Clinic Admin category regression coverage.
   //
-  // These tests guard against a regression in which the `clinic_admin`
-  // category is inferred by `inferCategoryFromAction` for every action
-  // starting with `clinic_admin.` but is NOT present in
-  // `AUDIT_EVENT_CATEGORIES`. The result would be that
-  // `buildAuditEventDraft` rejects every Clinic Admin Overview audit
-  // event with `unknown_category`, which (via `AuditHelperService.emitDirect`)
-  // would not roll back a transaction (direct emission is non-transactional)
-  // but would silently fail to persist the audit record. The defence-in-depth
-  // test below ensures the audit record is persisted.
+  // These tests guard against a regression in which a `clinic_admin`
+  // category and a `clinic_admin.overview.viewed` action code are
+  // reintroduced into the TypeScript catalogues WITHOUT a corresponding
+  // database migration extending the `audit_events_category_check` CHECK
+  // constraint in the dedicated audit database.
   //
-  // The fix added `clinic_admin` to the `AuditEventCategory` union and
-  // the `AUDIT_EVENT_CATEGORIES` list, and registered the
-  // `clinic_admin.overview.viewed` action code in
-  // `CLINIC_ADMIN_ACTION_CODES`.
+  // Root cause being prevented: the original live-data batch added
+  // `clinic_admin` to the TypeScript `AuditEventCategory` union and
+  // `clinic_admin.overview.viewed` to the action-code catalogue, but
+  // did NOT add a database migration. The outbox INSERT would succeed
+  // (the transactional `audit_outbox_events` table stores the event as
+  // JSONB with no category CHECK), but the dispatcher's projection
+  // into `audit_events` would fail with a CHECK constraint violation,
+  // leaving the outbox row pending forever and silently breaking the
+  // audit trail. This is the exact bug pattern that migration
+  // `20260726000000_audit_category_extend_for_role_preview` fixed for
+  // `role_preview`.
+  //
+  // The correction removed the `clinic_admin` category and the
+  // `clinic_admin.overview.viewed` action code from the TypeScript
+  // catalogues. The audit trail for the Clinic Admin Overview endpoint
+  // is now provided by the `AuthorizationGuard`'s existing
+  // `authorization.decision.allowed` event (category `authorization`,
+  // which IS in the database CHECK constraint). See
+  // `packages/observability/src/audit/categories.ts` for the full
+  // rationale.
+  //
+  // These tests prove the removal: any attempt to build a draft with
+  // the removed action code is rejected with `unknown_action_code`.
+  // This prevents a future regression where the action code is
+  // reintroduced without the corresponding database migration.
   // -------------------------------------------------------------------------
 
-  it('accepts the clinic_admin.overview.viewed action and infers the clinic_admin category', () => {
+  it('rejects the removed clinic_admin.overview.viewed action code with unknown_action_code', () => {
+    // The `clinic_admin.overview.viewed` action code was removed from
+    // the catalogue because its inferred category `clinic_admin` is
+    // NOT accepted by the `audit_events_category_check` CHECK
+    // constraint in the dedicated audit database. Any attempt to
+    // reintroduce the action code without a corresponding database
+    // migration would silently break the audit trail (outbox INSERT
+    // succeeds, dispatcher projection fails, outbox row pending
+    // forever). This test guards against that regression.
     const r = buildAuditEventDraft({
-      action: 'clinic_admin.overview.viewed',
-      tenantId: '00000000-0000-0000-0000-000000000001',
-      actorType: 'USER',
-      actorId: '00000000-0000-0000-0000-000000000002',
-      sessionId: '00000000-0000-0000-0000-000000000003',
-      requestId: '00000000-0000-0000-0000-000000000004',
-      scope: 'clinic_admin',
-      metadata: { endpoint: 'clinic_admin_overview_view' },
-    });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.draft.category).toBe('clinic_admin');
-      expect(r.draft.action).toBe('clinic_admin.overview.viewed');
-      expect(r.draft.scope).toBe('clinic_admin');
-    }
-  });
-
-  it('accepts an explicit clinic_admin category that matches a clinic_admin action', () => {
-    // Defence-in-depth: a caller MAY supply the category explicitly;
-    // the builder must accept it when it matches the inferred
-    // category.
-    const r = buildAuditEventDraft({
-      action: 'clinic_admin.overview.viewed',
-      category: 'clinic_admin',
-    });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.draft.category).toBe('clinic_admin');
-    }
-  });
-
-  it('rejects an explicit non-clinic_admin category for a clinic_admin action', () => {
-    // The category_action_mismatch check must still fire when a caller
-    // supplies the wrong category for a clinic_admin action.
-    const r = buildAuditEventDraft({
-      action: 'clinic_admin.overview.viewed',
-      category: 'security',
+      action: 'clinic_admin.overview.viewed' as never,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.reason).toBe('category_action_mismatch');
+      expect(r.reason).toBe('unknown_action_code');
     }
   });
 
-  it('does not leak sensitive values from the clinic_admin metadata', () => {
-    // Per the live-data task specification Phase 7 item 12, "Audit
-    // events do not expose sensitive dashboard values." The metadata
-    // validator must reject forbidden keys even when the category is
-    // clinic_admin. This ensures that a buggy caller cannot smuggle
-    // a password, a session token, or any other secret into the
-    // audit outbox through the clinic_admin path.
-    const r = buildAuditEventDraft({
-      action: 'clinic_admin.overview.viewed',
-      metadata: {
-        endpoint: 'clinic_admin_overview_view',
-        // A forbidden key — must be rejected.
-        sessionToken: 'should-never-be-persisted',
-      },
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe('metadata_validation_failed');
-    }
+  it('does not include clinic_admin in the AUDIT_EVENT_CATEGORIES list', () => {
+    // Defence-in-depth: the `clinic_admin` category MUST NOT be
+    // present in the `AUDIT_EVENT_CATEGORIES` list. If it is
+    // reintroduced, the `isAuditEventCategory` check would accept
+    // it, but the database CHECK constraint would reject it during
+    // projection.
+    expect(AUDIT_EVENT_CATEGORIES).not.toContain('clinic_admin');
+    // The list MUST contain the eight database-approved categories.
+    expect(AUDIT_EVENT_CATEGORIES).toEqual([
+      'security',
+      'authorization',
+      'tenant_context',
+      'organisation_context',
+      'facility_context',
+      'rbac',
+      'audit',
+      'role_preview',
+    ]);
   });
 });
 

@@ -10,7 +10,6 @@ import {
   FACILITY_REPOSITORY,
 } from '../../infrastructure/database/index.js';
 import { AuthService, type AuditRequestContext } from '../auth/auth.service.js';
-import { AuditHelperService } from '../audit/audit-helper.service.js';
 import type {
   ClinicAdminOverviewResponse,
   RegionStatus,
@@ -49,9 +48,27 @@ import { clinicAdminOverviewContextRequired } from './clinic-admin.errors.js';
  *   preserving the approved layout, typography, and edge protection.
  *
  * The service reuses the existing `AuthService` for session-cookie
- * validation and the existing `AuditHelperService` for audit
- * emission. It does NOT duplicate authentication, token parsing,
+ * validation. It does NOT duplicate authentication, token parsing,
  * cookie parsing, Origin, or CSRF logic.
+ *
+ * Audit trail: the service does NOT emit an explicit Clinic-Admin-
+ * specific audit event. The audit trail for the Overview endpoint is
+ * provided by the `AuthorizationGuard`'s existing
+ * `authorization.decision.allowed` event (category `authorization`,
+ * which IS accepted by the `audit_events_category_check` CHECK
+ * constraint in the dedicated audit database). The guard's event is
+ * emitted for every authorized request with
+ * `permissionCode='clinic_admin_overview:view'`, the endpoint path,
+ * the HTTP method, the actor, the session, the tenant, and the role
+ * codes. This is MORE metadata than a Clinic-Admin-specific
+ * `clinic_admin.overview.viewed` event would have carried. The
+ * original live-data batch introduced such an event under a
+ * `clinic_admin` category, but that category was NOT accepted by
+ * the database CHECK constraint (which allows only eight
+ * categories); the correction removed the explicit emission and
+ * relies on the guard's event. See
+ * `packages/observability/src/audit/categories.ts` for the full
+ * rationale.
  *
  * Per the live-data task specification Phase 7, the service:
  * - Requires an authenticated session.
@@ -64,11 +81,6 @@ import { clinicAdminOverviewContextRequired } from './clinic-admin.errors.js';
  *   verifies that the active organisation and facility are set on
  *   the session.
  * - Fails closed when any context dimension is missing or invalid.
- * - Emits an audit event `clinic_admin.overview.viewed` on every
- *   successful response. The audit event does NOT expose sensitive
- *   dashboard values; it carries only the action, the actor, the
- *   session, the request context, the tenant scope, and a small
- *   metadata object indicating the endpoint.
  */
 @Injectable()
 export class ClinicAdminOverviewService {
@@ -79,7 +91,6 @@ export class ClinicAdminOverviewService {
     @Inject(FACILITY_REPOSITORY)
     private readonly facilities: FacilityRepository,
     private readonly authService: AuthService,
-    private readonly auditHelper: AuditHelperService,
   ) {}
 
   /**
@@ -192,36 +203,21 @@ export class ClinicAdminOverviewService {
       throw clinicAdminOverviewContextRequired();
     }
 
-    // Emit the `clinic_admin.overview.viewed` audit event (direct,
-    // non-transactional — viewing the overview is not a state
-    // mutation). The audit event carries only non-sensitive
-    // metadata: the endpoint path, the tenant scope, and the actor
-    // identity. It does NOT carry dashboard values, region
-    // availability declarations, or display names.
-    if (auditContext !== undefined) {
-      await this.auditHelper.emitDirect({
-        action: 'clinic_admin.overview.viewed',
-        outcome: 'success',
-        source: 'api',
-        tenantId,
-        actorType: 'USER',
-        actorId: user.id,
-        sessionId: session.id,
-        requestId: auditContext.requestId,
-        correlationId: auditContext.correlationId,
-        ipAddress: auditContext.ipAddress,
-        userAgent: auditContext.userAgent,
-        scope: 'clinic_admin',
-        metadata: { endpoint: 'clinic_admin_overview_view' },
-      });
-    }
-
     // Build the regions array. Per the live-data task specification
     // Phase 4, every approved region must be classified into one of
     // the four categories. The current architectural reality (no
     // business-domain models exist) means every business region is
     // Category 3 (`not_supported`) and every navigational region is
     // Category 4 (`navigational_only`).
+    //
+    // NOTE: The audit trail for this endpoint is provided by the
+    // `AuthorizationGuard`'s `authorization.decision.allowed` event
+    // (emitted before the service is invoked). The service does NOT
+    // emit an explicit `clinic_admin.overview.viewed` event because
+    // the `clinic_admin` category is NOT accepted by the
+    // `audit_events_category_check` CHECK constraint in the dedicated
+    // audit database. See `packages/observability/src/audit/categories.ts`
+    // for the full rationale.
     const regions = buildDefaultRegions();
 
     return {
