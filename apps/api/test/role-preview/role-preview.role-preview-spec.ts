@@ -13,6 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { PREVIEW_TENANT_SLUG } from '../../src/modules/dev/role-preview/preview-identity-catalogue.js';
 import { PLATFORM_ROLE_CATALOGUE } from '@ibn-hayan/domain';
 import type { BootstrapChallengeResponse } from '@ibn-hayan/contracts';
+import { RolePreviewErrorResponseSchema } from '@ibn-hayan/contracts';
+import { BootstrapChallengeStore } from '../../src/modules/dev/role-preview/index.js';
 
 /**
  * Local type alias for the select-preview-role response body. Used
@@ -134,6 +136,7 @@ let server: Server;
 let prisma: PrismaService;
 let auditPrisma: AuditPrismaService;
 let dispatcher: AuditDispatcherService;
+let bootstrapStore: BootstrapChallengeStore;
 
 beforeAll(async () => {
   // Run the preview seed before booting the app, so that the
@@ -152,6 +155,14 @@ beforeAll(async () => {
   prisma = app.get(PrismaService);
   auditPrisma = app.get(AuditPrismaService);
   dispatcher = app.get(AuditDispatcherService);
+  // Acquire the in-memory BootstrapChallengeStore so that tests can
+  // prove non-consumption of a bootstrap challenge after a malformed
+  // request. The store is the authoritative server-side state; its
+  // `consume()` method returns 'ok' if the challenge was NOT
+  // previously consumed and 'replay' if it was. This is the
+  // smallest safe mechanism to prove the controller did NOT reach
+  // the service for a malformed input.
+  bootstrapStore = app.get(BootstrapChallengeStore);
 }, 120_000);
 
 afterAll(async () => {
@@ -527,6 +538,42 @@ describe('Logged-out bootstrap flow', () => {
       .set('Cookie', `ibn_hayan_role_preview_bootstrap=${bootstrapCookie}`)
       .send({ roleCode: 'R99_UNKNOWN', challengeId });
     expect(res.status).toBe(400);
+
+    // The public controller's strict Zod boundary
+    // (SelectPreviewRoleRequestSchema, whose `roleCode` field is
+    // constrained to the RoleCodeSchema enum of the 14 canonical
+    // codes R01-R14) rejects R99_UNKNOWN at the controller boundary
+    // and throws rolePreviewRequestInvalid(). The service is NEVER
+    // reached, so the structured error code is
+    // ROLE_PREVIEW_REQUEST_INVALID — NOT ROLE_PREVIEW_ROLE_UNKNOWN
+    // (which is a defence-in-depth service error unreachable from
+    // the current public controller path).
+    const parsed = RolePreviewErrorResponseSchema.safeParse(res.body);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.error.code).toBe('ROLE_PREVIEW_REQUEST_INVALID');
+    }
+
+    // Prove the bootstrap challenge was NOT consumed by the
+    // malformed request. The BootstrapChallengeStore is the
+    // authoritative server-side state; its `consume()` method
+    // returns 'ok' if the challenge was NOT previously consumed
+    // and 'replay' if it was. If the controller had reached the
+    // service, the service would have called `consume()` first
+    // and marked the challenge consumed, causing our call to
+    // return 'replay'. A return of 'ok' proves the service was
+    // NOT reached. After our explicit consume, the challenge is
+    // marked consumed; this is safe because (a) no session was
+    // created (consume only marks the flag), (b) no audit outbox
+    // row was created (audit happens in the service after
+    // consume, which we did not call), and (c) the store's
+    // `cleanup()` removes consumed entries on the next `issue()`
+    // call (which the next test's `bootstrapChallenge()` helper
+    // triggers). The `beforeEach` cleanup handles DB state; the
+    // in-memory store is bounded by the 5-minute expiry and the
+    // `cleanup()` call.
+    const consumeResult = bootstrapStore.consume(challengeId, bootstrapCookie);
+    expect(consumeResult).toBe('ok');
   });
 
   it('16. Caller-supplied IDs fail contract validation (400)', async () => {
@@ -538,6 +585,32 @@ describe('Logged-out bootstrap flow', () => {
         userId: 'should-be-rejected',
       });
     expect(res.status).toBe(400);
+
+    // The public controller's strict Zod boundary
+    // (SelectPreviewRoleRequestSchema is `.strict()`) rejects any
+    // key other than `roleCode` and `challengeId`. The
+    // `userId` field is a caller-supplied server-owned identity
+    // field and is rejected at the controller boundary. The
+    // service is NEVER reached, so the structured error code is
+    // ROLE_PREVIEW_REQUEST_INVALID.
+    const parsed = RolePreviewErrorResponseSchema.safeParse(res.body);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.error.code).toBe('ROLE_PREVIEW_REQUEST_INVALID');
+    }
+
+    // Prove the service was NOT reached by verifying no session
+    // was created and no audit outbox row was emitted. The
+    // `beforeEach` cleanup ensures both tables start empty; if
+    // the service had been reached, it would have created a
+    // session row (via `selectRoleWithBootstrap` or
+    // `selectRole`) and/or an audit outbox row (via the audit
+    // emitter). A count of 0 for both proves the service was
+    // NOT reached.
+    const sessions = await prisma.authSession.findMany({});
+    expect(sessions.length).toBe(0);
+    const outboxRows = await prisma.auditOutboxEvent.findMany({});
+    expect(outboxRows.length).toBe(0);
   });
 
   it('17. R09 creates a normal application session', async () => {

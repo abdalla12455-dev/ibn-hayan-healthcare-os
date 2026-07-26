@@ -14,16 +14,50 @@ import {
 } from './role-preview.errors.js';
 
 /**
- * Regression tests for the HTTP status codes of the Demo Role
- * Preview Mode error helpers.
+ * Helper-contract regression tests for the Demo Role Preview Mode
+ * error helpers.
+ *
+ * IMPORTANT — scope of these tests:
+ *
+ * These tests validate the HELPER CONTRACT (the NestJS exception
+ * type, HTTP status code, error envelope shape, and structured
+ * error code produced by each helper in isolation). They do NOT
+ * validate the public controller runtime path, and they do NOT
+ * prove which helper the public controller actually invokes for a
+ * given input.
+ *
+ * In particular:
+ * - `rolePreviewRoleUnknown()` is a defence-in-depth SERVICE
+ *   helper. It is NOT reachable from the current public
+ *   `RolePreviewController.selectRole()` for any request, because
+ *   the controller's strict Zod boundary
+ *   (`SelectPreviewRoleRequestSchema`, whose `roleCode` field is
+ *   constrained to the `RoleCodeSchema` enum of the 14 canonical
+ *   codes R01–R14) rejects any non-canonical role code at the
+ *   controller boundary and throws `rolePreviewRequestInvalid()`
+ *   (HTTP 400 + `ROLE_PREVIEW_REQUEST_INVALID`) WITHOUT reaching
+ *   the service. The `rolePreviewRoleUnknown()` tests below
+ *   validate the helper's contract so that the helper remains
+ *   correct for a hypothetical internal or future caller that
+ *   bypasses the public Zod boundary. No such caller exists in
+ *   the current codebase.
+ * - `rolePreviewRequestInvalid()` IS the public controller's
+ *   reachable 400 helper. The integration tests
+ *   `15. Unknown role fails (400)` and
+ *   `16. Caller-supplied IDs fail contract validation (400)` in
+ *   `role-preview.role-preview-spec.ts` prove the controller
+ *   invokes this helper for non-canonical role codes and for
+ *   caller-supplied server-owned identity fields, respectively.
+ *   Those integration tests also assert the structured error code
+ *   and prove the service is NOT reached.
  *
  * These tests guard against a regression in which
  * `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()`
  * incorrectly returned `ForbiddenException` (HTTP 403) instead of
- * `BadRequestException` (HTTP 400). The integration tests
- * `15. Unknown role fails (400)` and
- * `16. Caller-supplied IDs fail contract validation (400)` caught
- * the contract violation.
+ * `BadRequestException` (HTTP 400). The integration tests caught
+ * the contract violation for `rolePreviewRequestInvalid()` (the
+ * reachable helper); the unit test for `rolePreviewRoleUnknown()`
+ * guards the defence-in-depth helper's contract independently.
  *
  * The tests verify:
  * 1. Each error helper returns the correct NestJS exception type.
@@ -40,12 +74,24 @@ import {
  * 400).
  */
 describe('role-preview error helpers: HTTP status codes', () => {
-  describe('rolePreviewRoleUnknown', () => {
+  describe('rolePreviewRoleUnknown (defence-in-depth SERVICE helper; NOT reachable from the public controller)', () => {
     it('returns a 400 BadRequestException (not 403 ForbiddenException)', () => {
       const exc = rolePreviewRoleUnknown();
       // The fix: this must be a BadRequestException (HTTP 400), not
       // a ForbiddenException (HTTP 403). An unknown role code is a
       // client-side request error, not an authorisation failure.
+      //
+      // NOTE: this test validates the HELPER contract only. The
+      // public controller does NOT invoke this helper for any
+      // request because the strict Zod boundary
+      // (SelectPreviewRoleRequestSchema, with roleCode constrained
+      // to the RoleCodeSchema enum) rejects non-canonical role
+      // codes at the controller boundary and throws
+      // rolePreviewRequestInvalid() instead. The integration test
+      // `15. Unknown role fails (400)` proves the controller's
+      // runtime behaviour. This unit test guards the helper's
+      // contract for a hypothetical internal or future caller that
+      // bypasses the public Zod boundary.
       expect(exc.constructor.name).toBe('BadRequestException');
       expect(exc.getStatus()).toBe(400);
     });
@@ -55,12 +101,16 @@ describe('role-preview error helpers: HTTP status codes', () => {
       const response = exc.getResponse() as {
         error: { code: string; message: string };
       };
+      // Validates the helper's structured error code. This code is
+      // NOT produced by the current public controller for any
+      // request; it is the defence-in-depth code the service would
+      // throw if a caller bypassed the public Zod boundary.
       expect(response.error.code).toBe('ROLE_PREVIEW_ROLE_UNKNOWN');
       expect(response.error.message).toBe('Unknown role code.');
     });
   });
 
-  describe('rolePreviewRequestInvalid', () => {
+  describe('rolePreviewRequestInvalid (the public controller REACHABLE 400 helper)', () => {
     it('returns a 400 BadRequestException (not 403 ForbiddenException)', () => {
       const exc = rolePreviewRequestInvalid();
       // The fix: this must be a BadRequestException (HTTP 400), not

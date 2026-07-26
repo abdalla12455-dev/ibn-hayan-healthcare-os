@@ -373,7 +373,7 @@ export class RolePreviewController {
   @ApiResponse({
     status: 400,
     description:
-      'The role code is unknown (ROLE_PREVIEW_ROLE_UNKNOWN), or the request body failed contract validation (ROLE_PREVIEW_REQUEST_INVALID).',
+      'Malformed request body (ROLE_PREVIEW_REQUEST_INVALID). The select endpoint validates the body through SelectPreviewRoleRequestSchema, a .strict() Zod schema. The schema rejects: non-canonical role codes (e.g. R99_UNKNOWN) because roleCode is constrained to the RoleCodeSchema enum of the 14 canonical codes R01-R14; caller-supplied server-owned identity fields (e.g. userId, membershipId, tenantId, organisationId, facilityId) because the schema only permits roleCode and challengeId; missing required roleCode; wrong types; and any other Zod validation failure. The service is NOT reached for any of these inputs, so the bootstrap challenge is NOT consumed and no session or audit outbox row is created. The ROLE_PREVIEW_ROLE_UNKNOWN code is a defence-in-depth SERVICE error retained for a hypothetical internal or future caller that bypasses the public Zod boundary; it is NOT reachable from the current public controller path.',
   })
   @ApiResponse({
     status: 401,
