@@ -19,15 +19,20 @@ import swc from 'unplugin-swc';
  * The SWC compiler is used because NestJS source files use
  * TypeScript decorators and `emitDecoratorMetadata`.
  *
- * NOTE: This config is NOT yet wired into package.json scripts or the
- * CI workflow. A future task (with authorisation to modify package.json
- * and CI) should add:
- *   - `"test:clinic-admin": "vitest run --config vitest.clinic-admin.config.ts"`
- *     to apps/api/package.json scripts.
- *   - `pnpm test:clinic-admin` to the PostgreSQL 17 validation workflow.
- * Until then, the test file exists but is not run locally (no PG17)
- * and not run in CI (not wired). GitHub Actions remains authoritative
- * for the test's pass/fail status once it is wired in.
+ * Wired into the project command surface by the
+ * `fix: wire clinic admin integration and deduplicate overview requests`
+ * commit:
+ *   - `apps/api/package.json` declares `"test:clinic-admin": "vitest run --config vitest.clinic-admin.config.ts"` (plus the matching `pretest:clinic-admin` prisma-generate hook).
+ *   - The root `package.json` declares `"test:clinic-admin": "pnpm run build:shared && pnpm --filter @ibn-hayan/api test:clinic-admin"`.
+ *   - `.github/workflows/main-ci.yml` runs `pnpm test:clinic-admin` inside the `postgresql17-validation` job, after `pnpm test:database` and before `pnpm test:role-preview`. The job uses `set -euo pipefail`, so any non-zero exit code from the Clinic Admin suite fails the step and the job.
+ *
+ * Per the Clinic Admin Overview specification, this suite is NOT run
+ * locally (no PostgreSQL 17 in the development environment). It runs
+ * on GitHub Actions inside the composite node:24 + postgres:17 Docker
+ * image (see `.github/workflows/main-ci.yml`). When run locally without
+ * PostgreSQL 17, the suite fails at the `setupDatabaseTests()` bootstrap
+ * step (the disposable cluster cannot start) — this is the expected
+ * failure mode, NOT a regression.
  */
 export default defineConfig({
   plugins: [

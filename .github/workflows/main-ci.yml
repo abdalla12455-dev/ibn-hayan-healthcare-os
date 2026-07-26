@@ -33,9 +33,10 @@ name: Main CI
 #      Runs inside the composite node:24 + postgres:17 Docker image (same as
 #      the ADR-015 workflow). Executes the same static/build gates inside the
 #      container (to ensure the container environment is self-consistent),
-#      then runs the seven PostgreSQL-17-dependent test suites:
+#      then runs the nine PostgreSQL-17-dependent test suites:
 #        - pnpm test:context
 #        - pnpm test:database
+#        - pnpm test:clinic-admin
 #        - pnpm test:role-preview
 #        - pnpm audit:test:atomicity
 #        - pnpm audit:test:integration
@@ -265,7 +266,7 @@ jobs:
           '
 
       - name: Run PostgreSQL 17 test suites
-        # Eight PostgreSQL-17-dependent suites. Each suite boots a disposable
+        # Nine PostgreSQL-17-dependent suites. Each suite boots a disposable
         # PG 17 cluster via apps/api/test/database/_pg-bootstrap.ts. The
         # pool:forks + singleFork:true vitest configuration ensures the
         # cluster is shared across all test files within a single suite run.
@@ -277,6 +278,20 @@ jobs:
         # end-to-end against the disposable cluster. The suite is NOT run
         # locally (no PostgreSQL 17 in the development environment); it
         # runs only on GitHub Actions inside this composite image.
+        #
+        # The `pnpm test:clinic-admin` suite (added by the
+        # `fix: wire clinic admin integration and deduplicate overview requests`
+        # commit) verifies the Clinic Admin Overview HTTP path against the
+        # disposable cluster: GET /api/v1/clinic-admin/overview, the
+        # AuthorizationGuard, the session-cookie validation, the
+        # permission check, the tenant/organisation/facility context
+        # resolution, and the audit event emission. Placed after
+        # `pnpm test:database` (which boots the disposable cluster for
+        # the database-suite run, proving the bootstrap is healthy) and
+        # before `pnpm test:role-preview` (which is the other HTTP-e2e
+        # PG17 suite). The suite is NOT run locally (no PostgreSQL 17 in
+        # the development environment); it runs only on GitHub Actions
+        # inside this composite image.
         shell: bash
         run: |
           docker run --rm ibn-hayan-main-ci-pg17 bash -c '
@@ -286,6 +301,7 @@ jobs:
             cd apps/api
             pnpm test:context
             pnpm test:database
+            pnpm test:clinic-admin
             pnpm test:role-preview
             pnpm audit:test:atomicity
             pnpm audit:test:integration

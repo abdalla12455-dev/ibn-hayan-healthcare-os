@@ -273,11 +273,21 @@ export type RolePreviewActionCode =
 //
 // Database compatibility:
 //
-// The `facility_context` category IS accepted by the
-// `audit_events_category_check` CHECK constraint in the dedicated audit
-// database (it was added by migration
-// `20260726000000_audit_category_extend_for_role_preview`). The
-// transactional outbox (`audit_outbox_events`) stores the event as
+// The `facility_context` category was already part of the
+// TypeScript audit-category catalogue before migration
+// `20260726000000_audit_category_extend_for_role_preview` (it was
+// added to `packages/observability/src/audit/categories.ts` by the
+// ADR-015 scoped-context extension, which predated the migration).
+// Migration `20260726000000_audit_category_extend_for_role_preview`
+// EXTENDED the `audit_events_category_check` CHECK constraint in the
+// dedicated audit database to include `facility_context` (along with
+// `organisation_context` and `role_preview`), bringing the database
+// constraint in line with the previously-approved TypeScript
+// catalogue. The migration did NOT invent `facility_context`; it
+// extended the approved database set with categories that were
+// already approved in TypeScript.
+//
+// The transactional outbox (`audit_outbox_events`) stores the event as
 // JSONB with no category CHECK, so the outbox INSERT always succeeds.
 // The dispatcher's projection into `audit_events` succeeds because
 // `facility_context` is in the CHECK constraint. No new migration is
