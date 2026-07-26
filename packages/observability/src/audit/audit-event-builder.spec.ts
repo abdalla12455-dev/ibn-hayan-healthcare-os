@@ -240,6 +240,92 @@ describe('buildAuditEventDraft', () => {
       expect(r.reason).toBe('metadata_validation_failed');
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Clinic Admin category regression coverage.
+  //
+  // These tests guard against a regression in which the `clinic_admin`
+  // category is inferred by `inferCategoryFromAction` for every action
+  // starting with `clinic_admin.` but is NOT present in
+  // `AUDIT_EVENT_CATEGORIES`. The result would be that
+  // `buildAuditEventDraft` rejects every Clinic Admin Overview audit
+  // event with `unknown_category`, which (via `AuditHelperService.emitDirect`)
+  // would not roll back a transaction (direct emission is non-transactional)
+  // but would silently fail to persist the audit record. The defence-in-depth
+  // test below ensures the audit record is persisted.
+  //
+  // The fix added `clinic_admin` to the `AuditEventCategory` union and
+  // the `AUDIT_EVENT_CATEGORIES` list, and registered the
+  // `clinic_admin.overview.viewed` action code in
+  // `CLINIC_ADMIN_ACTION_CODES`.
+  // -------------------------------------------------------------------------
+
+  it('accepts the clinic_admin.overview.viewed action and infers the clinic_admin category', () => {
+    const r = buildAuditEventDraft({
+      action: 'clinic_admin.overview.viewed',
+      tenantId: '00000000-0000-0000-0000-000000000001',
+      actorType: 'USER',
+      actorId: '00000000-0000-0000-0000-000000000002',
+      sessionId: '00000000-0000-0000-0000-000000000003',
+      requestId: '00000000-0000-0000-0000-000000000004',
+      scope: 'clinic_admin',
+      metadata: { endpoint: 'clinic_admin_overview_view' },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.draft.category).toBe('clinic_admin');
+      expect(r.draft.action).toBe('clinic_admin.overview.viewed');
+      expect(r.draft.scope).toBe('clinic_admin');
+    }
+  });
+
+  it('accepts an explicit clinic_admin category that matches a clinic_admin action', () => {
+    // Defence-in-depth: a caller MAY supply the category explicitly;
+    // the builder must accept it when it matches the inferred
+    // category.
+    const r = buildAuditEventDraft({
+      action: 'clinic_admin.overview.viewed',
+      category: 'clinic_admin',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.draft.category).toBe('clinic_admin');
+    }
+  });
+
+  it('rejects an explicit non-clinic_admin category for a clinic_admin action', () => {
+    // The category_action_mismatch check must still fire when a caller
+    // supplies the wrong category for a clinic_admin action.
+    const r = buildAuditEventDraft({
+      action: 'clinic_admin.overview.viewed',
+      category: 'security',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('category_action_mismatch');
+    }
+  });
+
+  it('does not leak sensitive values from the clinic_admin metadata', () => {
+    // Per the live-data task specification Phase 7 item 12, "Audit
+    // events do not expose sensitive dashboard values." The metadata
+    // validator must reject forbidden keys even when the category is
+    // clinic_admin. This ensures that a buggy caller cannot smuggle
+    // a password, a session token, or any other secret into the
+    // audit outbox through the clinic_admin path.
+    const r = buildAuditEventDraft({
+      action: 'clinic_admin.overview.viewed',
+      metadata: {
+        endpoint: 'clinic_admin_overview_view',
+        // A forbidden key — must be rejected.
+        sessionToken: 'should-never-be-persisted',
+      },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('metadata_validation_failed');
+    }
+  });
 });
 
 describe('validateAuditKey', () => {

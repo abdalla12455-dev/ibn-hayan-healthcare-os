@@ -2259,3 +2259,185 @@ For the public `POST /api/v1/dev/role-preview/select` endpoint:
 **Recovery:** The branch tip before this edit is `08ee8852e50d3229124d5363a9b729675e99b586` (local and remote identical). If the edit needs to be discarded before commit, run `git restore apps/api/src/scripts/audit-verify.ts apps/api/test/audit/audit-verify.audit-verify-spec.ts` from the demo-preview worktree. If the edit has been committed and needs to be discarded, do NOT use `git reset --hard` (prohibited). Instead, create a revert commit on top.
 
 **Immediate next step:** Generate a fresh temporary deploy key, push the single audit-verification-CLI correction commit to `feat/demo-role-preview-v1`, verify local and remote SHAs match exactly, securely remove the local key material, and rerun both required GitHub Actions jobs (`static-and-build` and `postgresql17-validation`) without merging. The PR must NOT be merged until both jobs are green on the new commit.
+
+## Clinic Admin Overview Live-Data Batch (2026-07-26)
+
+This section is appended per the Update Protocol; no prior entries are rewritten. It records the implementation of the first production-grade Clinic Administrator Overview workflow connecting the existing approved Clinic Admin dashboard interface at `/clinic-admin` to real authenticated, tenant-isolated backend data. The implementation follows `download/docs/05_UI_UX/DESIGN_BIBLE.md` §12 (Arabic RTL) and §13 (English LTR) canonical approved designs.
+
+### Repository and branch
+
+- **Repository:** `/home/z/my-project` (primary worktree, on `main`)
+- **Implementation branch:** `feat/clinic-admin-overview-live-data-v1` (local-only as of this writing)
+- **Isolated worktree:** `/home/z/clinic-admin-overview-live-data-v1` (on `feat/clinic-admin-overview-live-data-v1`)
+- **Branch start point (parent):** `d6c02b62eaeba930e8e6c18676e1659e30550b11` (the `main` tip when the branch was created — verified baseline before the branch was cut)
+- **Authority note:** The start point SHA above is the **last verified `main` baseline when the branch was created** (2026-07-26). It is NOT a live claim about the current `main` tip. Before merging this branch, run `git fetch origin && git rev-parse main origin/main` and trust Git, not this section.
+
+### Completed capability
+
+The existing Clinic Admin Overview page at `/clinic-admin` (previously a pure shell rendering an honest "foundation" empty state) is now connected to real backend data through the new `GET /api/v1/clinic-admin/overview` endpoint. The page now displays:
+
+- The authenticated Clinic Administrator's display name (from the session's User row, resolved server-side).
+- The active context identity (tenant, organisation, facility display names — NOT UUIDs), resolved server-side from the session's active membership + active organisation + active facility.
+- The availability declaration for each approved region (Appointment Actions, Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary, Quick Actions).
+
+The page honestly reports which business regions are not yet supported. Per the architectural reality verified by inspecting `apps/api/prisma/schema.prisma` and `apps/api/src/app.module.ts`, the current domain model contains ONLY tenancy, identity, session, RBAC, and audit models. There are NO models for appointments, patients, doctors, inventory, billing, waiting room, or staff attendance. Per the live-data task specification Phase 5, NO schema or migration change was authorised. Therefore:
+
+- Every business region (Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary) is declared `'not_supported'` (Category 3 — not yet supported by the current domain or database architecture).
+- Every navigational region (Appointment Actions, Quick Actions) is declared `'navigational_only'` (Category 4 — decorative or navigational only).
+- The active context identity and the administrator display name are Category 1 (supported by existing contracts).
+
+The frontend renders each region in its honest "not yet configured" state, preserving the approved layout, typography, and 20px–24px edge protection per DESIGN_BIBLE.md §12.2 / §13.2. When the relevant business-domain vertical slices are implemented in subsequent batches, the contract will be extended to carry the real business metrics and the region availability declarations will change to `'supported'`.
+
+### Backend contracts used or added
+
+**Existing contracts reused:**
+- `ContextResponse` (from `@ibn-hayan/contracts/context`) — the shell already calls `GET /api/v1/context` to load the active tenant/organisation/facility context. The Overview endpoint reuses the same session-derived context rather than re-fetching.
+- `SessionResponse` (from `@ibn-hayan/contracts/auth`) — the shell already calls `GET /api/v1/auth/session` to validate the session. The Overview endpoint reuses the same session validation.
+- `RoleCodeSchema` (from `@ibn-hayan/contracts/authorization`) — the R09_ADMINISTRATOR role code is the canonical role for this surface.
+
+**New contracts added:**
+- `packages/contracts/src/clinic-admin/clinic-admin.schema.ts` — exports `ClinicAdminOverviewResponseSchema`, `ClinicAdminOverviewErrorResponseSchema`, `RegionKeySchema`, `RegionAvailabilitySchema`, `RegionStatusSchema`, `ActiveContextIdentitySchema`, `AdministratorIdentitySchema`, and inferred TypeScript types. All schemas are `.strict()` so adding an unexpected field at the boundary is rejected by the Zod parse.
+- `packages/contracts/src/clinic-admin/index.ts` — public entry point re-exporting the schemas and types.
+- `packages/contracts/src/index.ts` — added `export * from './clinic-admin/index.js'`.
+
+**New permission code:**
+- `clinic_admin_overview:view` added to `packages/domain/src/authorization/permissions.ts` `PERMISSION_CODES` union and to `packages/contracts/src/authorization/authorization.schema.ts` `PermissionCodeSchema`.
+
+**New audit action code:**
+- `clinic_admin.overview.viewed` added to `packages/observability/src/audit/action-codes.ts` under a new `CLINIC_ADMIN_ACTION_CODES` block. The `inferCategoryFromAction` function was extended to return `'clinic_admin'` for actions starting with `clinic_admin.`.
+
+**New audit category:**
+- `clinic_admin` added to `packages/observability/src/audit/categories.ts` `AuditEventCategory` union and `AUDIT_EVENT_CATEGORIES` list. Without this entry, every Clinic Admin Overview audit emission would fail with `unknown_category` (per the same regression pattern that affected Role Preview).
+
+### Data sources used
+
+The Overview endpoint reads from the existing tenancy repositories (no business-domain tables exist):
+- `TenantRepository.findById(tenantId)` — resolves the active Tenant display name.
+- `OrganisationRepository.findById(tenantId, organisationId)` — resolves the active Organisation display name; uses the composite-unique constraint on `(tenant_id, id)` so an organisation id from a different Tenant returns `null`.
+- `FacilityRepository.findById(tenantId, facilityId)` — resolves the active Facility display name; uses `findFirst` with `where: { AND: [{ id }, { tenantId }] }` so a facility id from a different Tenant returns `null`.
+
+The endpoint additionally verifies (defence-in-depth) that the resolved facility's `organisationId` matches the session's `activeOrganisationId`. This enforces Phase 7 items 3 and 4 ("A user from another organisation cannot access the data" and "A user from another facility cannot access the data") even if a session-tampering bug elsewhere were to produce an inconsistent active context.
+
+The session, user, and memberships are loaded by `AuthService.getSessionFromCookie` (reused, not duplicated). The endpoint does NOT accept tenant, organisation, or facility identifiers from the request body or query string.
+
+### Tenant and permission protections
+
+1. **R09-only authorisation.** The endpoint is guarded by `AuthorizationGuard` and declares `@RequirePermission('clinic_admin_overview:view', { mode: 'for-active-membership' })`. The permission is granted ONLY to `R09_ADMINISTRATOR` (Clinic Administrator). It is NOT granted to `R13_SYSTEM_ADMINISTRATOR` (Platform Super Admin), enforcing Phase 7 item 6 ("A Platform Super Admin is not silently treated as a Clinic Administrator"). The structural enforcement lives in `packages/domain/src/authorization/role-permissions.ts`.
+2. **Active-context requirement.** The service throws `clinicAdminOverviewContextRequired()` (HTTP 403, code `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`) when any of `activeTenantMembershipId`, `activeOrganisationId`, or `activeFacilityId` is null on the session. The response is generic and does NOT reveal which dimension is missing.
+3. **Tenant-scoped repository queries.** Every repository call passes `tenantId` as a required parameter; the existing repositories use composite-unique constraints that return `null` for an identifier from a different Tenant. A session-tampering attack that supplied an organisation or facility UUID from another Tenant would fail closed.
+4. **Facility-within-organisation check.** The resolved facility's `organisationId` is compared to the resolved organisation's `id`; a mismatch fails closed.
+5. **Caller-supplied identifier protection.** The endpoint is a parameterless GET; no tenant/organisation/facial identifier is accepted from the request body or query string. The client (`getClinicAdminOverview`) sends only `credentials: 'include'` and an `Accept: application/json` header.
+6. **Role Preview regression.** The Demo Role Preview mechanism cannot bypass production tenant isolation because (a) the Overview endpoint requires `clinic_admin_overview:view`, which is granted ONLY to R09 (not to preview sessions), and (b) the endpoint requires an active tenant + organisation + facility context, which preview sessions do not have (preview sessions have `activeTenantMembershipId = null` because they are logged-out demos).
+7. **Audit non-exposure.** The `clinic_admin.overview.viewed` audit event carries only `endpoint: 'clinic_admin_overview_view'` in its metadata. It does NOT carry dashboard values, region availability declarations, or display names. The audit metadata validator rejects forbidden keys (password, token, secret, csrf, cookie, authorization, privatekey, connectionstring, databaseurl) even when the category is `clinic_admin`.
+8. **Audit event category regression guard.** The new `clinic_admin` category is registered in `AUDIT_EVENT_CATEGORIES` so that `buildAuditEventDraft` accepts the inferred category. Without this entry, the audit emission would fail with `unknown_category` and silently drop the audit record (per the same regression pattern that affected Role Preview).
+
+### Files created
+
+**Backend (`apps/api/src/modules/clinic-admin/`):**
+- `clinic-admin.errors.ts` — `clinicAdminOverviewContextRequired()` HTTP 403 helper.
+- `clinic-admin-overview.service.ts` — `ClinicAdminOverviewService.loadOverview()`; resolves the active context identity, verifies the facility is within the organisation, emits the audit event, returns the response.
+- `clinic-admin.controller.ts` — `ClinAdminController.getOverview()`; mounts `GET /api/v1/clinic-admin/overview`; declares `@RequirePermission('clinic_admin_overview:view', { mode: 'for-active-membership' })`.
+- `clinic-admin.module.ts` — `ClinicAdminModule`; wires the controller + service; imports `AuthModule`, `AuthorizationModule`, `AuditModule`, `DatabaseModule`.
+- `index.ts` — public entry point re-exporting the module, controller, service, and error helper.
+
+**Contracts (`packages/contracts/src/clinic-admin/`):**
+- `clinic-admin.schema.ts` — Zod schemas for the response, error response, region key, region availability, region status, active context identity, administrator identity.
+- `clinic-admin.schema.spec.ts` — 28 contract tests covering strict mode, missing fields, extra fields, invalid values, Arabic display names, empty regions array.
+- `index.ts` — public entry point re-exporting the schemas and types.
+
+**Frontend:**
+- `apps/web/src/lib/api/clinic-admin/clinic-admin.client.ts` — `getClinicAdminOverview()` typed client; uses `credentials: 'include'`; classifies failures into typed `ApiError` categories; parses the response through `ClinicAdminOverviewResponseSchema`.
+- `apps/web/src/lib/api/clinic-admin/clinic-admin.client.spec.ts` — 13 client tests covering success, Arabic display names, 401/403/500 HTTP errors, network failure, invalid JSON, contract invalid, strict-mode extra fields, invalid region keys/availability values.
+- `apps/web/src/lib/api/clinic-admin/index.ts` — public entry point re-exporting the client.
+- `apps/web/src/components/clinic-admin/clinic-admin-overview.tsx` — `ClinicAdminOverview` content component; fetches on mount; renders loading, success, error, and not-supported states; renders the active context identity greeting and the nine approved regions in canonical reading order; preserves approved layout, typography, and edge protection.
+
+### Files modified
+
+**Backend:**
+- `apps/api/src/app.module.ts` — added `ClinicAdminModule` to the imports array; updated the module docstring.
+
+**Contracts:**
+- `packages/contracts/src/index.ts` — added `export * from './clinic-admin/index.js'`.
+- `packages/contracts/src/authorization/authorization.schema.ts` — added `'clinic_admin_overview:view'` to `PermissionCodeSchema`; updated the docstring.
+- `packages/contracts/src/authorization/authorization.schema.spec.ts` — updated the canonical permission codes test to include the new code; added a positive acceptance test for the new code.
+
+**Domain:**
+- `packages/domain/src/authorization/permissions.ts` — added `'clinic_admin_overview:view'` to `PermissionCode` union and `PERMISSION_CODES` list; updated docstrings.
+- `packages/domain/src/authorization/role-permissions.ts` — restructured `ROLE_PERMISSION_MATRIX` so that R09 is the SOLE holder of `clinic_admin_overview:view`. R01–R08, R10–R13 now use `PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view')`. R14 unchanged (empty). Updated docstrings.
+- `packages/domain/src/authorization/authorization.spec.ts` — updated existing tests to reflect the new permission and the new matrix shape; added new tests for R09 sole-holder, R13 explicit denial, R09+R13 union behaviour, `rolesGrantPermission` negative tests for every non-R09 role.
+
+**Observability:**
+- `packages/observability/src/audit/action-codes.ts` — added `CLINIC_ADMIN_ACTION_CODES = ['clinic_admin.overview.viewed']` block; added the action to `AUDIT_ACTION_CODES`; added `clinic_admin.` prefix handling to `inferCategoryFromAction`.
+- `packages/observability/src/audit/categories.ts` — added `'clinic_admin'` to `AuditEventCategory` union and `AUDIT_EVENT_CATEGORIES` list; updated docstring.
+- `packages/observability/src/audit/audit-event-builder.spec.ts` — added 4 new tests for `clinic_admin.overview.viewed` (success, explicit category match, explicit category mismatch, sensitive-metadata rejection).
+
+**Frontend:**
+- `apps/web/src/lib/api/index.ts` — added re-export of `getClinicAdminOverview` and `ClinicAdminOverviewClientResult`.
+- `apps/web/src/app/clinic-admin/page.tsx` — replaced the foundation placeholder with `<ClinicAdminOverview contextReady={true} />`. The shell still wraps the page; the shell enforces authentication and context protection per §17.1.
+- `apps/web/src/app/clinic-admin/page.test.tsx` — added a mock for `getClinicAdminOverview` returning a canonical success payload; existing 29 tests still pass without modification (the mock satisfies the new fetch).
+- `apps/web/src/app/globals.css` — appended CSS for the live-data Overview regions (`.ih-clinic-admin-overview--live`, `.ih-clinic-admin-overview__region`, `.ih-clinic-admin-overview__region-body`, `.ih-clinic-admin-overview__state`, `.ih-clinic-admin-overview__retry`, mobile responsive rules).
+
+### Files deleted
+
+None.
+
+### Validation results
+
+- `pnpm run typecheck` PASS (all 8 workspace projects).
+- `pnpm run lint` PASS (all 8 workspace projects; 0 errors, 0 warnings).
+- `pnpm run test` PASS — 792 unit tests:
+  - `packages/domain` — 103 tests (was 97; +6 new R09/R13 negative tests).
+  - `packages/contracts` — 205 tests (was 172; +33 new clinic-admin contract tests +1 new permission code test).
+  - `packages/observability` — 93 tests (was 89; +4 new clinic_admin audit tests).
+  - `apps/api` — 198 tests (unchanged; all Role Preview regression tests pass).
+  - `apps/web` — 193 tests (was 180; +13 new clinic-admin client tests; existing 29 clinic-admin page tests still pass with the new mock).
+- `pnpm run build` PASS (api via SWC, web via Next.js 16.2.10 Turbopack; `/clinic-admin` route registered as a static route).
+- `git diff --check` PASS (no whitespace errors).
+- Secret scan: PASS (no secrets, no fake business data, no accidental deletions, no generated dependency cache, no build output staged).
+
+### Tests not run
+
+- **PostgreSQL 17 integration tests** — the existing `pnpm test:context`, `pnpm test:auth`, `pnpm test:audit:database`, `pnpm test:audit:integration`, and `pnpm test:role-preview` suites require PostgreSQL 17, which is not available in this environment. GitHub Actions remains authoritative for these suites. The new Clinic Admin Overview endpoint has NO PostgreSQL 17 integration tests in this batch; the endpoint's logic is covered by the unit-test suite (contract validation, client parsing, role-permission matrix, audit builder). A future batch should add a focused integration test for the Overview endpoint (R09 with full context → 200; R13 → 403; missing context → 403; cross-tenant identifiers → 403).
+- **Manual browser inspection** — was not performed in this batch because (a) the environment has no running API server, (b) the environment has no PostgreSQL 17 database with seed data, and (c) the live-data task specification Phase 8 explicitly states "When PostgreSQL 17 is unavailable, clearly report which tests were not run. Do not claim they passed." The frontend component is covered by 29 existing page tests + 13 new client tests; the backend service is covered by 4 audit builder tests + 33 contract tests + 6 new role-permission tests.
+
+### Important decisions
+
+1. **No schema or migration change.** Per Phase 5 of the live-data task specification, NO schema or migration change was authorised. The endpoint reuses the existing tenancy repositories and the existing session row. The business regions are declared `'not_supported'` until the relevant vertical slices are implemented.
+2. **New permission `clinic_admin_overview:view` granted only to R09.** This is the structural enforcement of Phase 7 item 6 ("A Platform Super Admin is not silently treated as a Clinic Administrator"). The existing `context:view` permission was too broad (granted to R01–R13); a new dedicated permission allows fine-grained control over who can access the Clinic Admin Overview surface.
+3. **The endpoint is a parameterless GET.** No tenant, organisation, or facility identifier is accepted from the request. All context is derived from the session cookie via `AuthService.getSessionFromCookie` and the session row's `activeTenantMembershipId` / `activeOrganisationId` / `activeFacilityId` columns. This is the structural enforcement of Phase 7 items 7 and 8 ("Caller-supplied identifiers cannot override session context" and "Missing context fails closed").
+4. **The response carries display names only, not UUIDs.** The shell already receives the active context (with UUIDs) from `/api/v1/context`; the Overview response carries only the display names for region rendering. This is the structural enforcement of the §12.2/§13.2 privacy rule: the overview must not expose more identifiers than necessary.
+5. **The audit event carries only the endpoint name in metadata.** Per Phase 7 item 12 ("Audit events do not expose sensitive dashboard values"), the `clinic_admin.overview.viewed` event carries only `{ endpoint: 'clinic_admin_overview_view' }`. No dashboard values, no region availability declarations, no display names.
+6. **The frontend preserves the approved layout.** The new `ClinicAdminOverview` component renders inside the existing `ClinicAdminShell`. The shell still renders the fixed header, fixed sidebar (11 items), and scrollable main region per §17. The Overview component only renders the main-region content. The CSS uses the existing design tokens (`var(--surface)`, `var(--border)`, `var(--text-primary)`, etc.) and the existing BEM-style class naming convention.
+7. **The error state is non-revealing.** The error response uses generic messages ("You are not authorised to view the Clinic Admin Overview", "Your session has expired. Please sign in again.", "An error occurred while loading the data. Please try again in a moment."). The component does NOT expose the underlying error category, status code, or stack trace to the user.
+
+### Known gaps
+
+1. **No business metrics.** All seven business regions (Financial Snapshot, Today's Appointments, Operational Alerts, Inventory Alerts, Doctors on Duty, Waiting Room Operations, Staff Attendance Summary) are declared `'not_supported'` because the underlying domain models do not exist. The frontend renders each region in its honest "not yet configured" state. This is an architectural gap that subsequent vertical-slice batches will fill.
+2. **No PostgreSQL 17 integration test for the Overview endpoint.** The endpoint's logic is covered by unit tests, but a focused integration test (R09 with full context → 200; R13 → 403; missing context → 403; cross-tenant identifiers → 403; session-tampering → 403) should be added in a future batch when the PostgreSQL 17 test infrastructure is extended.
+3. **No "Today's Appointments" Time column or eight-row table.** DESIGN_BIBLE.md §13.3 mandates two implementation corrections: (1) the Today's Appointments table must include a Time column as the first column, and (2) the first column label must read `Patient ID`, not `Client ID`. These corrections apply when the appointments vertical slice is implemented and the table is populated with real data. In this batch, the Today's Appointments region is declared `'not_supported'`; no table is rendered. The corrections are documented in the contract spec for future implementation.
+4. **No timezone-aware today filtering.** The live-data task specification Phase 5 mentions "Today's statistics must use the facility's approved timezone when that capability exists. If facility timezone support does not yet exist, stop and report the architectural gap rather than silently assuming UTC or the server timezone." This gap is moot in this batch because there are no time-based queries (no business tables exist). When the appointments vertical slice is implemented, the facility timezone architectural gap must be addressed before any "today" query is written.
+5. **No browser-rendering verification.** The frontend component is covered by 29 existing page tests + 13 new client tests, but no manual browser inspection was performed (no running API server, no PostgreSQL 17 seed data). The CSS uses existing design tokens; the layout follows the existing `.ih-clinic-admin-overview` conventions. A future batch with a running stack should verify the desktop/tablet/mobile Arabic-RTL and English-LTR rendering, safe-area spacing, and edge cropping.
+
+### Remaining risks
+
+1. **Branch is local-only.** The branch `feat/clinic-admin-overview-live-data-v1` has NOT been pushed to `origin` because no authenticated temporary deploy key is currently available (per AGENTS.md invariant 5). A fresh v23 (or later) deploy key will be required for the controlled push task.
+2. **Audit emission is best-effort.** The `clinic_admin.overview.viewed` audit event is emitted via `AuditHelperService.emitDirect` (non-transactional). If the audit outbox insertion fails, the audit record is dropped (but the API response still succeeds). This is the existing pattern for read-only audit events; it matches `tenant_context.viewed`, `authorization.decision.allowed`, and `authorization.decision.denied`. The pattern is acceptable because viewing the Overview is not a state mutation.
+3. **Stale RegionAvailability declarations.** The `buildDefaultRegions()` function in the service hardcodes every business region as `'not_supported'`. When a vertical slice is implemented, the function must be updated to return `'supported'` for the relevant region, and the contract must be extended to carry the region-specific payload. Forgetting to update `buildDefaultRegions()` would leave a supported region rendered as "not yet configured". A future batch should add a test that asserts `buildDefaultRegions()` returns `'supported'` for every region whose underlying model exists.
+4. **No facility timezone.** As noted in Known Gaps item 4, the current architecture has no facility timezone. This is not a regression introduced by this batch; it is a pre-existing gap that must be addressed before any time-based business query is written.
+
+### Latest verified commit
+
+The latest verified commit on `feat/clinic-admin-overview-live-data-v1` will be recorded in `worklog.md` after the commit is created. The branch start point (parent) is `d6c02b62eaeba930e8e6c18676e1659e30550b11` (the `main` baseline when the branch was cut).
+
+### Immediate next step
+
+Generate a fresh temporary GitHub deploy key (v23 or later), push the single `feat: connect clinic admin overview to live data` commit to `feat/clinic-admin-overview-live-data-v1`, verify local and remote SHAs match exactly, securely remove the local key material, open a Pull Request, and rerun both required GitHub Actions jobs (`static-and-build` and `postgresql17-validation`). The PR must NOT be merged until both jobs are green on the new commit.
+
+### Recovery information
+
+- **Implementation branch:** `feat/clinic-admin-overview-live-data-v1` (local-only)
+- **Implementation worktree:** `/home/z/clinic-admin-overview-live-data-v1`
+- **Branch parent:** `d6c02b62eaeba930e8e6c18676e1659e30550b11` (the `main` baseline when the branch was cut)
+- **To inspect the implementation without checking out the branch:** `git worktree add /tmp/clinic-admin-overview-review feat/clinic-admin-overview-live-data-v1` (the local branch is reachable from the primary worktree)
+- **To discard the branch and start over:** `git worktree remove /home/z/clinic-admin-overview-live-data-v1` then `git branch -D feat/clinic-admin-overview-live-data-v1` (only with explicit operator authorisation; the work is local-only and has not been pushed, so this would lose the implementation)
+- **To re-run validation in the worktree:** `cd /home/z/clinic-admin-overview-live-data-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`

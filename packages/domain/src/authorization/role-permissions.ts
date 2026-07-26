@@ -76,23 +76,68 @@ import {
  * facility-scoped assignment cannot select an organisation or
  * facility context; the guard rejects the selection before the
  * permission check is reached.
+ *
+ * The `clinic_admin_overview:view` permission is granted ONLY to
+ * `R09_ADMINISTRATOR` (Clinic Administrator). It is the read-only
+ * authorisation gate for the Clinic Administrator Overview surface
+ * at `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12 and
+ * §13). It is NOT granted to `R13_SYSTEM_ADMINISTRATOR` (Platform
+ * Super Admin) — R13 holds a different surface (§15/§16) and must
+ * NOT be silently treated as a Clinic Administrator. Per the
+ * Clinic Admin Overview live-data task specification Phase 7 item 6,
+ * this structural separation is the enforcement point for "A Platform
+ * Super Admin is not silently treated as a Clinic Administrator."
  */
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
-  R01_PHYSICIAN: PERMISSION_CODES,
-  R02_NURSE: PERMISSION_CODES,
-  R03_PHARMACIST: PERMISSION_CODES,
-  R04_TECHNICIAN: PERMISSION_CODES,
-  R05_ALLIED_HEALTH_PROFESSIONAL: PERMISSION_CODES,
-  R06_RECEPTIONIST: PERMISSION_CODES,
-  R07_SCHEDULER: PERMISSION_CODES,
-  R08_BILLER: PERMISSION_CODES,
+  R01_PHYSICIAN: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R02_NURSE: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R03_PHARMACIST: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R04_TECHNICIAN: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R05_ALLIED_HEALTH_PROFESSIONAL: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R06_RECEPTIONIST: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R07_SCHEDULER: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R08_BILLER: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  // R09 Clinic Administrator is the SOLE holder of the
+  // `clinic_admin_overview:view` permission. The Clinic Admin
+  // Overview surface at `/clinic-admin` is the canonical
+  // application route for this role (per DESIGN_BIBLE.md §17.1).
   R09_ADMINISTRATOR: PERMISSION_CODES,
-  R10_COMPLIANCE_OFFICER: PERMISSION_CODES,
-  R11_HR_MANAGER: PERMISSION_CODES,
-  R12_EXECUTIVE: PERMISSION_CODES,
-  R13_SYSTEM_ADMINISTRATOR: PERMISSION_CODES,
+  R10_COMPLIANCE_OFFICER: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R11_HR_MANAGER: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  R12_EXECUTIVE: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
+  // R13 System Administrator (Platform Super Admin) is explicitly
+  // NOT granted `clinic_admin_overview:view`. R13 has a different
+  // product surface (Platform Super Admin Overview, DESIGN_BIBLE.md
+  // §15/§16). Allowing R13 to view the Clinic Admin Overview would
+  // conflate two distinct surfaces and violate Phase 7 item 6 of
+  // the live-data task specification.
+  R13_SYSTEM_ADMINISTRATOR: PERMISSION_CODES.filter(
+    (p) => p !== 'clinic_admin_overview:view',
+  ),
   // R14 Integration Account is denied the interactive workspace
   // context permissions. The integration account is non-human and
   // must not use browser workspace-selection endpoints. A principal

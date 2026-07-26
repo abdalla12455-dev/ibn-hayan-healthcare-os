@@ -40,6 +40,19 @@
  * Role Preview audit emission fails inside its surrounding Prisma
  * transaction, which (per the `emitOrFail` atomicity contract)
  * rolls back the session creation and surfaces as an HTTP 500.
+ *
+ * `clinic_admin` is the category for Clinic Administrator surface
+ * audit events (per DESIGN_BIBLE.md §12/§13). It is inferred by
+ * `inferCategoryFromAction` for any action whose prefix is
+ * `clinic_admin.` (e.g. `clinic_admin.overview.viewed`). The
+ * category is added in the Clinic Admin Overview live-data batch
+ * alongside the `/api/v1/clinic-admin/overview` endpoint. The
+ * audit event carries only non-sensitive metadata: the endpoint
+ * path, the tenant scope, and the actor identity. It does NOT
+ * carry dashboard values, region availability declarations, or
+ * display names (per the live-data task specification Phase 7
+ * item 12: "Audit events do not expose sensitive dashboard
+ * values").
  */
 export type AuditEventCategory =
   | 'security'
@@ -49,7 +62,8 @@ export type AuditEventCategory =
   | 'facility_context'
   | 'rbac'
   | 'audit'
-  | 'role_preview';
+  | 'role_preview'
+  | 'clinic_admin';
 
 /**
  * The complete list of audit event categories implemented in this
@@ -65,6 +79,7 @@ export const AUDIT_EVENT_CATEGORIES: readonly AuditEventCategory[] = [
   'rbac',
   'audit',
   'role_preview',
+  'clinic_admin',
 ] as const;
 
 /**

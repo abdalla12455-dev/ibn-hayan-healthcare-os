@@ -202,11 +202,17 @@ describe('authorization role catalogue', () => {
 });
 
 describe('authorization permission catalogue', () => {
-  it('exposes the seven current context permissions (ADR-015)', () => {
+  it('exposes the seven current context permissions plus the Clinic Admin Overview permission', () => {
     // Per ADR-015, the context permissions are split into per-level
     // codes: context:view, context:select, context:clear,
     // context:select_organisation, context:clear_organisation,
     // context:select_facility, context:clear_facility.
+    //
+    // The Clinic Admin Overview live-data batch adds the
+    // `clinic_admin_overview:view` permission, granted ONLY to
+    // R09_ADMINISTRATOR. The permission is the read-only
+    // authorisation gate for `/api/v1/clinic-admin/overview`
+    // (per DESIGN_BIBLE.md §12/§13).
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
@@ -215,6 +221,7 @@ describe('authorization permission catalogue', () => {
       'context:clear_organisation',
       'context:select_facility',
       'context:clear_facility',
+      'clinic_admin_overview:view',
     ]);
   });
 
@@ -226,6 +233,7 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('context:clear_organisation')).toBe(true);
     expect(isPermissionCode('context:select_facility')).toBe(true);
     expect(isPermissionCode('context:clear_facility')).toBe(true);
+    expect(isPermissionCode('clinic_admin_overview:view')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -242,14 +250,24 @@ describe('authorization role-permission matrix', () => {
     }
   });
 
-  it('R01 through R13 receive all three current context permissions', () => {
+  it('R01 through R13 receive all seven context permissions', () => {
+    // The context permissions are unchanged by the Clinic Admin
+    // Overview live-data batch: every human role (R01 through R13)
+    // still receives all seven context permissions. The new
+    // `clinic_admin_overview:view` permission is NOT granted to
+    // every human role — only to R09.
     const humanRoles = PLATFORM_ROLE_CODES.filter(
       (code) => code !== 'R14_INTEGRATION_ACCOUNT',
     );
     expect(humanRoles).toHaveLength(13);
+    const contextPermissions = PERMISSION_CODES.filter(
+      (p) => p !== 'clinic_admin_overview:view',
+    );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
-      expect(permissions).toEqual(PERMISSION_CODES);
+      for (const cp of contextPermissions) {
+        expect(permissions).toContain(cp);
+      }
     }
   });
 
@@ -257,13 +275,81 @@ describe('authorization role-permission matrix', () => {
     expect(ROLE_PERMISSION_MATRIX.R14_INTEGRATION_ACCOUNT).toEqual([]);
   });
 
+  it('R09 Clinic Administrator is the SOLE holder of clinic_admin_overview:view', () => {
+    // Per the live-data task specification Phase 7 item 6, "A
+    // Platform Super Admin is not silently treated as a Clinic
+    // Administrator." This is the structural enforcement point:
+    // R09_ADMINISTRATOR is the ONLY role whose matrix entry
+    // includes `clinic_admin_overview:view`.
+    for (const code of PLATFORM_ROLE_CODES) {
+      const permissions = ROLE_PERMISSION_MATRIX[code];
+      if (code === 'R09_ADMINISTRATOR') {
+        expect(permissions).toContain('clinic_admin_overview:view');
+      } else {
+        expect(permissions).not.toContain('clinic_admin_overview:view');
+      }
+    }
+  });
+
+  it('R13 System Administrator (Platform Super Admin) does NOT receive clinic_admin_overview:view', () => {
+    // Explicit negative test for Phase 7 item 6. R13 holds a
+    // different surface (Platform Super Admin Overview,
+    // DESIGN_BIBLE.md §15/§16) and must NOT be silently treated
+    // as a Clinic Administrator.
+    expect(ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR).not.toContain(
+      'clinic_admin_overview:view',
+    );
+  });
+
+  it('rolesGrantPermission returns true for R09 + clinic_admin_overview:view', () => {
+    expect(
+      rolesGrantPermission(['R09_ADMINISTRATOR'], 'clinic_admin_overview:view'),
+    ).toBe(true);
+  });
+
+  it('rolesGrantPermission returns false for R13 + clinic_admin_overview:view', () => {
+    expect(
+      rolesGrantPermission(
+        ['R13_SYSTEM_ADMINISTRATOR'],
+        'clinic_admin_overview:view',
+      ),
+    ).toBe(false);
+  });
+
+  it('rolesGrantPermission returns false for any non-R09 role + clinic_admin_overview:view', () => {
+    const nonR09Roles = PLATFORM_ROLE_CODES.filter(
+      (code) => code !== 'R09_ADMINISTRATOR',
+    );
+    for (const code of nonR09Roles) {
+      expect(
+        rolesGrantPermission([code], 'clinic_admin_overview:view'),
+      ).toBe(false);
+    }
+  });
+
+  it('rolesGrantPermission returns true for R09 + R13 + clinic_admin_overview:view (R09 grants, R13 does not revoke)', () => {
+    // Per PRODUCT_BIBLE.md Section 20.3, when a principal holds
+    // multiple roles, allowed permissions accumulate (set union).
+    // A principal holding both R09 and R13 has the union of both
+    // roles' permissions, which includes `clinic_admin_overview:view`
+    // (from R09). R13's denial of the permission does NOT revoke
+    // R09's grant.
+    expect(
+      rolesGrantPermission(
+        ['R09_ADMINISTRATOR', 'R13_SYSTEM_ADMINISTRATOR'],
+        'clinic_admin_overview:view',
+      ),
+    ).toBe(true);
+  });
+
   it('permissionsForRole returns the matrix entry for a known role', () => {
     expect(permissionsForRole('R01_PHYSICIAN')).toEqual(
-      PERMISSION_CODES,
+      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
     );
     expect(permissionsForRole('R13_SYSTEM_ADMINISTRATOR')).toEqual(
-      PERMISSION_CODES,
+      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
     );
+    expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(PERMISSION_CODES);
   });
 
   it('permissionsForRole returns an empty array for an unknown role', () => {
@@ -272,12 +358,10 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('permissionsForRoles accumulates permissions across multiple roles (union)', () => {
-    // Two roles that both grant all seven context permissions produce
-    // a union of seven permissions. Per ADR-015, the context
-    // permissions are split into per-level codes: context:view,
-    // context:select, context:clear, context:select_organisation,
-    // context:clear_organisation, context:select_facility,
-    // context:clear_facility.
+    // Two roles that both grant all seven context permissions
+    // (R01 and R13) produce a union of seven context permissions.
+    // Neither role grants `clinic_admin_overview:view`, so the
+    // union does not include it.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
@@ -290,6 +374,7 @@ describe('authorization role-permission matrix', () => {
     expect(union.has('context:clear_organisation')).toBe(true);
     expect(union.has('context:select_facility')).toBe(true);
     expect(union.has('context:clear_facility')).toBe(true);
+    expect(union.has('clinic_admin_overview:view')).toBe(false);
   });
 
   it('permissionsForRoles returns an empty set for a roleless membership', () => {

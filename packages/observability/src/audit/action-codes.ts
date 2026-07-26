@@ -223,6 +223,36 @@ export type RolePreviewActionCode =
   (typeof ROLE_PREVIEW_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Clinic Admin (Clinic Administrator Overview — live-data batch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clinic Admin action codes.
+ *
+ * Emitted by the clinic-admin module
+ * (`apps/api/src/modules/clinic-admin/`) for the Clinic
+ * Administrator Overview surface at
+ * `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12 Arabic
+ * RTL and §13 English LTR).
+ *
+ * The `clinic_admin.overview.viewed` action code is emitted on every
+ * successful overview response. The audit event is direct (non-
+ * transactional) because viewing the overview is not a state
+ * mutation. The audit event carries only non-sensitive metadata:
+ * the endpoint path (`clinic_admin_overview_view`), the tenant
+ * scope, and the actor identity. Per the live-data task
+ * specification Phase 7 item 12, the audit event does NOT expose
+ * dashboard values, region availability declarations, or display
+ * names.
+ */
+export const CLINIC_ADMIN_ACTION_CODES = [
+  'clinic_admin.overview.viewed',
+] as const;
+
+export type ClinicAdminActionCode =
+  (typeof CLINIC_ADMIN_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -242,6 +272,7 @@ export const AUDIT_ACTION_CODES = [
   ...RBAC_ACTION_CODES,
   ...AUDIT_SYSTEM_ACTION_CODES,
   ...ROLE_PREVIEW_ACTION_CODES,
+  ...CLINIC_ADMIN_ACTION_CODES,
 ] as const;
 
 /**
@@ -300,6 +331,9 @@ export function inferCategoryFromAction(
   }
   if (action.startsWith('role_preview.')) {
     return 'role_preview';
+  }
+  if (action.startsWith('clinic_admin.')) {
+    return 'clinic_admin';
   }
   return null;
 }

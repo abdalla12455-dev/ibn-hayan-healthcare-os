@@ -18,3 +18,7 @@ export {
   endPreviewRole,
   type RolePreviewClientResult,
 } from './role-preview/index';
+export {
+  getClinicAdminOverview,
+  type ClinicAdminOverviewClientResult,
+} from './clinic-admin/index';

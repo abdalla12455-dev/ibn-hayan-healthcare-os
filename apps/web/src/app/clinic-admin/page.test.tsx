@@ -64,6 +64,12 @@ vi.mock('@/lib/api/context', () => ({
   getContext: (...args: unknown[]) => mockGetContext(...args),
 }));
 
+const mockGetClinicAdminOverview = vi.fn();
+vi.mock('@/lib/api/clinic-admin', () => ({
+  getClinicAdminOverview: (...args: unknown[]) =>
+    mockGetClinicAdminOverview(...args),
+}));
+
 const MEMBERSHIP_ID = '11111111-1111-1111-1111-111111111111';
 const TENANT_ID = '22222222-2222-2222-2222-222222222222';
 const ORG_ID = '33333333-3333-3333-3333-333333333333';
@@ -140,6 +146,31 @@ beforeEach(() => {
   mockGetCsrfToken.mockResolvedValue({
     ok: true,
     data: { token: 'csrf-token-value' },
+  });
+  mockGetClinicAdminOverview.mockResolvedValue({
+    ok: true,
+    data: {
+      activeContext: {
+        tenantDisplayName: 'Tenant Alpha',
+        organisationDisplayName: 'Organisation Alpha',
+        facilityDisplayName: 'Facility Alpha',
+      },
+      administrator: {
+        displayName: 'Operator Alpha',
+      },
+      regions: [
+        { key: 'appointment_actions', availability: 'navigational_only' },
+        { key: 'financial_snapshot', availability: 'not_supported' },
+        { key: 'todays_appointments', availability: 'not_supported' },
+        { key: 'operational_alerts', availability: 'not_supported' },
+        { key: 'inventory_alerts', availability: 'not_supported' },
+        { key: 'doctors_on_duty', availability: 'not_supported' },
+        { key: 'waiting_room_operations', availability: 'not_supported' },
+        { key: 'staff_attendance_summary', availability: 'not_supported' },
+        { key: 'quick_actions', availability: 'navigational_only' },
+      ],
+      generatedAt: '2026-07-26T10:00:00.000Z',
+    },
   });
 });
 
