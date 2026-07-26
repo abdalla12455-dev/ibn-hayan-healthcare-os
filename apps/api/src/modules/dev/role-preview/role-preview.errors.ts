@@ -2,6 +2,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 
 /**
@@ -52,9 +53,22 @@ export function rolePreviewDisabled(): NotFoundException {
 
 /**
  * Return a 400 for an unknown role code at the select endpoint.
+ *
+ * Per HTTP semantics and the Role Preview contract, an unknown role
+ * code is a client-side request error (the caller supplied a value
+ * that does not match any canonical role code). The correct status
+ * is 400 Bad Request, NOT 403 Forbidden. A 403 would imply the
+ * caller is authenticated but not authorised to perform the
+ * operation; a 400 correctly communicates that the request itself
+ * is malformed.
+ *
+ * The previous implementation incorrectly used `ForbiddenException`
+ * (403). The integration test `15. Unknown role fails (400)`
+ * catches this contract violation. This helper now returns
+ * `BadRequestException` (400) to match the documented contract.
  */
-export function rolePreviewRoleUnknown(): ForbiddenException {
-  return new ForbiddenException({
+export function rolePreviewRoleUnknown(): BadRequestException {
+  return new BadRequestException({
     error: {
       code: 'ROLE_PREVIEW_ROLE_UNKNOWN',
       message: 'Unknown role code.',
@@ -64,9 +78,20 @@ export function rolePreviewRoleUnknown(): ForbiddenException {
 
 /**
  * Return a 400 for a malformed request body at the select endpoint.
+ *
+ * Per HTTP semantics and the Role Preview contract, a request body
+ * that fails Zod `.strict()` contract validation (unknown keys,
+ * wrong types, missing required fields) is a client-side request
+ * error. The correct status is 400 Bad Request, NOT 403 Forbidden.
+ *
+ * The previous implementation incorrectly used `ForbiddenException`
+ * (403). The integration test
+ * `16. Caller-supplied IDs fail contract validation (400)` catches
+ * this contract violation. This helper now returns
+ * `BadRequestException` (400) to match the documented contract.
  */
-export function rolePreviewRequestInvalid(): ForbiddenException {
-  return new ForbiddenException({
+export function rolePreviewRequestInvalid(): BadRequestException {
+  return new BadRequestException({
     error: {
       code: 'ROLE_PREVIEW_REQUEST_INVALID',
       message: 'Request body is invalid.',

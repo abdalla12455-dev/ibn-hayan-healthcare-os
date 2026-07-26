@@ -2087,3 +2087,62 @@ Replaced every `request(server).get/post(...)` URL in the spec file (23 call sit
 **Recovery:** The branch tip before this edit is `567b1279aeb34521e50505f106b1b239e91520a3` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore packages/observability/src/audit/categories.ts packages/observability/src/audit/audit-event-builder.spec.ts` from the demo-preview worktree (both files are unstaged).
 
 **Immediate next step:** The operator authorises a commit + push of the 2-file fix. After the push, the existing Pull Request's `static-and-build` and `postgresql17-validation` GitHub Actions jobs rerun on the new commit. The PR must NOT be merged until both jobs are green on the new commit.
+
+### Role Preview seven-failure diagnosis and correction (working-tree edit, 2026-07-26)
+
+**Date:** 2026-07-26
+
+**Trigger:** After the previous audit-category correction commit (`e103b7dafc695a9faf40bfb4de4838c3f1b063eb`) was pushed and `static-and-build` went green, the `postgresql17-validation` job still failed with 7 failed / 43 passed. The 7 failures group into three clusters.
+
+**Cluster 1 — Two HTTP contract mismatches (400 expected, 403 received):**
+- Test `15. Unknown role fails (400)` — expected 400, received 403.
+- Test `16. Caller-supplied IDs fail contract validation (400)` — expected 400, received 403.
+
+**Root cause (Cluster 1):** Production-code defect. The error helpers `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` in `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` both returned `ForbiddenException` (HTTP 403) despite their JSDoc comments documenting "Return a 400". The helpers should return `BadRequestException` (HTTP 400) because an unknown role code and a malformed request body are client-side request errors (4xx), not authorisation failures (403). The status-mapping comment at the top of the file was already correct (it said 400 for both), but the implementation used the wrong NestJS exception class. The defect affected both the bootstrap-flow `selectRoleViaBootstrap` path (throws `rolePreviewRoleUnknown()` from the service when `findPreviewIdentity` returns null) and the request-validation path (throws `rolePreviewRequestInvalid()` from the controller when Zod `.strict()` rejects the body).
+
+**Cluster 2 — One over-broad secret-exposure assertion:**
+- Test `28f. No bootstrap secret (nonce, challenge) appears in API responses` — rejects any occurrence of the substring `challenge`, but the bootstrap response legitimately contains the public `challengeId` field.
+
+**Root cause (Cluster 2):** Test-code defect. The assertion `expect(bodyStr).not.toContain('challenge')` rejected any substring match of `challenge`, including the legitimate public field name `challengeId`. The test's own comment acknowledged that "Bootstrap returns challengeId (NOT secret on its own)", but the assertion was not narrowed to match the comment. The public `challengeId` is an opaque identifier that is safe to expose to the client; the raw nonce (set only in the HttpOnly bootstrap cookie) is the actual secret. The over-broad assertion was a test defect, not a production secret leak.
+
+**Cluster 3 — One primary audit-dispatch failure with three cascading audit assertions:**
+- Test `31. Audit projection succeeds (dispatcher delivers the outbox event)` — the outbox row remains pending after `dispatchAll()`.
+- Test `32. Audit database receives the projected record` — no projected audit record appears in the dedicated audit database.
+- Test `33. Audit database record contains no password, token, nonce, challenge, hash, or URL` — fails because no projected record exists.
+- Test `34. Transactional and audit database isolation is proven` — fails because the audit-database projection count is zero.
+
+**Root cause (Cluster 3):** Production-code defect (migration gap). The `audit_events` table in the dedicated audit database has a CHECK constraint `audit_events_category_check` (added in migration `20260719130000_audit_store_foundation`) that allows only five categories: `security`, `authorization`, `tenant_context`, `rbac`, `audit`. The TypeScript `AuditEventCategory` union in `packages/observability/src/audit/categories.ts` was later extended to eight categories (adding `organisation_context`, `facility_context`, `role_preview`), but the database CHECK constraint was never updated to match. The gap was not caught earlier because: (1) the transactional `audit_outbox_events` table stores the `canonical_event_draft` as JSONB and has NO CHECK constraint on the category, so outbox inserts always succeed regardless of category; (2) the ADR-015 integration tests exercise `organisation_context` and `facility_context` through the outbox but the ADR-015 PostgreSQL 17 validation workflow ran against a migration snapshot that predated the dispatcher's full projection path for those categories; (3) the Demo Role Preview bootstrap flow is the first end-to-end path that emits a `role_preview` audit event AND projects it through the dispatcher into `audit_events`. The dispatcher's `auditStore.append()` calls `INSERT INTO audit_events`, which triggers the CHECK constraint violation. The violation is caught by the append repository's try/catch and returned as `transient_failure` with failureCode `audit_store_unavailable`. The dispatcher records the failure with a backoff, leaving the outbox row pending. Tests 31–34 all fail because no projected record appears.
+
+**Defect classification:**
+- Cluster 1: production-code (wrong NestJS exception class).
+- Cluster 2: test-code (over-broad substring assertion).
+- Cluster 3: production-code (migration CHECK constraint out of sync with TypeScript catalogue).
+
+**Correction (working-tree edit, NOT yet committed):**
+1. `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` — imported `BadRequestException` from `@nestjs/common`; changed `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` to return `BadRequestException` (400) instead of `ForbiddenException` (403); updated JSDoc to document the rationale and reference the integration tests that caught the contract violation.
+2. `apps/api/src/modules/dev/role-preview/role-preview.controller.ts` — added `@ApiResponse({ status: 400, ... })` to the `selectRole` endpoint's Swagger metadata; removed "the role code is unknown" from the 403 description (it now belongs to 400).
+3. `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — narrowed the test `28f` assertion: removed the over-broad `expect(bodyStr).not.toContain('challenge')` checks; replaced them with a meaningful secret-value check that extracts the raw nonce from the bootstrap cookie and asserts the nonce value does NOT appear in the response body. The `nonce` and `secret` field-name checks are preserved.
+4. `apps/api/prisma-audit/migrations/20260726000000_audit_category_extend_for_role_preview/migration.sql` — new migration that DROPs the old five-category `audit_events_category_check` and ADDs a new eight-category constraint matching the TypeScript catalogue exactly: `security`, `authorization`, `tenant_context`, `organisation_context`, `facility_context`, `rbac`, `audit`, `role_preview`. The migration is idempotent (`DROP CONSTRAINT IF EXISTS`) and safe (the new allowed set is a superset of the old, so no existing row can violate the new constraint).
+
+**Regression coverage:** Added `apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts` (14 tests) that verify every role-preview error helper returns the correct NestJS exception type and HTTP status code. The two key tests — `rolePreviewRoleUnknown returns a 400 BadRequestException (not 403 ForbiddenException)` and `rolePreviewRequestInvalid returns a 400 BadRequestException (not 403 ForbiddenException)` — would have failed before the fix. The spec also documents the existing 404/401/403 contracts for the other nine helpers and verifies the error-envelope shape (`{ error: { code, message } }`) is consistent across all eleven helpers. These tests run locally without PostgreSQL 17.
+
+**Local validation:** `pnpm run typecheck` PASS (all 7 packages + 2 apps). `pnpm run lint` PASS (all packages; 0 errors, 0 warnings). `pnpm run test` PASS (736 unit tests; 0 regressions; apps/api went from 184 → 198 tests with the 14 new error-helper regression tests). `pnpm run build` PASS (api via SWC, web via Next.js; `/role-preview` registered as a static route). `git diff --check` PASS.
+
+**PostgreSQL 17 CI rerun pending:** The Role Preview PostgreSQL 17 integration suite (`pnpm test:role-preview`, 38 tests) cannot run locally (no PostgreSQL 17 in this environment). The corrected failing operations are validated locally via: (a) the 14 new error-helper unit tests (Cluster 1); (b) the narrowed test-28f assertion logic (Cluster 2 — the assertion now checks the actual nonce value, not the public field name); (c) the new migration SQL is syntactically valid and the category list matches the TypeScript catalogue exactly (Cluster 3 — the migration will be applied by the `setupRolePreviewDatabaseTests()` bootstrap's `prisma migrate deploy` call before the integration tests run). The full integration suite will be exercised by the GitHub Actions `postgresql17-validation` job once the operator pushes this commit. The CI rerun is required before any PR merge.
+
+**Files modified:** 3.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` — `BadRequestException` import; `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` now return 400; JSDoc updated.
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts` — `@ApiResponse` 400 added to `selectRole`; 403 description narrowed.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — test `28f` assertion narrowed to check the actual nonce value, not the public `challengeId` field name.
+
+**Files created:** 2.
+- `apps/api/prisma-audit/migrations/20260726000000_audit_category_extend_for_role_preview/migration.sql` — new audit-store migration extending the `audit_events_category_check` constraint to all eight categories.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts` — 14-test regression spec for role-preview error-helper HTTP status codes.
+
+**Files deleted:** 0. **Dependency/lockfile changes:** NONE. **Production security control changes:** NONE. The fail-closed posture, authentication, session validation, CSRF, Origin validation, bootstrap challenge one-time consumption, replay protection, tenant/organisation/facility isolation, transactional/audit database isolation, cookie security, and audit integrity are all preserved. The only security-relevant change is that two error responses now correctly return 400 instead of 403 — this is a contract fix, not a weakening. The audit CHECK constraint is widened (more categories allowed), never narrowed.
+
+**Latest verified commit before this edit:** `e103b7dafc695a9faf40bfb4de4838c3f1b063eb` on `feat/demo-role-preview-v1` (local and remote identical).
+
+**Recovery:** The branch tip before this edit is `e103b7dafc695a9faf40bfb4de4838c3f1b063eb` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore apps/api/src/modules/dev/role-preview/role-preview.errors.ts apps/api/src/modules/dev/role-preview/role-preview.controller.ts apps/api/test/role-preview/role-preview.role-preview-spec.ts` and delete the two new files from the demo-preview worktree.
+
+**Immediate next step:** The operator authorises a commit + push of the 5-file fix. After the push, the existing Pull Request's `static-and-build` and `postgresql17-validation` GitHub Actions jobs rerun on the new commit. The PR must NOT be merged until both jobs are green on the new commit.

@@ -762,28 +762,60 @@ describe('Security', () => {
   });
 
   it('28f. No bootstrap secret (nonce, challenge) appears in API responses', async () => {
-    // Bootstrap returns challengeId (NOT secret on its own) and
-    // expiresInMs. The nonce is set in the HttpOnly cookie and is
-    // NEVER returned in the JSON body. The challenge value (the
-    // raw nonce) must not appear in any response body.
+    // Bootstrap returns the PUBLIC `challengeId` field (an opaque
+    // identifier that is safe to expose to the client) and
+    // `expiresInMs`. The raw nonce (the actual secret) is set ONLY
+    // in the HttpOnly bootstrap cookie and is NEVER returned in the
+    // JSON body.
+    //
+    // This test verifies that:
+    // 1. The response body does not contain the literal field names
+    //    `nonce` or `secret` (defence-in-depth; these fields are
+    //    never part of the public response contract).
+    // 2. The raw nonce value (extracted from the bootstrap cookie)
+    //    does NOT appear anywhere in the response body. This is the
+    //    meaningful secret-leak assertion.
+    //
+    // The previous version of this test rejected ANY occurrence of
+    // the substring `challenge`, which incorrectly matched the
+    // legitimate public field name `challengeId`. That over-broad
+    // assertion was a test defect, not a production secret leak.
+    // The fix narrows the assertion to the actual secret (the nonce
+    // value) while preserving the `nonce` and `secret` field-name
+    // checks.
     const bootRes = await request(server)
       .get(rolePreviewRoutes.bootstrap)
       .set('Origin', ORIGIN);
     const bodyStr = JSON.stringify(bootRes.body);
+
+    // Field-name checks: the public response contract never includes
+    // fields named `nonce` or `secret`.
     expect(bodyStr).not.toContain('nonce');
     expect(bodyStr).not.toContain('Nonce');
-    expect(bodyStr).not.toContain('challenge');
-    expect(bodyStr).not.toContain('Challenge');
     expect(bodyStr).not.toContain('secret');
     expect(bodyStr).not.toContain('Secret');
 
+    // Secret-value check: extract the raw nonce from the bootstrap
+    // cookie and verify it does NOT appear in the response body.
+    // The cookie value IS the nonce; the body must not echo it.
+    const bootstrapCookieValue = extractCookie(
+      getSetCookieString(bootRes),
+      'ibn_hayan_role_preview_bootstrap',
+    );
+    expect(bootstrapCookieValue.length).toBeGreaterThan(0);
+    expect(bodyStr).not.toContain(bootstrapCookieValue);
+
     // Now perform a select and verify the response body carries no
-    // bootstrap secret either.
+    // bootstrap secret either. The select response is a different
+    // shape (it carries `selectedRole`, `interfacePath`, etc.) and
+    // must not leak the nonce or any other bootstrap secret.
     const { response } = await bootstrapAndSelect('R09_ADMINISTRATOR');
     const selectBodyStr = JSON.stringify(response.body);
     expect(selectBodyStr).not.toContain('nonce');
-    expect(selectBodyStr).not.toContain('challenge');
     expect(selectBodyStr).not.toContain('secret');
+    // The nonce from the bootstrap cookie must not appear in the
+    // select response either.
+    expect(selectBodyStr).not.toContain(bootstrapCookieValue);
   });
 });
 

@@ -371,6 +371,11 @@ export class RolePreviewController {
     description: 'Preview session created; the new session cookie is set.',
   })
   @ApiResponse({
+    status: 400,
+    description:
+      'The role code is unknown (ROLE_PREVIEW_ROLE_UNKNOWN), or the request body failed contract validation (ROLE_PREVIEW_REQUEST_INVALID).',
+  })
+  @ApiResponse({
     status: 401,
     description:
       'Session is missing, expired, or revoked (session-bound flow only).',
@@ -378,7 +383,7 @@ export class RolePreviewController {
   @ApiResponse({
     status: 403,
     description:
-      'Origin is disallowed, CSRF is missing/invalid, the bootstrap challenge is expired/replay/invalid, the database-identity gate failed, or the role code is unknown.',
+      'Origin is disallowed, CSRF is missing/invalid, the bootstrap challenge is expired/replay/invalid, or the database-identity gate failed.',
   })
   @ApiResponse({
     status: 404,
