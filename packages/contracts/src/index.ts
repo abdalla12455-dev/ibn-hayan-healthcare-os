@@ -27,3 +27,4 @@ export * from './health/index.js';
 export * from './auth/index.js';
 export * from './context/index.js';
 export * from './authorization/index.js';
+export * from './role-preview/index.js';

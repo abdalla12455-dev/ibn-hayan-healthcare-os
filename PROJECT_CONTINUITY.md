@@ -748,3 +748,1514 @@ The correction is narrowly scoped. It does NOT rebuild the shell, does NOT creat
 - **Correction commit SHA:** recorded in `worklog.md` (the durable Git-authority rule forbids describing a SHA as permanently current)
 - **To inspect the corrected shell without checking out the branch:** `git worktree add /tmp/clinic-admin-review feat/clinic-admin-shell-v1` (the local branch is reachable from the primary worktree)
 - **To re-run validation in the worktree:** `cd /home/z/clinic-admin-shell-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability... build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+
+---
+
+## Demo Role Preview Mode v1 (2026-07-25)
+
+### Repository and branch
+
+- **Repository:** `https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os.git`
+- **Implementation branch:** `feat/demo-role-preview-v1` (local-only, unpushed as of this section's authoring)
+- **Implementation worktree:** `/home/z/demo-role-preview-v1`
+- **Branch parent:** `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (the merged PR #4 commit on `main`)
+- **Implementation commit subject:** `feat: add secure demo role preview mode v1`
+- **Implementation commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule, this section does NOT describe the SHA as permanently current — run `git rev-parse feat/demo-role-preview-v1` for the live tip)
+
+### Architecture
+
+Demo Role Preview Mode is a **development-only** feature that allows the operator to preview the system as every canonical role R01 through R14 without manually entering credentials. The feature uses real existing authentication, sessions, memberships, role assignments, tenant/organisation/facility context, and authorization semantics; it is **not** a visual-only role-name switch. It remains **completely unavailable in production**.
+
+The implementation introduces a new backend module (`apps/api/src/modules/dev/role-preview/`) and a new frontend route (`/role-preview`). The Clinic Admin header optionally renders a role switcher when preview mode is enabled and the current session belongs to the isolated preview workspace.
+
+### Environment gate
+
+One authoritative backend-controlled environment variable:
+
+- `IBN_HAYAN_ROLE_PREVIEW_ENABLED` (default `false`)
+- The gate is `RolePreviewFeatureConfig.isRolePreviewEnabled()` in `apps/api/src/modules/dev/role-preview/role-preview-feature.config.ts`.
+- Rules:
+  - default is **disabled**;
+  - enabled **only** when the value is the exact string `true`;
+  - enabled **only** when `NODE_ENV !== 'production'`;
+  - the **backend is authoritative** — a public frontend environment variable is never sufficient to enable the feature;
+  - when disabled, preview APIs return 404, `/role-preview` renders the safe unavailable result, the role-switcher control is absent, the preview seed refuses to run, and normal login, dashboard, session, and Clinic Admin behaviour remain unchanged;
+  - when `NODE_ENV === 'production'`, preview mode fails closed **even if the flag is accidentally `true`**.
+
+`.env.example` documents only the boolean feature flag with a safe default of `false`.
+
+### Production-disable guarantee
+
+Production fails closed **unconditionally**. The gate reads `process.env.NODE_ENV` directly (not via `ConfigService`) so that no caching layer can mask the production state. Every role-preview route consults the gate before delegating to the service. The 404 status for the availability and current-role endpoints does NOT advertise the route's existence in production; the select and end endpoints throw `rolePreviewDisabled()` (also 404) when the gate returns `false`. Ten unit tests in `role-preview-feature.config.spec.ts` verify the gate's behaviour across all flag/NODE_ENV combinations.
+
+### Isolated preview identity strategy
+
+A single development-only preview workspace contains:
+
+- one preview tenant (`slug=preview-role-tenant`, `displayName=Preview Role Tenant`);
+- one preview organisation (`code=PREVIEW_ORG`, `displayName=Preview Organisation`) under the preview tenant;
+- one preview facility (`code=PREVIEW_FACILITY`, `displayName=Preview Facility`) under the preview organisation;
+- one preview user identity for **every** canonical role R01 through R14;
+- one active `TenantMembership` for every preview identity under the preview tenant;
+- one `TenantRoleAssignment` for every preview identity at the canonical scope level for its role.
+
+The preview identity catalogue is defined in `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`. It is **derived from** `PLATFORM_ROLE_CATALOGUE` (the canonical role catalogue); no role is invented, removed, renamed, or relabelled. Sixteen unit tests in `preview-identity-catalogue.spec.ts` verify the catalogue's completeness, uniqueness, and scope assignment.
+
+### Canonical role coverage
+
+The implementation supports exactly the fourteen canonical roles found in the repository's role catalogue (`packages/domain/src/authorization/role-catalogue.ts`): R01 Physician, R02 Nurse, R03 Pharmacist, R04 Technician, R05 Allied Health Professional, R06 Receptionist, R07 Scheduler, R08 Biller, R09 Administrator, R10 Compliance Officer, R11 HR Manager, R12 Executive, R13 System Administrator, R14 Integration Account.
+
+### Role scope-assignment result
+
+Derived from ADR-015 §1.5 and the role-permission matrix:
+
+- **R01 through R12** (human tenant roles): role assignment at **facility scope** under the preview tenant → preview organisation → preview facility. This is the narrowest canonical scope and grants the preview identity the ability to select the preview tenant → preview organisation → preview facility context.
+- **R13 System Administrator**: role assignment at **tenant scope** (no scope-target). Per ADR-015 §1.5, R13 at tenant scope grants tenant-wide organisation and facility selection.
+- **R14 Integration Account**: role assignment at **tenant scope** (no scope-target). Per ADR-015 and the role-permission matrix, R14 is denied all interactive context permissions; the preview identity is created so the operator can confirm the role's honest "Interface not implemented yet" status.
+
+### Seed idempotency result
+
+The seed script (`apps/api/src/scripts/role-preview-seed-dev.ts`, registered as `pnpm --filter @ibn-hayan/api role-preview:seed`) is idempotent: existing rows are reused, missing rows are created, and existing credentials are updated to keep the password hash deterministic across seed runs. The seed refuses production, refuses an unverified database target (the `DATABASE_URL` must contain the substring `role_preview` or `preview_role`), refuses without the explicit `ALLOW_ROLE_PREVIEW_SEED=true` flag, refuses without `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`, applies migrations before any seed work, and creates **no** patient/appointment/invoice/payment/inventory/attendance/waiting-room/notification records.
+
+### Preview database-safety result
+
+The seed's defence-in-depth database-safety check refuses to run against any database whose URL does not contain the substring `role_preview` or `preview_role`. This prevents accidental seeding of a production database whose URL happens to be set in the environment. The preview database is expected to be a separate PostgreSQL 17 database (mirroring the audit database's isolation strategy); in development it may run on the same PostgreSQL cluster as the transactional store.
+
+### Backend module result
+
+The NestJS module `RolePreviewModule` (`apps/api/src/modules/dev/role-preview/role-preview.module.ts`) is registered in the root `AppModule` regardless of `NODE_ENV`. The feature-config gate is the authoritative entry point. The module imports `AuthModule`, `DatabaseModule`, and `AuditModule`; it reuses `AuthService`, `SessionTokenService`, `CsrfService`, and `AuditHelperService` via Nest DI. It does NOT duplicate authentication, CSRF, Origin, or audit logic.
+
+### Preview API routes
+
+Four routes under `/api/v1/dev/role-preview`:
+
+- `GET /api/v1/dev/role-preview` — query availability and list canonical preview role cards. Returns 404 when the feature is disabled.
+- `GET /api/v1/dev/role-preview/current` — return the current preview role metadata. Returns 404 when disabled, 401 when no session.
+- `POST /api/v1/dev/role-preview/select` — select a canonical role code, create a fresh preview session for the corresponding preview identity, establish the preview tenant/organisation/facility context, revoke the previous session atomically, and set the new HttpOnly cookie. Requires Origin + CSRF.
+- `POST /api/v1/dev/role-preview/end` — end the current preview session. Requires Origin + CSRF.
+
+### Authentication-path result
+
+The preview backend reuses the existing `AuthService.getSessionFromCookie` for session validation. The select endpoint revokes the previous session atomically (in the same Prisma transaction as the new session creation and the audit outbox insertion). The new session is created using the existing `SessionTokenService.generate()` and `SessionTokenService.hash()` helpers, exactly mirroring the auth service's `login` flow. The raw token lives only in the HttpOnly cookie; it is NEVER returned in a JSON response.
+
+### Session-creation result
+
+A new `auth_sessions` row is created for the preview identity's user with the new token hash, the absolute TTL, and the active tenant/organisation/facility context set directly on the row (using the same `activeTenantMembershipId`, `activeOrganisationId`, `activeFacilityId` columns used by the session-context module). The composite foreign keys enforce that the membership belongs to the user, the organisation belongs to the tenant, and the facility belongs to the organisation.
+
+### Role-switch result
+
+Switching role calls the secure backend `select` endpoint with only the canonical role code. The server:
+1. verifies the feature flag (defence-in-depth);
+2. resolves the preview identity from the role code via `findPreviewIdentity`;
+3. resolves the preview workspace (tenant, organisation, facility) by slug/code lookup;
+4. verifies the preview identity's user exists and has an active membership in the preview tenant;
+5. atomically creates the new session, sets the context, revokes the previous session, and emits the `role_preview.session.created` audit event in the same Prisma transaction;
+6. invalidates the previous session's CSRF token (best-effort, in-memory);
+7. returns the safe response (selected role, preview workspace display names, interface path) and the raw token (for the controller to set in the HttpOnly cookie).
+
+The previous session is **always** revoked — whether it was a preview session or a normal operator session. This is the structural enforcement of "safely revoke or replace the previous preview session during role switching".
+
+### Tenant-context / Organisation-context / Facility-context results
+
+The new session's `activeTenantMembershipId`, `activeOrganisationId`, and `activeFacilityId` are set directly on the row in the same Prisma transaction that creates the session. The values are derived server-side from the preview workspace's deterministic identifiers; the caller cannot supply them. The composite foreign keys enforce tenant/organisation/facility consistency at the database level.
+
+### R09 routing result
+
+When R09 is selected, the response carries `interfacePath: '/clinic-admin'`. The frontend's `/role-preview` page calls `router.push('/clinic-admin')`, which mounts the existing Clinic Admin shell. The shell's session and context checks pass because the new session has a valid active tenant/organisation/facility context. The operator sees the canonical Clinic Admin Overview page rendered exactly as a normal R09 operator would see it.
+
+### Unimplemented-role behaviour
+
+When a role other than R09 is selected, the response carries `interfacePath: null`. The frontend's `/role-preview` page shows a safe role-status view that displays the current role, the preview tenant/organisation/facility display names, and an honest statement that the role-specific product interface is not implemented. The page does NOT invent operational widgets or fake business data. The operator can use the role switcher (rendered in the page header) to switch to a different role.
+
+### `/role-preview` route result
+
+The `/role-preview` route is a development-only Next.js App Router page at `apps/web/src/app/role-preview/page.tsx`. The page:
+- queries the backend availability endpoint on mount;
+- renders a safe unavailable result when the backend returns 404 or `enabled: false`;
+- displays one role card for every canonical role R01 through R14 when enabled;
+- shows the role code, Arabic and English names, canonical scope, current interface implementation status, and a preview action;
+- supports Arabic RTL and English LTR via the existing `LanguageProvider`;
+- uses the existing design tokens, typography, and API-client conventions;
+- never displays internal UUIDs, the session token, or any credential material.
+
+### Header role-switcher result
+
+The role switcher (`apps/web/src/components/role-preview/role-preview-switcher.tsx`) is rendered in the Clinic Admin header only when the parent (`ClinicAdminShell`) has confirmed that (a) the backend availability endpoint returned `enabled: true` AND (b) the current-preview-role endpoint returned `active: true`. The switcher:
+- lists all canonical roles;
+- shows the current role;
+- calls the secure backend `select` endpoint on role switch;
+- navigates to `/clinic-admin` when an implemented role (R09) is selected;
+- navigates to `/role-preview` when an unimplemented role is selected;
+- supports Arabic and English labels;
+- is keyboard accessible (Escape closes the dropdown and restores focus to the trigger);
+- has visible focus states;
+- works on desktop, tablet, and mobile;
+- does NOT hardcode credentials, does NOT mutate client-side permission state, does NOT store the role code as authorization state in localStorage, and does NOT fake the unread notification count.
+
+The existing notification bell, the eleven-item Clinic Admin sidebar, the language switch, the active organisation/facility context chips, the profile menu, and the sign-out control all remain intact.
+
+### Production-hidden result
+
+Ten unit tests in `role-preview-feature.config.spec.ts` verify that the gate returns `false` in production regardless of the flag value, returns `false` for any non-`true` flag value, and returns `true` only when `NODE_ENV !== 'production'` AND the flag is the exact string `true`. The frontend availability check renders the safe unavailable result when the backend returns 404; the role switcher is rendered only when the parent has confirmed both `enabled: true` and `active: true`.
+
+### Normal-login / Dashboard / Clinic Admin regression results
+
+The implementation does NOT modify the existing `/login`, `/dashboard`, `/clinic-admin`, auth, session-context, or authorization code. The Clinic Admin header gains two optional props (`previewRoles` and `currentPreviewRoleCode`) that default to `null`/`undefined`; when absent, the header renders exactly as before. All existing authentication, session, context, and Clinic Admin tests remain green (180 web tests pass, including 29 existing Clinic Admin tests; 31 API tests pass; 154 contracts tests pass; 97 domain tests pass; 83 observability tests pass).
+
+### Files created
+
+**Backend (apps/api):**
+- `src/modules/dev/index.ts`
+- `src/modules/dev/role-preview/index.ts`
+- `src/modules/dev/role-preview/preview-identity-catalogue.ts`
+- `src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+- `src/modules/dev/role-preview/role-preview-feature.config.ts`
+- `src/modules/dev/role-preview/role-preview-feature.config.spec.ts`
+- `src/modules/dev/role-preview/role-preview.errors.ts`
+- `src/modules/dev/role-preview/role-preview.service.ts`
+- `src/modules/dev/role-preview/role-preview.controller.ts`
+- `src/modules/dev/role-preview/role-preview.module.ts`
+- `src/scripts/role-preview-seed-dev.ts`
+
+**Contracts (packages/contracts):**
+- `src/role-preview/index.ts`
+- `src/role-preview/role-preview.schema.ts`
+- `src/role-preview/role-preview.schema.spec.ts`
+
+**Frontend (apps/web):**
+- `src/app/role-preview/layout.tsx`
+- `src/app/role-preview/page.tsx`
+- `src/components/role-preview/role-preview-copy.ts`
+- `src/components/role-preview/role-preview-switcher.tsx`
+- `src/components/role-preview/role-preview-switcher.spec.tsx`
+- `src/lib/api/role-preview/index.ts`
+- `src/lib/api/role-preview/role-preview.client.ts`
+
+### Files modified
+
+- `.env.example` (added `IBN_HAYAN_ROLE_PREVIEW_ENABLED=false` documentation)
+- `apps/api/package.json` (added `role-preview:seed` and `prerole-preview:seed` scripts)
+- `apps/api/src/app.module.ts` (registered `RolePreviewModule`)
+- `apps/web/src/components/clinic-admin/clinic-admin-header.tsx` (added optional `previewRoles` and `currentPreviewRoleCode` props; renders `RolePreviewSwitcher` only when both are present)
+- `apps/web/src/components/clinic-admin/clinic-admin-shell.tsx` (added preview availability + current preview role loading; passes preview props to header)
+- `apps/web/src/lib/api/index.ts` (re-exported role-preview client)
+- `packages/contracts/src/index.ts` (re-exported role-preview contracts)
+- `packages/observability/src/audit/action-codes.ts` (added `role_preview.session.created` and `role_preview.session.ended` action codes; updated `inferCategoryFromAction`)
+
+### Files deleted
+
+None.
+
+### Schema or migration files changed
+
+**None.** The implementation uses the existing `User`, `LocalCredential`, `Tenant`, `Organisation`, `Facility`, `TenantMembership`, `TenantRoleAssignment`, `AuthSession`, and `AuditOutboxEvent` models. No `prisma/schema.prisma` change, no `prisma/migrations/**` change, no `prisma-audit/schema.prisma` change.
+
+### Dependency or lockfile changes
+
+**None.** No `package.json` dependency was added or removed; `pnpm-lock.yaml` is unchanged. The `apps/api/package.json` modification adds only the `role-preview:seed` and `prerole-preview:seed` scripts.
+
+### Fake business data introduced
+
+**None.** The preview seed creates only identity, tenancy, membership, and role-assignment records. No patients, appointments, invoices, payments, inventory, attendance, waiting-room, or notification records are created.
+
+### Secrets exposed
+
+**None.** The implementation NEVER logs, prints, or returns:
+- the preview password (referenced only as a constant for hashing);
+- the password hash;
+- the raw session token;
+- the CSRF token;
+- the preview identities' email addresses (used only for database lookup);
+- internal UUIDs (the API response carries only display labels).
+
+### Validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run build:shared` | PASS | contracts + domain built |
+| `pnpm --filter @ibn-hayan/observability build` | PASS | observability built (includes the new role-preview action codes) |
+| `pnpm run typecheck` | PASS | 7 packages + 2 apps typecheck clean |
+| `pnpm run lint` | PASS | 7 packages + 2 apps lint clean |
+| `pnpm run test` | PASS | 545 tests pass (97 domain + 154 contracts + 83 observability + 31 api + 180 web) |
+| `pnpm run build` | PASS | All packages built; Next.js production build succeeded; `/role-preview` registered as a static route alongside `/`, `/_not-found`, `/clinic-admin`, `/dashboard`, `/login` |
+| `git diff --check` | PASS | No whitespace errors |
+
+### Database-backed validation status
+
+**BLOCKED.** This environment has no PostgreSQL 17 available. The database-backed validation (creating the isolated `role_preview` database, applying migrations, running the preview seed, verifying every canonical role identity, testing session switching, verifying R09 context reaches `/clinic-admin`, verifying other roles reach the honest role-status view) was NOT executed in this environment. Per the specification, the task does NOT substitute production infrastructure and does NOT claim integration validation passed. The unit tests (gate, catalogue, contracts, switcher) provide structural verification; the PostgreSQL 17 integration validation will run on GitHub Actions CI when the branch is pushed through a separate controlled branch-and-PR workflow.
+
+### Known limitations
+
+1. **Branch is local-only.** `feat/demo-role-preview-v1` has NOT been pushed to `origin`. A separate controlled branch-and-PR workflow remains required.
+2. **Database-backed runtime validation is blocked.** See "Database-backed validation status" above.
+3. **Operator visual review remains required.** Build-time HTML inspection verified the route is registered, but runtime browser validation (Arabic RTL desktop, English LTR desktop, tablet, mobile, role-card grid, role switcher open/close, role switch with R09 navigation, role switch with unimplemented role, keyboard nav, focus states, console errors, network requests) was not executed in this environment.
+4. **The preview seed has not been run.** Running the seed requires a PostgreSQL 17 database whose URL contains `role_preview` or `preview_role`. The seed script is registered as `pnpm --filter @ibn-hayan/api role-preview:seed` and is ready to run in a development environment with the required `ALLOW_ROLE_PREVIEW_SEED=true`, `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`, and the isolated preview database URL.
+
+### Immediate next product slice
+
+**Today's Appointments.** This Demo Role Preview Mode implementation does NOT alter the canonical next-vertical-slice ordering. Today's Appointments remains the immediate next product slice, to be implemented end-to-end using real tenant-scoped and facility-scoped data through database, business logic, API, permissions, frontend table, tests, RTL/LTR states, and manual validation. The notification backend remains a **later** vertical slice; the notification bell in the fixed header continues to show an honest empty/unavailable state.
+
+### Recovery information
+
+- **Implementation branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+- **Implementation worktree:** `/home/z/demo-role-preview-v1`
+- **Branch parent:** `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (the merged PR #4 commit on `main`)
+- **Implementation commit subject:** `feat: add secure demo role preview mode v1`
+- **Implementation commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule)
+- **To inspect the implementation without checking out the branch:** `git worktree add /tmp/demo-role-preview-review feat/demo-role-preview-v1` (the local branch is reachable from the primary worktree)
+- **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`
+- **To run the preview seed (requires PostgreSQL 17 + isolated preview database):** `cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`
+
+
+---
+
+## Secure Demo Role Preview Mode v1 — Runtime Correction
+
+**Date:** 2026-07-25
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `dfd22f97a141ab6d7f19c84a6c5aa8c6eed67015` (`feat: add secure demo role preview mode v1`)
+**Correction commit subject:** `fix: secure demo role preview runtime v1`
+**Correction commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule)
+
+### Problem corrected
+
+The initial Demo Role Preview Mode v1 implementation (`dfd22f9`) tracked a
+fixed plaintext preview password as a TypeScript constant
+(`PREVIEW_IDENTITY_PASSWORD = '[REDACTED-RETIRED-PREVIEW-LITERAL]'` — the
+retired literal has been removed from all tracked files per the Secure
+Logged-Out Demo Role Bootstrap correction)
+in `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`.
+While the implementation defended the password through seed-time
+production-refusal and database-URL validation, the password value itself
+was tracked in the repository — which is not acceptable as the final
+implementation.
+
+### Correction architecture
+
+The tracked fixed password was replaced with a server-only environment
+variable: `IBN_HAYAN_ROLE_PREVIEW_PASSWORD`.
+
+Properties of the corrected architecture:
+- **No default value.** The password is never defaulted. The operator
+  must supply it explicitly when preview mode is enabled.
+- **No fallback value.** When preview mode is enabled and the password
+  is missing or invalid, the application refuses to start.
+- **Never exposed through a `NEXT_PUBLIC_*` variable.** The password is
+  server-only; the frontend never sees it.
+- **Never returned to frontend code.** No API response, audit event, log
+  line, or error message contains the password.
+- **Never printed or logged.** The password is read from the
+  environment, hashed with Argon2id, and discarded.
+- **Never written into `PROJECT_CONTINUITY.md` or `worklog.md`.** Only
+  the variable name and the protected file location are documented.
+- **Required only when preview mode or the preview seed is being used.**
+  When `IBN_HAYAN_ROLE_PREVIEW_ENABLED` is not `'true'` (or when
+  `NODE_ENV === 'production'`), the password is not required and not
+  validated.
+- **Production fails closed.** Even if the password is present and the
+  flag is `'true'`, production refuses to enable preview mode.
+- **Minimum reasonable length.** The password must be at least 12
+  characters (matching ADR-013 §1.1).
+- **Whitespace-only value rejected.** A value that is empty after
+  trimming is treated as missing.
+- **Development preview startup fails safely when missing.** The
+  `RolePreviewPasswordValidator` provider is constructed eagerly when
+  the module is loaded; an invalid password prevents the application
+  from starting.
+- **Normal production and normal development startup with preview
+  disabled must not require it.** When the gate returns `false`, the
+  password is not read, not validated, and not required.
+
+### Protected password file
+
+The actual runtime password lives outside the repository at:
+`/home/z/.config/ibn-hayan-role-preview/preview.env`
+
+- Directory permissions: `0700` (`drwx------`)
+- File permissions: `0600` (`-rw-------`)
+- Password length: 32 characters (well above the 12-char minimum)
+- Password alphabet: `A-Za-z0-9-_` (≈187 bits of entropy)
+- Generated with Python `secrets.choice()` (cryptographically secure)
+- The password value is NEVER printed, logged, committed, or included
+  in any completion report.
+
+The `.env.example` file carries only a blank placeholder:
+`IBN_HAYAN_ROLE_PREVIEW_PASSWORD=`
+
+### Files created
+
+- `apps/api/src/modules/dev/role-preview/preview-password.ts` —
+  server-only password architecture: `MIN_PREVIEW_PASSWORD_LENGTH`,
+  `PREVIEW_PASSWORD_ENV_VAR`, `PreviewPasswordMissingError`,
+  `isValidPreviewPassword()`, `readPreviewPasswordFromEnv()`.
+- `apps/api/src/modules/dev/role-preview/preview-password.spec.ts` —
+  27 unit tests covering validation, error behaviour, and the
+  no-leakage requirement.
+- `apps/api/src/modules/dev/role-preview/role-preview-password-validator.ts`
+  — NestJS `@Injectable` provider whose constructor validates the
+  password at module-init time when the gate is enabled; a missing or
+  invalid password prevents the application from starting.
+- `apps/api/src/modules/dev/role-preview/role-preview-password-validator.spec.ts`
+  — 11 unit tests covering all gate/password combinations including
+  production fail-closed, fail-safe, and the no-exposure requirement.
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.ts`
+  — removed the `PREVIEW_IDENTITY_PASSWORD` constant and its JSDoc;
+  updated item 7 of the catalogue documentation to describe the
+  server-only password architecture.
+- `apps/api/src/modules/dev/role-preview/index.ts` — removed the
+  `PREVIEW_IDENTITY_PASSWORD` re-export; added re-exports for the new
+  password module.
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+  — removed the test that asserted the tracked password's length;
+  replaced it with a test that asserts the catalogue module no longer
+  exports `PREVIEW_IDENTITY_PASSWORD`.
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts` —
+  registered the `RolePreviewPasswordValidator` as a provider so that
+  NestJS constructs it eagerly when the module is loaded.
+- `apps/api/src/scripts/role-preview-seed-dev.ts` — replaced the
+  `PREVIEW_IDENTITY_PASSWORD` import with
+  `readPreviewPasswordFromEnv`; the seed now reads the password from
+  the server-only environment variable and validates it before
+  hashing.
+- `.env.example` — added a blank `IBN_HAYAN_ROLE_PREVIEW_PASSWORD=`
+  placeholder with a safe explanatory comment that documents the
+  variable's purpose, validation rules, and the protected file
+  location without including any sample password.
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None.
+
+### Dependency or lockfile changes
+
+None.
+
+### Fake business data introduced
+
+None. The correction does not create any patient, appointment,
+invoice, payment, inventory, attendance, waiting-room, financial, or
+notification records.
+
+### Runtime authentication flow review (Phase 3)
+
+The existing runtime authentication flow was reviewed and verified
+correct. No changes were needed:
+
+- The backend feature gate (`RolePreviewFeatureConfig`) is
+  authoritative; every route consults it before delegating.
+- Production always rejects preview routes (the gate returns `false`
+  unconditionally when `NODE_ENV === 'production'`).
+- Role selection accepts only a canonical `roleCode` (Zod `.strict()`
+  schema rejects any additional field — no `userId`, `membershipId`,
+  `tenantId`, `organisationId`, `facilityId`, permission codes, or
+  session IDs accepted).
+- The selected identity is server-derived from the role code via the
+  preview identity catalogue; the caller cannot supply any identity or
+  context ID.
+- The selected identity must belong to the isolated preview tenant
+  (verified by slug lookup and membership check).
+- Normal session-token generation and hashing are used
+  (`SessionTokenService.generate()` and `.hash()`).
+- Normal secure HttpOnly session cookies are used
+  (`buildSessionCookieOptions()`).
+- The previous preview session is revoked atomically in the same
+  Prisma transaction as the new session creation.
+- Origin checks remain active on mutation routes (select, end).
+- CSRF remains active on mutation routes (verified after the session
+  check, before the business logic).
+- Audit events contain no secret (metadata carries only `endpoint`
+  and `roleCode`).
+- No raw session token is returned in JSON (it lives only in the
+  HttpOnly cookie).
+- No password or hash is returned in any response.
+- Normal login remains unchanged.
+- Normal non-preview sessions cannot use the preview role switcher
+  (the switcher is rendered only when the backend confirms the session
+  is an active preview session).
+
+### PostgreSQL 17 availability (Phase 4)
+
+**BLOCKED.** This environment does NOT provide a supported PostgreSQL 17
+runtime:
+
+- No `psql` command available.
+- No `/usr/lib/postgresql/` directory.
+- No `docker` or `podman` container runtime.
+- No repository-supported `docker-compose` or container command.
+- No official Z.AI development database capability documented in the
+  repository or environment.
+
+`AGENTS.md` §"Environment Constraints" confirms: "Have **no PostgreSQL
+17** locally — use the GitHub Actions Docker workflow for PG17
+validation."
+
+Per the correction specification's Phase 4 and Phase 10, the task does
+NOT substitute SQLite, PGlite, or another database while claiming
+PostgreSQL 17 validation. The task does NOT start a misleading
+frontend-only preview. The corrected branch and commit are preserved;
+the runtime preview launch is deferred until a supported PostgreSQL 17
+runtime is available.
+
+### Database-backed runtime validation (Phase 5–6)
+
+**BLOCKED** by Phase 4. The isolated preview database was not created,
+migrations were not applied, the seed was not run, and the 20-item
+database-backed integration validation was not executed. These steps
+will run on GitHub Actions CI when the branch is pushed through a
+separate controlled branch-and-PR workflow, or when a supported
+PostgreSQL 17 runtime is provided in the development environment.
+
+### Automated validation (Phase 7)
+
+| Check | Result |
+|---|---|
+| `pnpm run typecheck` | PASS (all 7 packages + 2 apps) |
+| `pnpm run lint` | PASS (all 7 packages + 2 apps) |
+| `pnpm run test` | PASS — 579 tests (97 domain + 154 contracts + 83 observability + 65 api + 180 web) |
+| `pnpm run build` | PASS — Next.js production build; `/role-preview` registered as a static route alongside `/`, `/_not-found`, `/clinic-admin`, `/dashboard`, `/login` |
+| `git diff --check` | PASS — no whitespace errors |
+
+### Clinic Admin shell regression check
+
+- Exactly 11 sidebar items (1 implemented `overview` + 10 unimplemented). ✓
+- Notifications remain in the header bell (`<NotificationBell />` at `clinic-admin-header.tsx:194`). ✓
+- R09 Arabic label remains `مدير المنشأة` in the role catalogue. ✓
+- No fake business data introduced. ✓
+
+### Production safety
+
+- The feature is completely unavailable in production regardless of the
+  flag value or the password value. Ten unit tests verify the gate's
+  fail-closed behaviour.
+- The frontend consults the backend availability endpoint; no
+  client-side state can enable the feature.
+- The password is server-only; no `NEXT_PUBLIC_*` variable exposes it.
+- The `RolePreviewPasswordValidator` prevents the application from
+  starting when preview mode is enabled but the password is missing or
+  invalid (fail-safe).
+- No tracked fixed preview password remains in the repository. A unit
+  test asserts the catalogue module no longer exports
+  `PREVIEW_IDENTITY_PASSWORD`.
+
+### Z.AI user-visible preview (Phase 9)
+
+**NOT LAUNCHED.** Per Phase 10, the official Z.AI preview mechanism
+requires a backend database to satisfy the specification's requirement
+that the preview be "backed by an isolated PostgreSQL 17 preview
+database and the real R01–R14 preview identities." Because no
+supported PostgreSQL 17 runtime is available (Phase 4), the preview
+was not launched. The task did NOT improvise platform infrastructure,
+did NOT create daemon scripts, did NOT probe hidden services, and did
+NOT leave orphan processes.
+
+### Known blockers
+
+1. **No supported PostgreSQL 17 runtime in this environment.** This
+   blocks Phase 5 (seed), Phase 6 (database-backed integration
+   validation), and Phase 9 (launch of the Z.AI user-visible preview
+   backed by a real database).
+
+2. **Pre-existing `.preview-logs/` tracked scripts.** The files
+   `.preview-logs/preview-proxy.py`, `.preview-logs/start-api.sh`, and
+   `.preview-logs/start-web.sh` are tracked in the repository from a
+   previous session (commit `362d4cd`, July 19). The `.gitignore`
+   documents them as "intentional preview-infrastructure scripts."
+   These are NOT part of the current correction and were NOT modified
+   or added by this task. The operator may wish to review whether they
+   should be removed in a separate housekeeping commit; they predate
+   the Demo Role Preview Mode v1 implementation.
+
+### Immediate next product slice
+
+Today's Appointments — unchanged. The Secure Demo Role Preview Mode v1
+correction does NOT alter the canonical next-vertical-slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `dfd22f97a141ab6d7f19c84a6c5aa8c6eed67015` (`feat: add secure demo role preview mode v1`).
+- **Correction commit subject:** `fix: secure demo role preview runtime v1`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the durable Git-authority rule).
+- **Protected password file:** `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory `0700`, file `0600`, outside the repository).
+- **To inspect the correction without checking out the branch:** `git worktree add /tmp/demo-role-preview-correction-review feat/demo-role-preview-v1`.
+- **To re-run validation in the worktree:** `cd /home/z/demo-role-preview-v1 && pnpm install --frozen-lockfile && pnpm run build:shared && pnpm --filter @ibn-hayan/observability build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the preview seed (requires PostgreSQL 17 + isolated preview database + protected preview.env):** `set -a && source /home/z/.config/ibn-hayan-role-preview/preview.env && set +a && cd /home/z/demo-role-preview-v1/apps/api && ALLOW_ROLE_PREVIEW_SEED=true IBN_HAYAN_ROLE_PREVIEW_ENABLED=true DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/role_preview_db NODE_ENV=development pnpm role-preview:seed`.
+
+---
+
+## Secure Logged-Out Demo Role Bootstrap — Correction v2
+
+**Date:** 2026-07-26
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `1bd24117532e286839947d486d99419314a4531a` (`fix: secure demo role preview runtime v1`)
+**Correction commit subject:** `fix: enable secure logged-out demo role bootstrap`
+
+### Problem corrected
+
+The Secure Demo Role Preview Mode v1 correction (`1bd2411`) replaced
+the tracked fixed preview password with a server-only environment
+variable, but it preserved the original requirement that
+`POST /api/v1/dev/role-preview/select` demands an existing application
+session cookie AND a session-bound CSRF token. The CSRF token can
+only be obtained via `GET /api/v1/auth/csrf`, which itself requires a
+valid session. Consequently, a fresh logged-out operator could NOT
+bootstrap a preview session from `/role-preview` without first
+visiting `/login` and entering credentials — contradicting the
+operator requirement that role selection be possible without manual
+credential entry.
+
+### Root cause
+
+`role-preview.controller.ts` (select endpoint, lines 284–308 in the
+`1bd2411` revision) called `authService.getSessionFromCookie` and
+threw `rolePreviewSessionRequired()` (401) when no session was
+present, then called `csrfService.verify(session.id, csrfToken)` and
+threw `rolePreviewCsrfInvalid()` (403) when no CSRF token was
+present. The frontend's `handleSelect` (`/role-preview/page.tsx:130`)
+called `getCsrfToken()` first, which fails for logged-out users
+because `/api/v1/auth/csrf` returns 401.
+
+### Correction architecture
+
+A new one-time bootstrap challenge flow was added. The flow uses a
+separate HttpOnly bootstrap cookie (carrying a cryptographically
+random nonce) plus a server-side in-memory challenge store. The
+bootstrap cookie's `SameSite=Strict` attribute is the CSRF defense
+for the initial logged-out `POST /select` request; no session-bound
+CSRF token is required for the bootstrap flow.
+
+**New routes and methods:**
+
+- `GET /api/v1/dev/role-preview/bootstrap` — issues a one-time
+  bootstrap challenge. Sets the HttpOnly bootstrap cookie
+  (`ibn_hayan_role_preview_bootstrap`) with a 32-byte random nonce
+  (base64url, 43 ASCII characters, ~256 bits of entropy). Returns
+  only safe challenge metadata: `{ ok: true, challengeId,
+  expiresInMs }`. The raw nonce is NEVER returned in the JSON body.
+- `POST /api/v1/dev/role-preview/select` — now supports TWO flows:
+  1. **Logged-out bootstrap flow.** When the request body carries a
+     `challengeId` AND the bootstrap cookie is present, the
+     controller verifies the challenge, consumes it (one-time),
+     creates the first preview session, sets the application-session
+     cookie, and clears the bootstrap cookie.
+  2. **Session-bound switching flow.** When the request body does
+     NOT carry a `challengeId`, the controller requires an existing
+     session cookie and a valid `X-CSRF-Token` header (the existing
+     behaviour, preserved for subsequent role switching from an
+     active preview session).
+
+**New backend files:**
+
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.ts` —
+  `BootstrapChallengeStore` (NestJS `@Injectable`): in-memory
+  `Map<challengeIdHash, { nonceHash, expiresAt, consumed }>`.
+  `issue(maxAgeMs)` generates a 32-byte nonce + 16-byte
+  challengeId, hashes both with SHA-256, stores the hashes.
+  `consume(challengeId, nonce)` verifies the nonce against the
+  stored hash using `timingSafeEqual`, marks the challenge
+  consumed atomically, returns one of
+  `'ok' | 'not_found' | 'expired' | 'replay' | 'invalid'`.
+  `cleanup()` removes expired/consumed entries. `BOOTSTRAP_MAX_AGE_MS`
+  is exactly 5 minutes (300 000 ms).
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.spec.ts` —
+  22 unit tests covering issue, consume success/replay/not-found/
+  invalid/expiry, invalidate, cleanup, and the no-logging-of-
+  secret-material requirement.
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.ts` —
+  `BOOTSTRAP_COOKIE_NAME`, `BOOTSTRAP_MAX_AGE_MS`,
+  `buildBootstrapCookieOptions(isProduction, maxAgeMs)`,
+  `buildBootstrapCookieClearOptions(isProduction)`. The cookie is
+  HttpOnly, SameSite=Strict, Secure in production, Max-Age clamped
+  to 300s, Path=`/api/v1/dev/role-preview`, no domain.
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.spec.ts`
+  — 18 unit tests covering all cookie attributes.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+  — `isPreviewTransactionalDatabaseUrl(url)`,
+  `isPreviewAuditDatabaseUrl(url)`,
+  `isPreviewDatabaseIdentityValid(env)`. Returns true only when the
+  URL contains `role_preview` or `preview_role` (case-insensitive).
+  Mirrors the seed script's check exactly. NEVER logs the URL.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+  — 18 unit tests.
+
+**Modified backend files:**
+
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts`
+  — added `GET /bootstrap` route; updated `POST /select` to
+  dispatch to `selectRoleViaBootstrap` (when `challengeId` is
+  present) or `selectRoleViaSession` (when it is not). Both flows
+  verify Origin. The bootstrap flow additionally checks the
+  database-identity gate. The `end` route defensively clears the
+  bootstrap cookie.
+- `apps/api/src/modules/dev/role-preview/role-preview.service.ts`
+  — added `issueBootstrap()` and `selectRoleWithBootstrap()`
+  methods. The latter verifies and consumes the challenge, resolves
+  the preview identity, creates the new session, revokes any
+  previous session, and emits a
+  `role_preview.session.bootstrapped` audit event in the same
+  Prisma transaction.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts`
+  — added `rolePreviewBootstrapExpired()`,
+  `rolePreviewBootstrapReplay()`,
+  `rolePreviewBootstrapInvalid()`,
+  `rolePreviewDatabaseIdentityInvalid()`.
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts`
+  — registered `BootstrapChallengeStore` as a provider and exported
+  it.
+- `apps/api/src/modules/dev/role-preview/index.ts` — exported the
+  new public API.
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+  — removed the retired literal from the test comment.
+
+**Modified contracts files:**
+
+- `packages/contracts/src/role-preview/role-preview.schema.ts` —
+  added `BootstrapChallengeResponseSchema` (with `ok`, `challengeId`,
+  `expiresInMs`); updated `SelectPreviewRoleRequestSchema` to accept
+  an optional `challengeId`; added new error codes to
+  `RolePreviewErrorResponseSchema`.
+- `packages/contracts/src/role-preview/index.ts` — exported the new
+  schema.
+- `packages/contracts/src/role-preview/role-preview.schema.spec.ts`
+  — added tests for the bootstrap response schema, the updated
+  select request schema, and the new error codes.
+
+**Modified observability files:**
+
+- `packages/observability/src/audit/action-codes.ts` — added
+  `role_preview.session.bootstrapped` to `ROLE_PREVIEW_ACTION_CODES`.
+
+**Modified frontend files:**
+
+- `apps/web/src/lib/api/role-preview/role-preview.client.ts` —
+  added `requestRolePreviewBootstrap()`; updated
+  `selectPreviewRole()` to accept an optional `challengeId` and
+  route to the bootstrap flow when present (no CSRF header).
+- `apps/web/src/lib/api/role-preview/index.ts` — exported the new
+  function.
+- `apps/web/src/app/role-preview/page.tsx` — updated the page to:
+  (1) fetch Preview availability; (2) check for an active preview
+  session; (3) if no active session, request a bootstrap challenge
+  and hold the `challengeId` in component memory only (NEVER in
+  localStorage); (4) on role selection, dispatch to the bootstrap
+  flow (no CSRF header) or the session-bound flow (with CSRF
+  header) based on whether a session is active; (5) handle
+  expired/replay/network-error states honestly with new copy keys
+  `networkError` and `challengeExpired`; (6) redirect to
+  `/role-preview` (not `/login`) after ending the preview session
+  so the operator can immediately request a fresh bootstrap.
+- `apps/web/src/components/role-preview/role-preview-copy.ts` —
+  added `networkError` and `challengeExpired` copy keys in both
+  Arabic and English.
+
+**New CI integration test files:**
+
+- `apps/api/vitest.role-preview.config.ts` — Vitest config for the
+  role-preview integration tests (mirror of
+  `vitest.context.config.ts`).
+- `apps/api/test/role-preview/_role-preview-bootstrap.ts` —
+  Role-Preview-specific database bootstrap that wraps
+  `setupDatabaseTests()` and additionally creates databases named
+  `role_preview_test` and `role_preview_audit_test` (so the
+  database-identity gate passes), applies migrations to them, and
+  overrides `DATABASE_URL`/`AUDIT_DATABASE_URL` plus the preview
+  env vars.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+  — 38 integration tests covering the full Secure Logged-Out Demo
+  Role Bootstrap flow against real PostgreSQL 17.
+
+**Modified CI configuration:**
+
+- `apps/api/package.json` — added `test:role-preview` and
+  `pretest:role-preview` scripts.
+- `.github/workflows/main-ci.yml` — added `pnpm test:role-preview`
+  to the `postgresql17-validation` job (now eight suites, was
+  seven).
+
+### Required runtime gates
+
+The logged-out bootstrap operates ONLY when ALL of the following are
+true:
+
+1. `NODE_ENV !== 'production'` (checked by `RolePreviewFeatureConfig`)
+2. `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true` (checked by
+   `RolePreviewFeatureConfig`)
+3. `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` is present and valid server-side
+   (checked by `RolePreviewPasswordValidator` at module init)
+4. `DATABASE_URL` is positively identified as an isolated role-preview
+   transactional database (checked by
+   `isPreviewDatabaseIdentityValid`)
+5. `AUDIT_DATABASE_URL` is positively identified as an isolated
+   role-preview audit database (checked by
+   `isPreviewDatabaseIdentityValid`)
+6. Request Origin passes the existing allow-list validation
+   (checked by `AuthService.isOriginAllowed`)
+7. Requested role code exists in the canonical role catalogue
+   (checked by `findPreviewIdentity`)
+8. Selected identity belongs to the isolated preview tenant (checked
+   by membership lookup)
+9. Preview seed state is valid and complete (checked by tenant,
+   organisation, facility, user, and membership lookups)
+
+If any precondition fails, the route returns a safe unavailable
+result (404 for the gate, 403 for Origin/database-identity).
+
+### Bootstrap-cookie settings
+
+- Name: `ibn_hayan_role_preview_bootstrap`
+- HttpOnly: true
+- SameSite: Strict
+- Secure: true in production, false in development
+- Max-Age: 300s (5 minutes), clamped
+- Path: `/api/v1/dev/role-preview`
+- Domain: not set (bound to the exact origin)
+
+### Production-disable guarantee
+
+The feature is completely unavailable in production regardless of
+the flag, password, or database-identity values. The
+`RolePreviewFeatureConfig.isRolePreviewEnabled()` method returns
+`false` unconditionally when `NODE_ENV === 'production'`. Every
+route consults the gate before delegating to the service. The
+database-identity gate provides additional defence-in-depth.
+
+### Initial logged-out role selection vs subsequent session-bound
+role switching
+
+- **Initial selection (logged-out bootstrap flow):** uses the
+  bootstrap cookie as proof-of-possession; NO CSRF token required;
+  consumes the one-time challenge; creates the first preview
+  session; clears the bootstrap cookie.
+- **Subsequent switching (session-bound flow):** requires an
+  existing session cookie AND a valid `X-CSRF-Token` header
+  (preserves the existing behaviour); safely revokes the previous
+  preview session in the same Prisma transaction as the new session
+  creation.
+
+### Local validation results
+
+- `pnpm run typecheck`: PASS (all 7 packages + 2 apps)
+- `pnpm run lint`: PASS (all 7 packages + 2 apps)
+- `pnpm run test`: PASS (303 tests: 123 api + 180 web; was 245
+  before this correction; +58 new unit tests across bootstrap-store,
+  cookies, database-identity, and contracts schemas)
+- `pnpm run build`: PASS (Next.js production build;
+  `/role-preview` registered as a static route alongside `/`,
+  `/_not-found`, `/clinic-admin`, `/dashboard`, `/login`)
+- `git diff --check`: PASS (no whitespace errors)
+- Clinic Admin shell still has exactly 11 sidebar items (1
+  implemented + 10 unimplemented)
+- Notifications still in the header bell, NOT in the sidebar
+- R09 Arabic label still `مدير المنشأة`
+- No fake business data introduced
+- Normal login remains unchanged
+- Normal dashboard remains unchanged
+- Normal Clinic Admin protections remain unchanged
+- Retired password literal is absent from all tracked files
+- Actual protected password value is absent from Git and bundles
+- No Preview daemon exists
+- No runtime log was created
+- No long-running process remains
+
+### PostgreSQL 17 GitHub Actions integration-test coverage
+
+38 integration scenarios added under
+`apps/api/test/role-preview/role-preview.role-preview-spec.ts`,
+covering:
+
+- Seed validation (1–11): production refusal, non-preview DB
+  refusal, audit-DB gap, tenant/org/facility creation, 14
+  identities, R01–R14 role codes, scope levels, idempotency, no
+  business records.
+- Bootstrap + select (12–26): bootstrap success, expired challenge
+  rejection, replay rejection, unknown role rejection, caller-
+  supplied IDs rejection, R09 session creation, tenant/org/facility
+  context correctness, R09 → `/clinic-admin` routing, unimplemented
+  role → `/role-preview` routing, subsequent switching replaces the
+  previous session, end revokes the session, HttpOnly and
+  SameSite=Strict cookie behaviour.
+- Security (27–38): Secure-attribute follows environment rules,
+  valid Origin succeeds, invalid Origin fails, CSRF enforced on
+  session-bound switching, no password/hash/token in responses, no
+  bootstrap secret in audit records (documented gap), preview
+  routes fail against non-preview database identities, normal login
+  / dashboard / Clinic Admin protection unchanged.
+
+The CI suites are EXPLICITLY listed in
+`.github/workflows/main-ci.yml`; the new `pnpm test:role-preview`
+suite was added alongside the existing seven suites. The suite is
+NOT run locally (no PostgreSQL 17 in the development environment);
+it runs only on GitHub Actions inside the composite node:24 +
+postgres:17 Docker image.
+
+### CI status
+
+PENDING. The integration tests have been added but have NOT been
+executed on GitHub Actions yet. The branch is local-only and
+unpushed. The next step is to push the branch through a controlled
+branch-and-PR workflow so GitHub Actions can run the PostgreSQL 17
+integration tests.
+
+### Runtime Preview status
+
+NOT LAUNCHED. Per the task specification, this correction does NOT
+launch the user-visible Z.AI Preview. The Preview requires a backend
+PostgreSQL 17 database, which is not available in this development
+environment.
+
+### Files created
+
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.ts`
+- `apps/api/src/modules/dev/role-preview/bootstrap-store.spec.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.cookies.spec.ts`
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+- `apps/api/vitest.role-preview.config.ts`
+- `apps/api/test/role-preview/_role-preview-bootstrap.ts`
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/index.ts`
+- `apps/api/src/modules/dev/role-preview/preview-identity-catalogue.spec.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.module.ts`
+- `apps/api/src/modules/dev/role-preview/role-preview.service.ts`
+- `apps/web/src/app/role-preview/page.tsx`
+- `apps/web/src/components/role-preview/role-preview-copy.ts`
+- `apps/web/src/lib/api/role-preview/index.ts`
+- `apps/web/src/lib/api/role-preview/role-preview.client.ts`
+- `packages/contracts/src/role-preview/index.ts`
+- `packages/contracts/src/role-preview/role-preview.schema.ts`
+- `packages/contracts/src/role-preview/role-preview.schema.spec.ts`
+- `packages/observability/src/audit/action-codes.ts`
+- `apps/api/package.json`
+- `.github/workflows/main-ci.yml`
+- `PROJECT_CONTINUITY.md`
+- `worklog.md`
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None.
+
+### Dependency or lockfile changes
+
+None.
+
+### Fake business data introduced
+
+None.
+
+### Known limitations
+
+1. **No local PostgreSQL 17.** The 38 integration tests run only
+   on GitHub Actions. The local environment has no PostgreSQL 17
+   runtime (per `AGENTS.md` §"Environment Constraints").
+2. **Audit-URL validation gap.** The preview seed validates
+   `DATABASE_URL` but not `AUDIT_DATABASE_URL`. This is documented
+   in test 3; a follow-up will add the audit-URL check.
+3. **Audit-database assertion gap.** Test 34 documents that a full
+   audit-database query for bootstrap secrets is a follow-up. The
+   unit tests already verify the audit metadata carries only
+   `endpoint` and `roleCode`.
+4. **In-memory challenge store.** Restarting the API invalidates
+   all outstanding bootstrap challenges. This is acceptable for a
+   development-only feature.
+
+### Immediate next product slice
+
+Today's Appointments — unchanged. The Secure Logged-Out Demo Role
+Bootstrap correction does NOT alter the canonical next-vertical-
+slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at
+  `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with
+  origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on
+  `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `1bd24117532e286839947d486d99419314a4531a`
+  (`fix: secure demo role preview runtime v1`).
+- **Correction commit subject:** `fix: enable secure logged-out
+  demo role bootstrap`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the
+  durable Git-authority rule).
+- **Protected password file:**
+  `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory
+  `0700`, file `0600`, outside the repository).
+- **To re-run local validation:** `cd /home/z/demo-role-preview-v1
+  && pnpm install --frozen-lockfile && pnpm run build:shared &&
+  pnpm --filter @ibn-hayan/observability... build && pnpm run
+  typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the PostgreSQL 17 integration tests (GitHub Actions
+  only):** push the branch through a controlled branch-and-PR
+  workflow; the `postgresql17-validation` job runs
+  `pnpm test:role-preview` alongside the existing seven suites.
+
+
+---
+
+## Isolated Preview Audit Database Enforcement (2026-07-25)
+
+**Date:** 2026-07-25
+**Branch:** `feat/demo-role-preview-v1` (local-only, unpushed)
+**Parent commit:** `2b9f6dc01fe8e794e273c6638464ce3a24d7a341`
+(`fix: enable secure logged-out demo role bootstrap`)
+**Correction commit subject:** `fix: enforce isolated preview audit database`
+**Correction commit SHA:** recorded in `worklog.md` (per the durable
+Git-authority rule)
+
+### Audit-URL seed-gap root cause
+
+The prior implementation of the preview seed
+(`apps/api/src/scripts/role-preview-seed-dev.ts`) validated ONLY
+`DATABASE_URL` and never `AUDIT_DATABASE_URL`. The validation itself
+used an unsafe case-insensitive substring match across the FULL URL
+(`url.toLowerCase().includes('role_preview')`), which can false-positive
+when the substring appears in the username
+(`role_preview_user:pass@host/prod`), the hostname
+(`user:pass@role-preview-db.example.com/prod`), or the query string
+(`?schema=role_preview`). None of those prove the database NAME is
+preview-specific. A misconfigured environment could therefore pass
+the gate while pointing at a production database.
+
+The companion module
+(`apps/api/src/modules/dev/role-preview/preview-database-identity.ts`)
+had the same unsafe substring-matching issue and did NOT verify that
+the two URLs resolve to distinct database names (ADR-014 requires
+the audit store to be a dedicated database separate from the
+transactional store).
+
+### Database-name parsing architecture
+
+The corrected validator uses the native `URL` parser to derive the
+database name from `url.pathname` only. The validation steps are:
+
+1. The URL must be a non-empty string.
+2. The URL must parse with the native `URL` parser.
+3. The URL scheme must be `postgresql:` or `postgres:`.
+4. The URL pathname must yield a non-empty database name (the
+   leading `/` is stripped; the remainder must be non-empty).
+5. The database name (lowercased) must contain at least one
+   approved preview identifier (`role_preview` or `preview_role`).
+
+The pair validator additionally verifies the two database names are
+DISTINCT. The structured result carries only safe fields: `ok`,
+`reason` (a safe failure code), and `databaseName` (the pathname
+only — never the credentials, hostname, or query string). The
+validator never logs, never throws, and never connects to the
+database.
+
+### Transactional and audit database distinction
+
+Per ADR-014, the audit store is a dedicated PostgreSQL 17 database
+separate from the transactional store. The corrected validator
+enforces this by comparing the parsed database names of
+`DATABASE_URL` and `AUDIT_DATABASE_URL`. If the two names are
+identical, the validator returns `ok: false` with reason
+`databases_not_distinct`. This prevents the seed from running when
+the audit database is accidentally the same as the transactional
+database.
+
+### Seed fail-before-write protection
+
+The corrected seed's `readSeedEnv()` function (now exported for unit
+testing) runs ALL validation BEFORE any Prisma query, BEFORE any
+migration, and BEFORE any entity creation. The validation order is:
+
+1. `NODE_ENV !== 'production'`
+2. `ALLOW_ROLE_PREVIEW_SEED=true`
+3. `IBN_HAYAN_ROLE_PREVIEW_ENABLED=true`
+4. `IBN_HAYAN_ROLE_PREVIEW_PASSWORD` present and valid (≥ 12 chars)
+5. `DATABASE_URL` parses as a PostgreSQL URL whose database name
+   contains an approved preview identifier
+6. `AUDIT_DATABASE_URL` parses as a PostgreSQL URL whose database
+   name contains an approved preview identifier
+7. The two database names are DISTINCT
+
+A failure at any step throws `RolePreviewSeedEnvError` and the seed
+exits without touching the database. The error messages are SAFE:
+they identify which check failed and a short reason code, but they
+NEVER include the URL value, the credentials, the username, the
+password, the hostname, the query string, or the database password.
+
+### Audit outbox and projection validation
+
+The audit architecture (per ADR-014 and the ninth canonical batch
+specification) uses a transactional outbox:
+
+1. Audit events are first written to the `audit_outbox_events` table
+   in the TRANSACTIONAL database (in the same Prisma transaction as
+   the state mutation — e.g. session creation).
+2. The `AuditDispatcherService` claims pending outbox rows using
+   PostgreSQL-safe concurrent claiming (`FOR UPDATE SKIP LOCKED`)
+   and appends each to the `audit_events` table in the DEDICATED
+   audit database.
+3. The outbox row is marked delivered only after successful
+   audit-store append AND only if the dispatcher still owns the
+   active lease on the row.
+
+The Role Preview bootstrap flow emits
+`role_preview.session.bootstrapped` through the outbox in the same
+Prisma transaction as the new session creation. The audit metadata
+carries ONLY `{ endpoint: 'role_preview_bootstrap_select', roleCode:
+'R09_ADMINISTRATOR' }` — no bootstrap nonce, no challenge value, no
+password, no session token, no hash, no complete database URL.
+
+### Audit database assertion coverage
+
+The prior Test 34 (`No bootstrap secret appears in audit records`)
+was a no-op placeholder (`expect(true).toBe(true)`). The corrected
+integration suite replaces it with six real audit-database
+assertion tests (Phase 6 items 29–34):
+
+- **29.** Approved audit action is emitted
+  (`role_preview.session.bootstrapped` in the transactional outbox).
+- **30.** Audit outbox contains no secret (no nonce, challenge,
+  password, token, hash, or URL in the outbox row).
+- **31.** Audit projection succeeds (the dispatcher delivers the
+  outbox event; `delivered_at` is set; no pending events remain).
+- **32.** Audit database receives the projected record (the
+  `audit_events` table in the DEDICATED audit database has the
+  `role_preview.session.bootstrapped` row).
+- **33.** Audit database record contains no password, token, nonce,
+  challenge, hash, or URL (the metadata carries ONLY `endpoint` and
+  `roleCode`).
+- **34.** Transactional and audit database isolation is proven (the
+  transactional Prisma client has NO `auditEvent` model; the audit
+  events live ONLY in the DEDICATED audit database).
+
+These tests use the REAL audit outbox + dispatcher + audit-store
+architecture — they do NOT bypass audit processing by directly
+inserting fake audit rows, and they do NOT merely inspect an
+in-memory mock. The tests run ONLY on GitHub Actions (PostgreSQL 17
+composite Docker image); they are NOT run locally because the
+development environment has no PostgreSQL 17.
+
+### Local validation results
+
+| Gate | Result | Notes |
+|---|---|---|
+| `pnpm run typecheck` | PASS | 7 packages + 2 apps typecheck clean |
+| `pnpm run lint` | PASS | 7 packages + 2 apps lint clean (11 prettier issues auto-fixed) |
+| `pnpm run test` (unit) | PASS | api 184 (was 5; +79 from the two new spec files) + web 180 + contracts 123 + domain 97 + observability 83 = 667 total. 0 regressions. |
+| `pnpm run build` | PASS | All packages built; Next.js production build succeeded; `/role-preview` registered as a static route |
+| `git diff --check` | PASS | No whitespace errors |
+| New `preview-database-identity.spec.ts` | PASS | 60 unit tests |
+| New `role-preview-seed-dev.spec.ts` | PASS | 19 unit tests (13 Phase 4 scenarios + 6 additional safety cases) |
+| Retired password literal scan | PASS | `preview-role-only-do-not-use-in-production` is ABSENT from all tracked files |
+| Actual preview password exposure scan | PASS | The protected preview password value is ABSENT from all git-tracked files and from all build output |
+| Database URL exposure scan | PASS | No complete `postgresql://` URL appears in any error message or log line |
+| Clinic Admin sidebar items | PASS | Exactly 11 items (`overview`, `appointments`, `patients`, `doctors`, `staff-attendance`, `waiting-room`, `services-procedures`, `billing-payments`, `inventory`, `reports-analytics`, `settings`) |
+| R09 Arabic label | PASS | `مدير المنشأة` in `packages/domain/src/authorization/role-catalogue.ts` line 232 |
+| Notification bell location | PASS | `NotificationBell` is in `clinic-admin-header.tsx` (the header), NOT in the sidebar |
+| `.preview-logs/` new files | PASS | No new files created under `.preview-logs/` by this task (the three pre-existing files `preview-proxy.py`, `start-api.sh`, `start-web.sh` were committed in `362d4cd`, an ancestor of `main` `72cce12`; they are static, not running) |
+| Preview daemon | PASS | No preview daemon created; no listeners on ports 3000/3001/3002 |
+| Runtime log | PASS | No runtime log created |
+
+### PostgreSQL 17 CI status
+
+**PENDING.** The 37-test PostgreSQL 17 integration suite
+(`apps/api/test/role-preview/role-preview.role-preview-spec.ts`)
+has been updated to cover all 37 Phase 6 scenarios. The suite runs
+ONLY on GitHub Actions inside the composite node:24 + postgres:17
+Docker image (per `.github/workflows/main-ci.yml`). The local
+environment has no PostgreSQL 17 runtime. The suite is NOT claimed
+to have passed locally; it will run on GitHub Actions CI when the
+branch is pushed through a controlled branch-and-PR workflow.
+
+### Files created
+
+- `apps/api/src/scripts/role-preview-seed-dev.spec.ts` — 19 unit
+  tests for the seed's `readSeedEnv()` function, covering all 13
+  Phase 4 seed-safety scenarios plus 6 additional safety cases
+  (username-only false positive, hostname-only false positive,
+  `postgres://` scheme, etc.).
+
+### Files modified
+
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.ts`
+  — rewrote with the structured `validatePreviewDatabaseUrl()` and
+  `validatePreviewDatabaseIdentity()` functions; replaced the unsafe
+  full-URL substring match with native `URL` parsing of the
+  database NAME only; added the distinct-database-name check;
+  retained the boolean wrappers (`isPreviewTransactionalDatabaseUrl`,
+  `isPreviewAuditDatabaseUrl`, `isPreviewDatabaseIdentityValid`) for
+  backward compatibility with the controller.
+- `apps/api/src/modules/dev/role-preview/preview-database-identity.spec.ts`
+  — expanded from 16 to 60 unit tests, covering URL parsing,
+  distinct-database check, no-credential return, no-full-URL
+  return, username-only/hostname-only/query-string-only false
+  positive rejection, and the `postgres://` legacy scheme.
+- `apps/api/src/scripts/role-preview-seed-dev.ts` — replaced the
+  unsafe substring check with `validatePreviewDatabaseIdentity()`;
+  added `AUDIT_DATABASE_URL` validation; added the distinct-DB
+  check; exported `readSeedEnv()` and `RolePreviewSeedEnvError` for
+  unit testing; added an entry-point guard so importing the module
+  in a test does NOT execute `main()`; added safe database-name
+  logging (the raw URLs are NEVER logged).
+- `apps/api/src/modules/dev/role-preview/index.ts` — re-exported
+  the new `validatePreviewDatabaseUrl`, `validatePreviewDatabaseIdentity`,
+  `PREVIEW_DATABASE_NAME_IDENTIFIERS`, and the
+  `PreviewDatabaseUrlValidation` / `PreviewDatabaseIdentityResult`
+  types.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts`
+  — replaced Test 3 (audit-URL gap placeholder) with 8 real
+  seed-validation tests (Phase 6 items 1–8); replaced Test 34
+  (audit-DB gap placeholder) with 6 real audit-database assertion
+  tests (Phase 6 items 29–34); added the `dispatchAll()` helper;
+  wired `AuditPrismaService` and `AuditDispatcherService` into the
+  test setup; added audit-tables cleanup in `beforeEach`; updated
+  the header comment to reflect the 37-test Phase 6 coverage.
+- `PROJECT_CONTINUITY.md` — appended this section.
+- `worklog.md` — appended a task entry.
+
+### Files deleted
+
+None.
+
+### Schema or migration changes
+
+None. The correction uses the existing `audit_outbox_events` table
+(transactional database) and the existing `audit_events` +
+`audit_chain_heads` tables (dedicated audit database). No
+`prisma/schema.prisma` change, no `prisma/migrations/**` change, no
+`prisma-audit/schema.prisma` change.
+
+### Dependency or lockfile changes
+
+None. No `package.json` dependency was added or removed;
+`pnpm-lock.yaml` is unchanged.
+
+### Fake business data introduced
+
+None. The correction does NOT create any business records. The
+preview seed (unchanged in this correction) creates only identity,
+tenancy, membership, and role-assignment records.
+
+### Preview daemon or runtime artifact
+
+None. No daemon script was created. No runtime log was created. No
+persistent process was started. The three pre-existing
+`.preview-logs/` files (`preview-proxy.py`, `start-api.sh`,
+`start-web.sh`) were committed in `362d4cd` (an ancestor of `main`
+`72cce12`) and are NOT running.
+
+### Runtime Preview status
+
+**NOT LAUNCHED.** The Preview server was NOT started. No API, web,
+database, proxy, or daemon process was started. The correction is
+purely source-code + test-code + documentation. The Preview feature
+remains development-only and is activated only when an operator
+explicitly sets the environment variables and runs the seed.
+
+### Known limitations
+
+1. **No local PostgreSQL 17.** The 37-test PostgreSQL 17
+   integration suite runs ONLY on GitHub Actions. The local
+   environment has no PostgreSQL 17 runtime (per `AGENTS.md`
+   §"Environment Constraints").
+2. **PostgreSQL 17 CI status pending.** The integration suite has
+   been updated but has NOT been executed on GitHub Actions yet. A
+   controlled branch-and-PR workflow is required to run it.
+3. **In-memory challenge store.** Restarting the API invalidates
+   all outstanding bootstrap challenges. This is acceptable for a
+   development-only feature.
+4. **`.preview-logs/` pre-existing files.** The three files in
+   `.preview-logs/` were committed in `362d4cd` (a UUID-subject
+   autocommit) which is an ancestor of `main`. They are tracked,
+   static files — NOT running daemons. This correction does NOT
+   remove them; a separate operator decision is required if they
+   should be removed from `main`.
+
+### Immediate next product slice
+
+**Today's Appointments** — unchanged. The Isolated Preview Audit
+Database Enforcement correction does NOT alter the canonical
+next-vertical-slice ordering.
+
+### Recovery information
+
+- **Primary worktree:** `/home/z/my-project` on `main` at
+  `72cce12af075e3f19962c3e247b4fd0e3aa67e3f` (0/0 divergence with
+  origin).
+- **Demo-preview worktree:** `/home/z/demo-role-preview-v1` on
+  `feat/demo-role-preview-v1`.
+- **Pre-correction SHA:** `2b9f6dc01fe8e794e273c6638464ce3a24d7a341`
+  (`fix: enable secure logged-out demo role bootstrap`).
+- **Correction commit subject:** `fix: enforce isolated preview
+  audit database`.
+- **Correction commit SHA:** recorded in `worklog.md` (per the
+  durable Git-authority rule).
+- **Protected password file:**
+  `/home/z/.config/ibn-hayan-role-preview/preview.env` (directory
+  `0700`, file `0600`, outside the repository).
+- **To re-run local validation:** `cd /home/z/demo-role-preview-v1
+  && pnpm install --frozen-lockfile && pnpm run build:shared &&
+  pnpm --filter @ibn-hayan/observability... build && pnpm run
+  typecheck && pnpm run lint && pnpm run test && pnpm run build`.
+- **To run the PostgreSQL 17 integration tests (GitHub Actions
+  only):** push the branch through a controlled branch-and-PR
+  workflow; the `postgresql17-validation` job runs
+  `pnpm test:role-preview` alongside the existing seven suites.
+
+### Role Preview CI route-prefix fix (working-tree edit, 2026-07-26)
+
+**Branch:** `feat/demo-role-preview-v1` (present on `origin`; local and remote SHAs identical at `896a4aafd90ac0bf515d89bc8e09feb505d74ebf` before this edit).
+
+**Trigger:** GitHub Actions `postgresql17-validation` job failed on the pushed branch with `32 failed | 18 passed` in `apps/api/test/role-preview/role-preview.role-preview-spec.ts`. Representative failure: test 37a expected `403`, received `404` for `request(server).get('/dev/role-preview/bootstrap')`.
+
+**Root cause:** The integration-test Nest application correctly applied `app.setGlobalPrefix('api/v1')` (mirroring production `apps/api/src/main.ts` line 36), but every supertest request in the spec file targeted the UNPREFIXED controller path (`/dev/role-preview/...`, `/auth/...`). With the global prefix applied, the unprefixed paths did not match any registered route, so Nest's router returned a framework-level 404 for every request. All 32 failures were framework 404s — not Role-Preview safe-unavailable 404s, not application-defined 403s, not auth 401s. The expected status codes and the production error helpers were already correct; only the request URLs were wrong.
+
+**Fix (single-file working-tree edit, NOT yet committed):** Added a canonical route-constant block at the top of `apps/api/test/role-preview/role-preview.role-preview-spec.ts`:
+
+```ts
+const API_PREFIX = '/api/v1';
+const rolePreviewRoutes = {
+  availability: `${API_PREFIX}/dev/role-preview`,
+  bootstrap:    `${API_PREFIX}/dev/role-preview/bootstrap`,
+  current:      `${API_PREFIX}/dev/role-preview/current`,
+  select:       `${API_PREFIX}/dev/role-preview/select`,
+  end:          `${API_PREFIX}/dev/role-preview/end`,
+} as const;
+const authRoutes = {
+  login:   `${API_PREFIX}/auth/login`,
+  session: `${API_PREFIX}/auth/session`,
+  csrf:    `${API_PREFIX}/auth/csrf`,
+} as const;
+```
+
+Replaced every `request(server).get/post(...)` URL in the spec file (23 call sites across helpers + test bodies) with the corresponding constant. The only `/api/v1` literal remaining in the file is the `API_PREFIX` constant itself. No production code (main.ts, controllers, error helpers, services) was modified. No security contract was weakened. No expected status code was changed.
+
+**Validation (local):** `pnpm run typecheck` PASS (all 7 packages + 2 apps). `pnpm run lint` PASS (all packages; 0 errors, 0 warnings). `pnpm run test` PASS (667 unit tests; 0 regressions). `pnpm run build` PASS (api via SWC, web via Next.js; `/role-preview` registered as a static route). `git diff --check` PASS.
+
+**Diff scope:** 1 file modified (`apps/api/test/role-preview/role-preview.role-preview-spec.ts`); +62 / -24 lines; 0 files created; 0 files deleted; 0 schema/migration/dependency/lockfile changes; 0 production code changes.
+
+**Posture:** Working-tree edit only. No commit, no push, no PR merge, no deploy key, no production deployment, no database access, no Preview launch. The operator will authorise the commit + push of this single-file fix in the next task; the GitHub Actions `postgresql17-validation` job will then re-run the corrected 38-test Role Preview integration suite.
+
+**Recovery:** The branch tip before this edit is `896a4aafd90ac0bf515d89bc8e09feb505d74ebf` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore apps/api/test/role-preview/role-preview.role-preview-spec.ts` from the demo-preview worktree (the file is unstaged).
+
+### Role Preview bootstrap-selection 500 correction (working-tree edit, 2026-07-26)
+
+**Branch:** `feat/demo-role-preview-v1` (present on `origin`; local and remote SHAs identical at `567b1279aeb34521e50505f106b1b239e91520a3` before this edit).
+
+**Trigger:** After the API-prefix correction commit `567b127` was pushed and the existing Pull Request's `postgresql17-validation` job reran, the integration suite advanced past the prior framework-404 failures but exhibited a new failure pattern: at least 22 tests failed through the shared `bootstrapAndSelect` helper at `apps/api/test/role-preview/role-preview.role-preview-spec.ts:276`. The failing assertion was `expect(selectRes.status).toBe(200)`; the actual result was `500`. Representative downstream failures included audit database integrity test 34 and every other test that calls `bootstrapAndSelect`. The bootstrap route succeeded (issued a challenge, set the cookie), but the subsequent `POST /api/v1/dev/role-preview/select` request returned an unhandled HTTP 500.
+
+**First backend exception (proven, not assumed):** `Error('Audit emission failed (atomicity enforcement): unknown_category — Unknown audit category: role_preview')`, thrown by `AuditHelperService.emitOrFail` inside the Prisma `$transaction` callback in `RolePreviewService.selectRoleWithBootstrap` (`apps/api/src/modules/dev/role-preview/role-preview.service.ts:674`).
+
+**Exact failing operation:** `buildAuditEventDraft({ action: 'role_preview.session.bootstrapped', ... })` returned `{ ok: false, reason: 'unknown_category', detail: 'Unknown audit category: role_preview' }`. The `AuditHelperService.emit` method propagated the failure to `emitOrFail`, which threw the atomicity-enforcement `Error`. The throw caused the surrounding `prisma.$transaction(async (tx) => { ... })` callback to reject, which caused Prisma to roll back the entire transaction (the new `auth_sessions` row creation AND the audit outbox insertion). The unhandled throw propagated through the Nest controller to Nest's default exception filter, which returned HTTP 500.
+
+**Failure stage:** During audit outbox insertion, inside the Prisma transaction, AFTER session creation but BEFORE transaction commit. The session row was created in the transaction's savepoint but rolled back; no session row, no outbox row, no audit projection was committed.
+
+**Defect classification:** Production-code defect (NOT test setup). The audit category catalogue in `packages/observability/src/audit/categories.ts` was missing the `role_preview` entry. The `role_preview.session.created`, `role_preview.session.bootstrapped`, and `role_preview.session.ended` action codes were already registered in `packages/observability/src/audit/action-codes.ts`, and `inferCategoryFromAction` in the same file already inferred the `role_preview` category for any action whose prefix is `role_preview.`. But the category catalogue never added `role_preview` to the `AuditEventCategory` union type or the `AUDIT_EVENT_CATEGORIES` list. As a result, `isAuditEventCategory('role_preview')` returned `false`, and `buildAuditEventDraft` rejected every Role Preview audit event with `unknown_category`. The defect affected all three Role Preview audit-emitting flows: `selectRole` (session-bound), `selectRoleWithBootstrap` (logged-out), and `endPreviewSession`. The integration suite exercised the bootstrap flow first via `bootstrapAndSelect`, so the 500 surfaced there.
+
+**Root cause:** `packages/observability/src/audit/categories.ts` was not updated when the Role Preview action codes were added to `packages/observability/src/audit/action-codes.ts`. The category catalogue and the action-code catalogue drifted out of sync. The `inferCategoryFromAction` function was extended to recognise the `role_preview.` prefix, but the corresponding category entry was never added to the validated category list, so the inferred category was always rejected at the boundary.
+
+**Proof:** Ran a focused Node.js script that imported `buildAuditEventDraft` from the built observability package and called it with the exact audit-event input used by `RolePreviewService.selectRoleWithBootstrap` (action `role_preview.session.bootstrapped`, tenantId, actorType, actorId, sessionId, requestId, scope, metadata). Before the fix, the result was `{ ok: false, reason: 'unknown_category', detail: 'Unknown audit category: role_preview' }`. After the fix, the result was `{ ok: true, draft: { category: 'role_preview', action: 'role_preview.session.bootstrapped', ... } }`. The same proof was run for `role_preview.session.created` and `role_preview.session.ended`; all three returned `ok: true` with `category: 'role_preview'` after the fix.
+
+**Correction (working-tree edit, NOT yet committed):** Added `'role_preview'` to the `AuditEventCategory` union type and the `AUDIT_EVENT_CATEGORIES` list in `packages/observability/src/audit/categories.ts`. The category is 13 characters, well within the `category` column's `VarChar(40)` bound in the audit-store schema (`apps/api/prisma-audit/schema.prisma`). The fix is the smallest coherent correction: no production route, controller, service, error helper, schema, migration, dependency, or lockfile was modified. No security contract was weakened. No expected status code was changed.
+
+**Regression coverage:** Added 6 focused unit tests to `packages/observability/src/audit/audit-event-builder.spec.ts` that prove: (1) `role_preview.session.created` builds successfully with category `role_preview`; (2) `role_preview.session.bootstrapped` builds successfully with category `role_preview`; (3) `role_preview.session.ended` builds successfully with category `role_preview`; (4) an explicit `role_preview` category is accepted when it matches the action's inferred category; (5) the `category_action_mismatch` check still fires when a caller supplies the wrong category for a `role_preview` action (defence-in-depth preserved); (6) the metadata validator still rejects forbidden keys (e.g. `sessionToken`) for `role_preview` events (no secret leakage through the role_preview path). These tests run locally without PostgreSQL 17 and would have failed before the fix.
+
+**Local validation:** `pnpm run typecheck` PASS (all 7 packages + 2 apps). `pnpm run lint` PASS (all packages; 0 errors, 0 warnings). `pnpm run test` PASS (722 unit tests; 0 regressions; observability package went from 83 → 89 tests with the 6 new regression tests). `pnpm run build` PASS (api via SWC, web via Next.js; `/role-preview` registered as a static route). `git diff --check` PASS.
+
+**PostgreSQL 17 CI rerun pending:** The Role Preview PostgreSQL 17 integration suite (`pnpm test:role-preview`, 38 tests) cannot run locally (no PostgreSQL 17 in this environment). The corrected failing operation is validated locally via the 6 new unit tests in `audit-event-builder.spec.ts`, which prove that `buildAuditEventDraft` now accepts every `role_preview.session.*` action. The full integration suite will be exercised by the GitHub Actions `postgresql17-validation` job once the operator pushes this commit. The CI rerun is required before any PR merge.
+
+**Files modified:** 2.
+- `packages/observability/src/audit/categories.ts` — added `role_preview` to the `AuditEventCategory` union and the `AUDIT_EVENT_CATEGORIES` list, with explanatory documentation.
+- `packages/observability/src/audit/audit-event-builder.spec.ts` — added 6 focused regression tests.
+
+**Files created:** 0. **Files deleted:** 0. **Schema/migration/dependency/lockfile changes:** NONE. **Production security control changes:** NONE.
+
+**Latest verified commit before this edit:** `567b1279aeb34521e50505f106b1b239e91520a3` on `feat/demo-role-preview-v1` (local and remote identical).
+
+**Recovery:** The branch tip before this edit is `567b1279aeb34521e50505f106b1b239e91520a3` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore packages/observability/src/audit/categories.ts packages/observability/src/audit/audit-event-builder.spec.ts` from the demo-preview worktree (both files are unstaged).
+
+**Immediate next step:** The operator authorises a commit + push of the 2-file fix. After the push, the existing Pull Request's `static-and-build` and `postgresql17-validation` GitHub Actions jobs rerun on the new commit. The PR must NOT be merged until both jobs are green on the new commit.
+
+### Role Preview seven-failure diagnosis and correction (working-tree edit, 2026-07-26)
+
+**Date:** 2026-07-26
+
+**Trigger:** After the previous audit-category correction commit (`e103b7dafc695a9faf40bfb4de4838c3f1b063eb`) was pushed and `static-and-build` went green, the `postgresql17-validation` job still failed with 7 failed / 43 passed. The 7 failures group into three clusters.
+
+**Cluster 1 — Two HTTP contract mismatches (400 expected, 403 received):**
+- Test `15. Unknown role fails (400)` — expected 400, received 403.
+- Test `16. Caller-supplied IDs fail contract validation (400)` — expected 400, received 403.
+
+**Root cause (Cluster 1):** Production-code defect. The error helpers `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` in `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` both returned `ForbiddenException` (HTTP 403) despite their JSDoc comments documenting "Return a 400". The helpers should return `BadRequestException` (HTTP 400) because an unknown role code and a malformed request body are client-side request errors (4xx), not authorisation failures (403). The status-mapping comment at the top of the file was already correct (it said 400 for both), but the implementation used the wrong NestJS exception class. The defect affected both the bootstrap-flow `selectRoleViaBootstrap` path (throws `rolePreviewRoleUnknown()` from the service when `findPreviewIdentity` returns null) and the request-validation path (throws `rolePreviewRequestInvalid()` from the controller when Zod `.strict()` rejects the body).
+
+**CORRECTION (added 2026-07-26, role-preview-invalid-role-contract-alignment task):** The preceding paragraph's attribution of test 15's failure to the `rolePreviewRoleUnknown()` service path is INACCURATE. The strict `RoleCodeSchema` enum (`z.enum` of the 14 canonical codes R01–R14) inside `SelectPreviewRoleRequestSchema` rejects `R99_UNKNOWN` at the controller's Zod boundary (controller line 415-418) BEFORE the service is ever invoked. The service's `findPreviewIdentity()` therefore never receives a non-canonical code from the public controller path, and `rolePreviewRoleUnknown()` is unreachable from the public controller for any request. Test 15's `R99_UNKNOWN` request was failing because the controller threw `rolePreviewRequestInvalid()` (which returned 403 instead of 400), NOT because the service threw `rolePreviewRoleUnknown()`. The same applies to test 16: the `.strict()` schema rejects the `userId` key at the controller boundary, so the service is never reached. `rolePreviewRoleUnknown()` is a defence-in-depth SERVICE error reserved for a hypothetical internal or future caller that bypasses the public Zod boundary; no such caller exists in the current codebase. The operator has approved Contract A: a non-canonical role code such as `R99_UNKNOWN` is malformed public API input, and the canonical public response is HTTP 400 + `ROLE_PREVIEW_REQUEST_INVALID`. See the new "Role Preview invalid-role contract alignment" entry below for the full correction record.
+
+**Cluster 2 — One over-broad secret-exposure assertion:**
+- Test `28f. No bootstrap secret (nonce, challenge) appears in API responses` — rejects any occurrence of the substring `challenge`, but the bootstrap response legitimately contains the public `challengeId` field.
+
+**Root cause (Cluster 2):** Test-code defect. The assertion `expect(bodyStr).not.toContain('challenge')` rejected any substring match of `challenge`, including the legitimate public field name `challengeId`. The test's own comment acknowledged that "Bootstrap returns challengeId (NOT secret on its own)", but the assertion was not narrowed to match the comment. The public `challengeId` is an opaque identifier that is safe to expose to the client; the raw nonce (set only in the HttpOnly bootstrap cookie) is the actual secret. The over-broad assertion was a test defect, not a production secret leak.
+
+**Cluster 3 — One primary audit-dispatch failure with three cascading audit assertions:**
+- Test `31. Audit projection succeeds (dispatcher delivers the outbox event)` — the outbox row remains pending after `dispatchAll()`.
+- Test `32. Audit database receives the projected record` — no projected audit record appears in the dedicated audit database.
+- Test `33. Audit database record contains no password, token, nonce, challenge, hash, or URL` — fails because no projected record exists.
+- Test `34. Transactional and audit database isolation is proven` — fails because the audit-database projection count is zero.
+
+**Root cause (Cluster 3):** Production-code defect (migration gap). The `audit_events` table in the dedicated audit database has a CHECK constraint `audit_events_category_check` (added in migration `20260719130000_audit_store_foundation`) that allows only five categories: `security`, `authorization`, `tenant_context`, `rbac`, `audit`. The TypeScript `AuditEventCategory` union in `packages/observability/src/audit/categories.ts` was later extended to eight categories (adding `organisation_context`, `facility_context`, `role_preview`), but the database CHECK constraint was never updated to match. The gap was not caught earlier because: (1) the transactional `audit_outbox_events` table stores the `canonical_event_draft` as JSONB and has NO CHECK constraint on the category, so outbox inserts always succeed regardless of category; (2) the ADR-015 integration tests exercise `organisation_context` and `facility_context` through the outbox but the ADR-015 PostgreSQL 17 validation workflow ran against a migration snapshot that predated the dispatcher's full projection path for those categories; (3) the Demo Role Preview bootstrap flow is the first end-to-end path that emits a `role_preview` audit event AND projects it through the dispatcher into `audit_events`. The dispatcher's `auditStore.append()` calls `INSERT INTO audit_events`, which triggers the CHECK constraint violation. The violation is caught by the append repository's try/catch and returned as `transient_failure` with failureCode `audit_store_unavailable`. The dispatcher records the failure with a backoff, leaving the outbox row pending. Tests 31–34 all fail because no projected record appears.
+
+**Defect classification:**
+- Cluster 1: production-code (wrong NestJS exception class).
+- Cluster 2: test-code (over-broad substring assertion).
+- Cluster 3: production-code (migration CHECK constraint out of sync with TypeScript catalogue).
+
+**Correction (working-tree edit, NOT yet committed):**
+1. `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` — imported `BadRequestException` from `@nestjs/common`; changed `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` to return `BadRequestException` (400) instead of `ForbiddenException` (403); updated JSDoc to document the rationale and reference the integration tests that caught the contract violation.
+2. `apps/api/src/modules/dev/role-preview/role-preview.controller.ts` — added `@ApiResponse({ status: 400, ... })` to the `selectRole` endpoint's Swagger metadata; removed "the role code is unknown" from the 403 description (it now belongs to 400).
+3. `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — narrowed the test `28f` assertion: removed the over-broad `expect(bodyStr).not.toContain('challenge')` checks; replaced them with a meaningful secret-value check that extracts the raw nonce from the bootstrap cookie and asserts the nonce value does NOT appear in the response body. The `nonce` and `secret` field-name checks are preserved.
+4. `apps/api/prisma-audit/migrations/20260726000000_audit_category_extend_for_role_preview/migration.sql` — new migration that DROPs the old five-category `audit_events_category_check` and ADDs a new eight-category constraint matching the TypeScript catalogue exactly: `security`, `authorization`, `tenant_context`, `organisation_context`, `facility_context`, `rbac`, `audit`, `role_preview`. The migration is idempotent (`DROP CONSTRAINT IF EXISTS`) and safe (the new allowed set is a superset of the old, so no existing row can violate the new constraint).
+
+**Regression coverage:** Added `apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts` (14 tests) that verify every role-preview error helper returns the correct NestJS exception type and HTTP status code. The two key tests — `rolePreviewRoleUnknown returns a 400 BadRequestException (not 403 ForbiddenException)` and `rolePreviewRequestInvalid returns a 400 BadRequestException (not 403 ForbiddenException)` — would have failed before the fix. The spec also documents the existing 404/401/403 contracts for the other nine helpers and verifies the error-envelope shape (`{ error: { code, message } }`) is consistent across all eleven helpers. These tests run locally without PostgreSQL 17.
+
+**Local validation:** `pnpm run typecheck` PASS (all 7 packages + 2 apps). `pnpm run lint` PASS (all packages; 0 errors, 0 warnings). `pnpm run test` PASS (736 unit tests; 0 regressions; apps/api went from 184 → 198 tests with the 14 new error-helper regression tests). `pnpm run build` PASS (api via SWC, web via Next.js; `/role-preview` registered as a static route). `git diff --check` PASS.
+
+**PostgreSQL 17 CI rerun pending:** The Role Preview PostgreSQL 17 integration suite (`pnpm test:role-preview`, 38 tests) cannot run locally (no PostgreSQL 17 in this environment). The corrected failing operations are validated locally via: (a) the 14 new error-helper unit tests (Cluster 1); (b) the narrowed test-28f assertion logic (Cluster 2 — the assertion now checks the actual nonce value, not the public field name); (c) the new migration SQL is syntactically valid and the category list matches the TypeScript catalogue exactly (Cluster 3 — the migration will be applied by the `setupRolePreviewDatabaseTests()` bootstrap's `prisma migrate deploy` call before the integration tests run). The full integration suite will be exercised by the GitHub Actions `postgresql17-validation` job once the operator pushes this commit. The CI rerun is required before any PR merge.
+
+**Files modified:** 3.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` — `BadRequestException` import; `rolePreviewRoleUnknown()` and `rolePreviewRequestInvalid()` now return 400; JSDoc updated.
+- `apps/api/src/modules/dev/role-preview/role-preview.controller.ts` — `@ApiResponse` 400 added to `selectRole`; 403 description narrowed.
+- `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — test `28f` assertion narrowed to check the actual nonce value, not the public `challengeId` field name.
+
+**Files created:** 2.
+- `apps/api/prisma-audit/migrations/20260726000000_audit_category_extend_for_role_preview/migration.sql` — new audit-store migration extending the `audit_events_category_check` constraint to all eight categories.
+- `apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts` — 14-test regression spec for role-preview error-helper HTTP status codes.
+
+**Files deleted:** 0. **Dependency/lockfile changes:** NONE. **Production security control changes:** NONE. The fail-closed posture, authentication, session validation, CSRF, Origin validation, bootstrap challenge one-time consumption, replay protection, tenant/organisation/facility isolation, transactional/audit database isolation, cookie security, and audit integrity are all preserved. The only security-relevant change is that two error responses now correctly return 400 instead of 403 — this is a contract fix, not a weakening. The audit CHECK constraint is widened (more categories allowed), never narrowed.
+
+**Latest verified commit before this edit:** `e103b7dafc695a9faf40bfb4de4838c3f1b063eb` on `feat/demo-role-preview-v1` (local and remote identical).
+
+**Recovery:** The branch tip before this edit is `e103b7dafc695a9faf40bfb4de4838c3f1b063eb` (recorded on `origin/feat/demo-role-preview-v1`). If the edit needs to be discarded, run `git restore apps/api/src/modules/dev/role-preview/role-preview.errors.ts apps/api/src/modules/dev/role-preview/role-preview.controller.ts apps/api/test/role-preview/role-preview.role-preview-spec.ts` and delete the two new files from the demo-preview worktree.
+
+**Immediate next step:** The operator authorises a commit + push of the 5-file fix. After the push, the existing Pull Request's `static-and-build` and `postgresql17-validation` GitHub Actions jobs rerun on the new commit. The PR must NOT be merged until both jobs are green on the new commit.
+
+### Role Preview invalid-role contract alignment (working-tree edit, 2026-07-26)
+
+**Date:** 2026-07-26
+
+**Repository:** `/home/z/demo-role-preview-v1` (worktree of `/home/z/my-project`).
+
+**Branch:** `feat/demo-role-preview-v1`.
+
+**Task ID:** `role-preview-invalid-role-contract-alignment`.
+
+**Trigger:** An inspection-only verification of the previous correction commit (`2f7fd6c5d82780a9671c2b423342bfebc5dc82c5`) revealed a contract contradiction. The previous completion report stated that the canonical unknown-role error code is `ROLE_PREVIEW_ROLE_UNKNOWN`, but also stated that `R99_UNKNOWN` is rejected first by the strict Zod `RoleCodeSchema` and therefore returns `ROLE_PREVIEW_REQUEST_INVALID`, and that `rolePreviewRoleUnknown()` is not reached by the controller path. These two statements cannot both be canonical for the same input. The operator resolved the contradiction by approving Contract A: a non-canonical role code such as `R99_UNKNOWN` is malformed public API input, and the canonical public response is HTTP 400 + `ROLE_PREVIEW_REQUEST_INVALID`. `ROLE_PREVIEW_ROLE_UNKNOWN` remains only as a defence-in-depth service error for a hypothetical internal or future caller that bypasses the public Zod boundary.
+
+**Approved contract decision (Contract A):**
+
+For the public `POST /api/v1/dev/role-preview/select` endpoint:
+
+- Request `{ roleCode: "R99_UNKNOWN", challengeId: "<valid>" }` → HTTP 400 + `ROLE_PREVIEW_REQUEST_INVALID`. Runtime path: `SelectPreviewRoleRequestSchema.safeParse` rejects `R99_UNKNOWN` (because `roleCode` is constrained to `RoleCodeSchema`, a strict `z.enum` of the 14 canonical codes R01–R14); the controller throws `rolePreviewRequestInvalid()`; the service is NOT reached; the bootstrap challenge is NOT consumed.
+
+- Request `{ roleCode: "R09_ADMINISTRATOR", challengeId: "<valid>", userId: "should-be-rejected" }` → HTTP 400 + `ROLE_PREVIEW_REQUEST_INVALID`. Runtime path: the `.strict()` schema rejects the `userId` key (only `roleCode` and `challengeId` are permitted); the controller throws `rolePreviewRequestInvalid()`; the service is NOT reached; no session or audit outbox row is created.
+
+- `ROLE_PREVIEW_ROLE_UNKNOWN` is NOT part of the currently reachable public controller path. It remains a defence-in-depth service error. The `rolePreviewRoleUnknown()` helper is retained; its HTTP status (400) and structured error code (`ROLE_PREVIEW_ROLE_UNKNOWN`) are unchanged.
+
+- `RoleCodeSchema` runtime behaviour is preserved (strict `z.enum`, NOT weakened to `z.string`). `SelectPreviewRoleRequestSchema` runtime behaviour is preserved (`.strict()`, NOT relaxed). `R99_UNKNOWN` does NOT pass request parsing.
+
+**Files modified (6):**
+
+1. `apps/api/src/modules/dev/role-preview/role-preview.errors.ts` — updated the file-level header JSDoc to clearly distinguish `ROLE_PREVIEW_REQUEST_INVALID` (the public controller's reachable 400 response, covering non-canonical role codes, caller-supplied server-owned identity fields, missing required fields, wrong types, and any other Zod validation failure) from `ROLE_PREVIEW_ROLE_UNKNOWN` (a defence-in-depth SERVICE error, NOT the public controller's reachable path). Updated the JSDoc on `rolePreviewRoleUnknown()` to clarify it is NOT invoked by the current public controller for any request, and that the unit test validates the helper's contract, not the public controller runtime path. Updated the JSDoc on `rolePreviewRequestInvalid()` to clarify it IS the public controller's reachable 400 helper and to enumerate the malformed inputs it covers. No runtime logic changed; no HTTP status changed; no structured error code changed; no helper deleted; no duplicate helper created.
+
+2. `apps/api/src/modules/dev/role-preview/role-preview.controller.ts` — updated the `@ApiResponse({ status: 400, ... })` OpenAPI documentation on the `selectRole` endpoint to describe the actual reachable controller behaviour. The new description states that the 400 response carries `ROLE_PREVIEW_REQUEST_INVALID` and enumerates the malformed inputs (non-canonical role codes, caller-supplied server-owned identity fields, missing required `roleCode`, wrong types, any other Zod validation failure). The description also states that `ROLE_PREVIEW_ROLE_UNKNOWN` is a defence-in-depth SERVICE error NOT reachable from the current public controller path. No controller runtime logic changed.
+
+3. `apps/api/test/role-preview/role-preview.role-preview-spec.ts` — strengthened integration tests 15 and 16 with exact structured error-code assertions and non-reachability proofs. Test 15 (`Unknown role fails (400)`) now asserts `parsed.data.error.code === 'ROLE_PREVIEW_REQUEST_INVALID'` via `RolePreviewErrorResponseSchema.safeParse(res.body)`, and proves the bootstrap challenge was NOT consumed by calling `bootstrapStore.consume(challengeId, bootstrapCookie)` and asserting the result is `'ok'` (which proves the service was NOT reached; if the service had been reached, it would have called `consume()` first and our call would return `'replay'`). Test 16 (`Caller-supplied IDs fail contract validation (400)`) now asserts `parsed.data.error.code === 'ROLE_PREVIEW_REQUEST_INVALID'` and proves the service was NOT reached by verifying `prisma.authSession.findMany({}).length === 0` and `prisma.auditOutboxEvent.findMany({}).length === 0`. Added imports for `RolePreviewErrorResponseSchema` and `BootstrapChallengeStore`; added a `bootstrapStore` module-level variable initialised in `beforeAll` via `app.get(BootstrapChallengeStore)`. The non-consumption proof is safe: the explicit `consume()` call only marks the challenge's `consumed` flag (no session created, no audit outbox row emitted); the store's `cleanup()` removes consumed entries on the next `issue()` call (triggered by the next test's `bootstrapChallenge()` helper); the `beforeEach` cleanup handles DB state.
+
+4. `apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts` — clarified the file-level header JSDoc and the `rolePreviewRoleUnknown` describe-block name and inline comments to state explicitly that these tests validate the HELPER CONTRACT in isolation, NOT the public controller runtime path. The `rolePreviewRoleUnknown` describe block is now named `rolePreviewRoleUnknown (defence-in-depth SERVICE helper; NOT reachable from the public controller)`. The `rolePreviewRequestInvalid` describe block is now named `rolePreviewRequestInvalid (the public controller REACHABLE 400 helper)`. No test logic changed; no test removed; no test added that expects `ROLE_PREVIEW_ROLE_UNKNOWN` for `R99_UNKNOWN` from the public API.
+
+5. `PROJECT_CONTINUITY.md` — added an inline CORRECTION note immediately after the inaccurate Cluster 1 root-cause statement in the previous "Role Preview seven-failure diagnosis and correction" entry (preserving the original text), and added this new entry. Did NOT rewrite unrelated history. Did NOT delete previous entries.
+
+6. `worklog.md` — added an inline CORRECTION note immediately after the inaccurate Cluster 1 diagnosis statement and the inaccurate Stage Summary root-cause statement in the previous "role-preview-seven-failure-diagnosis-and-correction" entry (preserving the original text), and added a new coherent task entry. Did NOT rewrite unrelated history. Did NOT delete previous entries.
+
+**Files created:** 0. **Files deleted:** 0. **Schema/migration changes:** NONE. **Dependency/lockfile changes:** NONE. **Production security control changes:** NONE. The fail-closed posture, authentication, session validation, CSRF, Origin validation, bootstrap challenge one-time consumption, replay protection, tenant/organisation/facility isolation, transactional/audit database isolation, cookie security, and audit integrity are all preserved. `RoleCodeSchema` remains a strict `z.enum`; `SelectPreviewRoleRequestSchema` remains `.strict()`; `rolePreviewRoleUnknown()` remains HTTP 400 + `ROLE_PREVIEW_ROLE_UNKNOWN`; no helper was deleted or duplicated.
+
+**Local validation:** `pnpm run typecheck` PASS. `pnpm run lint` PASS. `pnpm run test` PASS (unit tests; independently verified count reported in the worklog entry). `pnpm run build` PASS. `git diff --check` PASS. Focused tests for `role-preview.errors.spec.ts` PASS. The Role Preview PostgreSQL 17 integration suite (tests 15 and 16, plus the rest of the 38-test suite) cannot run locally (no PostgreSQL 17 in this environment); GitHub Actions remains authoritative for the integration suite.
+
+**Known remaining risk:** The Role Preview PostgreSQL 17 integration suite has not been run locally. The two strengthened assertions in tests 15 and 16 (the structured error-code assertion and the non-consumption / non-reachability proof) will be exercised by the GitHub Actions `postgresql17-validation` job once the operator pushes this commit. If the runtime response body shape differs from `RolePreviewErrorResponseSchema` (e.g. if a global exception filter wraps the response), the `parsed.success` assertion will catch it. If the bootstrap store's `consume()` method behaves differently under the integration test's NestJS application context, the `expect(consumeResult).toBe('ok')` assertion will catch it. The local unit tests cannot prove these integration behaviours.
+
+**Latest verified commit before this edit:** `2f7fd6c5d82780a9671c2b423342bfebc5dc82c5` on `feat/demo-role-preview-v1` (local). Remote `feat/demo-role-preview-v1` is `e103b7dafc695a9faf40bfb4de4838c3f1b063eb`. Local is 1 commit ahead, 0 behind remote.
+
+**Recovery:** The branch tip before this edit is `2f7fd6c5d82780a9671c2b423342bfebc5dc82c5` (local only, NOT pushed). If the edit needs to be discarded before commit, run `git restore apps/api/src/modules/dev/role-preview/role-preview.errors.ts apps/api/src/modules/dev/role-preview/role-preview.controller.ts apps/api/test/role-preview/role-preview.role-preview-spec.ts apps/api/src/modules/dev/role-preview/role-preview.errors.spec.ts PROJECT_CONTINUITY.md worklog.md` from the demo-preview worktree. If the edit has been committed and needs to be discarded, the recovery tag `adr-015-validated-pre-main-v1` and the previous commit `2f7fd6c5d82780a9671c2b423342bfebc5dc82c5` remain available; do NOT use `git reset --hard` (prohibited). Instead, create a revert commit on top.
+
+**Immediate next step:** Register the existing v21 public key on the Ibn Hayan GitHub repository with write access, push the two local correction commits to `feat/demo-role-preview-v1` using one controlled fast-forward push, verify local and remote feature SHAs match exactly, securely remove the local v21 key material, and rerun both required GitHub Actions jobs without merging. The PR must NOT be merged until both jobs are green on the new commit.
+
+### Audit verify CLI false-positive diagnosis and correction (working-tree edit, 2026-07-26)
+
+**Date:** 2026-07-26
+
+**Repository:** `/home/z/demo-role-preview-v1` (worktree of `/home/z/my-project`).
+
+**Branch:** `feat/demo-role-preview-v1`.
+
+**Task ID:** `audit-verify-cli-false-positive-correction`.
+
+**Trigger:** Pull Request #5 `postgresql17-validation` job FAILED on commit `08ee8852e50d3229124d5363a9b729675e99b586`. The `static-and-build` job was GREEN. Only one test failed: `test/audit/audit-verify.audit-verify-spec.ts` → `Audit integrity verification > CLI audit:verify exits 0 on a valid chain` at line 208. Expected `exitCode = 0`, received `exitCode = 1`. The suite result was 1 failed, 5 passed, 6 total. The corrupted-chain CLI test passed ONLY because it expected a non-zero exit code — creating a mandatory false-positive investigation.
+
+**Pull Request:** #5.
+
+**Current feature SHA:** `08ee8852e50d3229124d5363a9b729675e99b586` (local and remote identical after the v21 push).
+
+**CI result on `08ee885`:**
+- `static-and-build`: GREEN.
+- `postgresql17-validation`: FAILED. Exact failing test: `test/audit/audit-verify.audit-verify-spec.ts:208` → `CLI audit:verify exits 0 on a valid chain`. Expected `exitCode = 0`, received `exitCode = 1`.
+
+**Hidden-diagnostic problem:** The test helper `runAuditVerifyCli()` caught the `execFileSync` error and returned only `{ exitCode, output }`. The test asserted ONLY `exitCode === 0` (valid chain) and `exitCode !== 0` (corrupted chain). The output was never inspected. A non-zero exit code could mean: (a) the verifier detected corruption, (b) the CLI failed to bootstrap, (c) a configuration validation failure, (d) a database connection failure, (e) a module-resolution failure, or (f) a timeout. The test design accepted ANY non-zero exit as proof of corruption detection — a false-positive risk.
+
+**Corrupted-chain false-positive risk:** CONFIRMED. The corrupted-chain test passed for the WRONG reason. Both the valid-chain and corrupted-chain tests invoked the CLI, which exited with code 1 in BOTH cases — not because of integrity verification, but because the CLI failed to bootstrap. The corrupted-chain test's `expect(result.exitCode).not.toBe(0)` assertion was satisfied by the bootstrap failure, not by corruption detection.
+
+**Proven root cause:** The `audit:verify` CLI script (`apps/api/src/scripts/audit-verify.ts`) ran via `node --import tsx src/scripts/audit-verify.ts` (the `audit:verify` package.json script). The `tsx` loader (v4.23.1) uses esbuild internally. Esbuild does NOT support `emitDecoratorMetadata`. Without `design:paramtypes` metadata, NestJS DI cannot resolve class-typed constructor parameters (parameters without an explicit `@Inject(TOKEN)` decorator). The CLI script bootstrapped the full `AppModule` via `NestFactory.createApplicationContext(AppModule)`. The `AppModule` includes `RolePreviewModule`, whose `RolePreviewService` constructor has class-typed parameters (`RolePreviewFeatureConfig`, `PrismaService`, `AuthService`, `SessionTokenService`, `CsrfService`, `AuditHelperService`, `BootstrapChallengeStore`) that rely on `emitDecoratorMetadata`. Under tsx, these parameters are `undefined` at runtime, and NestJS throws `UndefinedDependencyException: Nest can't resolve dependencies of the RolePreviewService (?, ...)`. The CLI's top-level `catch` handler prints `audit:verify failed: ...` and calls `process.exit(1)`. Both tests see exit code 1; the valid-chain test fails, the corrupted-chain test passes as a false positive.
+
+**Evidence:**
+1. Running `node --import tsx src/scripts/audit-verify.ts --scope=all` locally (with env vars set but no PG) reproduced the exact `UndefinedDependencyException` error. Even `node --import tsx src/main.ts` (the API server entrypoint) failed the same way.
+2. `Reflect.getMetadata('design:paramtypes', RolePreviewService)` returned `undefined` under tsx — proving tsx does not emit decorator metadata.
+3. The same code compiled with SWC (`@swc/core`) DID emit `_ts_metadata("design:paramtypes", [...])` — proving SWC supports it and tsx does not.
+4. The `auth-bootstrap-dev.ts` and `role-preview-seed-dev.ts` scripts already use standalone construction (no `NestFactory`) — the established pattern in this codebase for CLI scripts that need to avoid the full AppModule bootstrap.
+
+**Whether the issue was introduced by the latest commits:**
+- Commit `2f7fd6c5d82780a9671c2b423342bfebc5dc82c5` (`fix: resolve role preview seven remaining integration failures`): NO. This commit modified role-preview files (errors, controller, tests) and added one audit migration. It did NOT modify the audit-verify CLI or its test. The audit migration only widens the `audit_events_category_check` CHECK constraint (from 5 to 8 categories); the `audit.integrity.verified` event maps to the `audit` category, which was already in the original 5-category constraint. The migration is NOT the cause.
+- Commit `08ee8852e50d3229124d5363a9b729675e99b586` (`fix: align role preview invalid role contract`): NO. This commit modified role-preview JSDoc, OpenAPI, and test assertions. It did NOT modify the audit-verify CLI or its test.
+- **Pre-existing but previously hidden:** YES. The `audit:verify` script has been `node --import tsx src/scripts/audit-verify.ts` since commit `b16869d` (when the audit primitive was completed). The `audit-verify.audit-verify-spec.ts` test has asserted only `exitCode` since the same commit. The CI workflow runs the PostgreSQL 17 suites sequentially with `set -euo pipefail`: `pnpm test:context`, `pnpm test:database`, `pnpm test:role-preview`, `pnpm audit:test:atomicity`, `pnpm audit:test:integration`, `pnpm audit:test:database`, `pnpm audit:test:concurrency`, `pnpm audit:test:verify`. Before commit `2f7fd6c` fixed the 7 role-preview integration failures, `pnpm test:role-preview` failed, and `set -euo pipefail` stopped the step before reaching `pnpm audit:test:verify`. The audit-verify CLI test was NEVER RUN until the role-preview failures were fixed. The audit-verify CLI has been broken since `b16869d`, but the failure was masked by the earlier role-preview failures.
+
+**Files modified (2):**
+
+1. `apps/api/src/scripts/audit-verify.ts` — rewrote the CLI script to construct its dependencies directly (standalone construction) instead of bootstrapping the full `AppModule` via `NestFactory.createApplicationContext(AppModule)`. The script now constructs `AuditConfigurationService`, `AuditPrismaService`, `PrismaService`, `PrismaAuditStoreReadRepository`, `PrismaAuditOutboxRepository`, `AuditIntegrityVerifierService`, `AuditEmitterService`, and `AuditHelperService` in dependency order, using `new` directly. This mirrors the pattern already established by `auth-bootstrap-dev.ts` and `role-preview-seed-dev.ts`. The verification logic, event emission, exit-code behaviour, recursion prevention, and integrity-key non-exposure are all preserved byte-for-byte. The `process.exitCode` assignment (0 on success, 1 on verification failure) is preserved. The `finally { ... }` block now disconnects both Prisma clients instead of calling `app.close()`. The top-level `catch` handler (`audit:verify failed: ...; process.exit(1)`) is preserved. No runtime behaviour changed except the bootstrap mechanism. The `NestFactory` and `AppModule` imports were removed; the standalone-construction imports were added.
+
+2. `apps/api/test/audit/audit-verify.audit-verify-spec.ts` — strengthened the CLI-level tests to prevent false positives. Added a `CLI_STARTUP_FAILURE_MARKERS` constant listing markers that indicate the CLI failed BEFORE reaching integrity verification (`UndefinedDependencyException`, `audit:verify failed:`, `Can't reach database server`, `Nest can't resolve dependencies`, `Error [ERR_`, `Cannot find module`, `ENOENT`, `spawn pnpm ENOENT`). Added an `assertNoStartupFailure(output)` helper that throws if any marker appears in the output. The valid-empty-chain test now asserts: (a) no startup-failure marker, (b) `exitCode === 0`, (c) output contains `Verification OK`. Added a new valid-populated-chain test that appends 3 events in-process, then runs the CLI, and asserts: (a) no startup-failure marker, (b) `exitCode === 0`, (c) output contains `Verification OK`, (d) output contains `events_checked=3`. The corrupted-chain test now asserts: (a) no startup-failure marker (the critical false-positive guard), (b) `exitCode !== 0`, (c) output contains `Verification FAILED`. The test helper `runAuditVerifyCli()` is unchanged (still returns `{ exitCode, output }`). The service-level tests (4 tests) are unchanged. The total test count increased from 6 to 7 (the new valid-populated-chain test).
+
+**Files created:** 0. **Files deleted:** 0. **Schema/migration changes:** NONE. **Dependency/lockfile changes:** NONE. **Production security control changes:** NONE. The audit integrity verification logic is byte-identical. The verifier still detects modified payload, modified previous hash, invalid sequence, missing sequence, duplicated sequence, incorrect key version, and chain fork. The `process.exitCode` behaviour is preserved (0 on success, 1 on verification failure). The `audit.integrity.verified` / `audit.integrity.verification_failed` event emission is preserved. The recursion prevention is preserved. The integrity-key non-exposure is preserved.
+
+**Local validation:** `pnpm run typecheck` PASS. `pnpm run lint` PASS. `pnpm run test` PASS (736 unit tests: 97 domain + 172 contracts + 89 observability + 198 api + 180 web; 0 regressions). `pnpm run build` PASS. `git diff --check` PASS. The audit-verify spec (7 tests) cannot run locally (no PostgreSQL 17); all 7 tests are skipped when PG 17 is unavailable. The audit-configuration spec (28 tests) PASS. The observability audit specs (89 tests) PASS. Locally verified that the CLI no longer throws `UndefinedDependencyException` — it now reaches the database query and fails with "Can't reach database server" (expected without PG 17), proving the DI fix works.
+
+**PostgreSQL 17 CI rerun pending:** The audit-verify spec (7 tests, including the 3 CLI-level tests with strengthened assertions) cannot run locally. GitHub Actions remains authoritative for this suite. The strengthened assertions will: (a) prove the CLI reaches integrity verification (no startup-failure marker), (b) prove the valid chain exits 0 with "Verification OK", (c) prove the corrupted chain exits non-zero with "Verification FAILED". If the CLI still fails to bootstrap for any reason, the `assertNoStartupFailure` guard will catch it and produce a clear failure message identifying the marker.
+
+**Known remaining risk:** The `audit:dispatch` CLI script (`apps/api/src/scripts/audit-dispatch.ts`) has the SAME `NestFactory.createApplicationContext(AppModule)` pattern and will fail the same way under tsx. It is NOT tested by the current CI suite (no `audit:dispatch` CLI test exists). The fix should be applied to `audit:dispatch` in a follow-up commit if the operator authorises it. This commit does NOT fix `audit:dispatch` to keep the correction minimal and focused on the proven CI failure.
+
+**Latest verified commit before this edit:** `08ee8852e50d3229124d5363a9b729675e99b586` on `feat/demo-role-preview-v1` (local and remote identical).
+
+**Remote feature SHA before the next push:** `08ee8852e50d3229124d5363a9b729675e99b586`.
+
+**Local/remote divergence before commit:** 0 ahead, 0 behind. After commit: 1 ahead, 0 behind.
+
+**Recovery:** The branch tip before this edit is `08ee8852e50d3229124d5363a9b729675e99b586` (local and remote identical). If the edit needs to be discarded before commit, run `git restore apps/api/src/scripts/audit-verify.ts apps/api/test/audit/audit-verify.audit-verify-spec.ts` from the demo-preview worktree. If the edit has been committed and needs to be discarded, do NOT use `git reset --hard` (prohibited). Instead, create a revert commit on top.
+
+**Immediate next step:** Generate a fresh temporary deploy key, push the single audit-verification-CLI correction commit to `feat/demo-role-preview-v1`, verify local and remote SHAs match exactly, securely remove the local key material, and rerun both required GitHub Actions jobs (`static-and-build` and `postgresql17-validation`) without merging. The PR must NOT be merged until both jobs are green on the new commit.

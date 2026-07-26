@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
 import {
   setupDatabaseTests,
   isOwnedCluster,
@@ -30,10 +29,23 @@ import { randomUUID } from 'node:crypto';
  * These tests verify the service-level behaviour (emission of
  * verification events) and the CLI-level behaviour (exit codes).
  *
- * The CLI-level tests run the `audit:verify` script via `pnpm exec`
- * and check the exit code. The script connects to the disposable
- * PostgreSQL cluster (via `DATABASE_URL` and `AUDIT_DATABASE_URL`
- * set in the environment by `setupDatabaseTests`).
+ * The CLI-level tests run the `audit:verify` script via
+ * `pnpm --filter @ibn-hayan/api audit:verify -- <args>` and check
+ * the exit code AND the structured output. The script connects to
+ * the disposable PostgreSQL cluster (via `DATABASE_URL` and
+ * `AUDIT_DATABASE_URL` set in the environment by
+ * `setupDatabaseTests`).
+ *
+ * False-positive prevention: The CLI-level tests assert BOTH the
+ * exit code AND the output marker ("Verification OK" or
+ * "Verification FAILED"). A generic non-zero exit code is NOT
+ * accepted as sufficient evidence of corruption detection. The
+ * tests also check that the output does NOT contain a startup or
+ * configuration failure marker (e.g. "UndefinedDependencyException",
+ * "audit:verify failed:", "Can't reach database server") which
+ * would indicate the CLI failed before reaching integrity
+ * verification. This prevents the corrupted-chain test from
+ * passing as a false positive when the CLI fails to start.
  */
 setupDatabaseTests();
 
@@ -85,6 +97,42 @@ function buildDraft(
     throw new Error(`buildAuditEventDraft failed: ${buildResult.reason}`);
   }
   return { draft: buildResult.draft, eventId };
+}
+
+/**
+ * Markers that indicate the CLI failed BEFORE reaching integrity
+ * verification. If any of these appear in the output, the test
+ * must fail — the exit code alone is not sufficient evidence.
+ */
+const CLI_STARTUP_FAILURE_MARKERS = [
+  'UndefinedDependencyException',
+  'audit:verify failed:',
+  "Can't reach database server",
+  "Nest can't resolve dependencies",
+  'Error [ERR_',
+  'Cannot find module',
+  'ENOENT',
+  'spawn pnpm ENOENT',
+] as const;
+
+/**
+ * Assert that the CLI output does NOT contain any startup-failure
+ * marker. This prevents the corrupted-chain test from passing as
+ * a false positive when the CLI fails to start, fails
+ * configuration validation, or cannot connect to the audit
+ * database.
+ */
+function assertNoStartupFailure(output: string): void {
+  for (const marker of CLI_STARTUP_FAILURE_MARKERS) {
+    if (output.includes(marker)) {
+      throw new Error(
+        `CLI startup/configuration failure detected (marker: "${marker}"). ` +
+          `The CLI did NOT reach integrity verification. ` +
+          `Exit code alone is not sufficient evidence. ` +
+          `Sanitised output excerpt (first 500 chars): ${output.slice(0, 500)}`,
+      );
+    }
+  }
 }
 
 describe('Audit integrity verification', () => {
@@ -180,32 +228,57 @@ describe('Audit integrity verification', () => {
 
   // -------------------------------------------------------------------
   // CLI-level tests: run the `audit:verify` script and check exit
-  // codes. These tests are skipped when not running on an owned
-  // disposable cluster (because the script needs to connect to the
-  // cluster via environment variables).
+  // codes AND output markers. These tests are skipped when not
+  // running on an owned disposable cluster (because the script
+  // needs to connect to the cluster via environment variables).
   // -------------------------------------------------------------------
-  it('CLI audit:verify exits 0 on a valid chain', () => {
+  it('CLI audit:verify exits 0 on a valid empty chain', () => {
     if (!isOwnedCluster()) {
       console.warn('Skipping CLI test: not running on an owned cluster.');
       return;
     }
 
-    // Append a few events to build a valid chain. We do this
-    // synchronously before running the CLI.
-    const apiDir = resolve(__dirname, '..', '..');
-    // Use a synchronous inline script to append events, because the
-    // CLI script runs in a separate process and does not share the
-    // test's database connection.
-    // We already appended events in the beforeEach (none, because
-    // beforeEach truncates). Append 3 events now.
-    // We use the appendRepo directly (in-process) to append.
-    void apiDir; // suppress unused variable
-
-    // We can't use async in this sync test. Skip if we can't append
-    // synchronously. Instead, we verify the CLI exits 0 on an empty
-    // chain (which is trivially valid).
+    // An empty chain (no events) is trivially valid. The verifier
+    // should return OK and the CLI should exit 0.
     const result = runAuditVerifyCli(['--scope=all']);
+
+    // The output must NOT contain a startup-failure marker. This
+    // proves the CLI reached integrity verification.
+    assertNoStartupFailure(result.output);
+
+    // The exit code must be 0 (valid chain).
     expect(result.exitCode).toBe(0);
+
+    // The output must contain the "Verification OK" marker. This
+    // proves the CLI actually ran the verifier and the verifier
+    // returned OK — not that the CLI exited 0 for some other
+    // reason.
+    expect(result.output).toContain('Verification OK');
+  }, 60_000);
+
+  it('CLI audit:verify exits 0 on a valid populated chain', async () => {
+    if (!isOwnedCluster()) {
+      console.warn('Skipping CLI test: not running on an owned cluster.');
+      return;
+    }
+
+    // Append 3 events to build a valid populated chain. We do this
+    // in-process (via the test's auditPrisma connection) before
+    // running the CLI. The CLI runs in a separate process but
+    // connects to the same audit database via AUDIT_DATABASE_URL.
+    for (let i = 0; i < 3; i++) {
+      const { draft } = buildDraft();
+      await appendRepo.append(draft);
+    }
+
+    const result = runAuditVerifyCli(['--scope=all']);
+
+    assertNoStartupFailure(result.output);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain('Verification OK');
+    // The output should report that 3 events were checked.
+    expect(result.output).toContain('events_checked=3');
   }, 60_000);
 
   it('CLI audit:verify exits non-zero on a corrupted chain', async () => {
@@ -225,20 +298,42 @@ describe('Audit integrity verification', () => {
     await auditPrisma.$executeRaw`ALTER TABLE "audit_events" ENABLE TRIGGER USER`;
 
     const result = runAuditVerifyCli(['--scope=all']);
+
+    // The output must NOT contain a startup-failure marker. This
+    // is the critical false-positive guard: if the CLI failed to
+    // start (e.g. DI error, missing env var, DB connection error),
+    // the exit code would be non-zero but NOT because of integrity
+    // verification. The startup-failure marker check ensures the
+    // non-zero exit is genuinely because the verifier detected
+    // corruption.
+    assertNoStartupFailure(result.output);
+
+    // The exit code must be non-zero.
     expect(result.exitCode).not.toBe(0);
+
+    // The output must contain the "Verification FAILED" marker.
+    // This proves the CLI actually ran the verifier and the
+    // verifier detected the corruption — not that the CLI exited
+    // non-zero for some unrelated reason.
+    expect(result.output).toContain('Verification FAILED');
   }, 60_000);
 });
 
 /**
  * Run the `audit:verify` CLI script with the given arguments.
  *
- * The script is run via `pnpm --filter @ibn-hayan/api audit:verify`
- * so that the Prisma clients are generated before the script runs.
- * The environment is inherited from the current process (which
- * includes `DATABASE_URL` and `AUDIT_DATABASE_URL` set by
- * `setupDatabaseTests`).
+ * The script is run via
+ *   pnpm --filter @ibn-hayan/api audit:verify -- <args>
+ * so that the `preaudit:verify` hook (Prisma client generation)
+ * runs before the script. The environment is inherited from the
+ * current process (which includes `DATABASE_URL` and
+ * `AUDIT_DATABASE_URL` set by `setupDatabaseTests`).
  *
  * Returns the exit code and the combined stdout+stderr output.
+ * The output is used by the caller to assert structured markers
+ * (e.g. "Verification OK", "Verification FAILED") and to detect
+ * startup/configuration failures that would produce a false
+ * positive exit code.
  */
 function runAuditVerifyCli(args: string[]): {
   exitCode: number;

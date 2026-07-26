@@ -6,10 +6,12 @@ import { LanguageSwitch } from '@/components/marketing/language-switch';
 import { Button } from '@/components/ui/button';
 import { getClinicAdminCopy } from './clinic-admin-copy';
 import { NotificationBell } from './notification-bell';
+import { RolePreviewSwitcher } from '@/components/role-preview/role-preview-switcher';
 import type {
   ActiveOrganisationContext,
   ActiveFacilityContext,
   ActiveTenantContext,
+  RolePreviewRoleCard,
 } from '@ibn-hayan/contracts';
 
 /**
@@ -29,6 +31,14 @@ import type {
  * The header reads active context from the canonical session-context
  * module (ADR-015) via props. It must never accept tenant,
  * organisation, or facility scope from untrusted URL parameters.
+ *
+ * Per the Demo Role Preview Mode v1 specification, the header may
+ * optionally render a role switcher when preview mode is enabled
+ * and the current session belongs to the isolated preview
+ * workspace. The switcher is rendered only when the parent passes
+ * a non-null `previewRoles` prop. The switcher does NOT replace
+ * the active organisation/facility context, the language switch,
+ * the notification bell, the profile menu, or the sign-out control.
  */
 export interface ClinicAdminHeaderProps {
   /** The active section title (e.g. the page H1). */
@@ -47,6 +57,19 @@ export interface ClinicAdminHeaderProps {
   readonly signingOut: boolean;
   /** Sidebar toggle handler (for mobile drawer). */
   readonly onToggleSidebar?: () => void;
+  /**
+   * Canonical preview role cards (R01 through R14). When non-null,
+   * the header renders the Demo Role Preview Mode role switcher.
+   * When `null`, the switcher is absent (normal production mode
+   * or non-preview session).
+   */
+  readonly previewRoles?: readonly RolePreviewRoleCard[] | null;
+  /**
+   * The currently selected preview role code, or `null` when no
+   * preview role is selected. Ignored when `previewRoles` is
+   * `null` or `undefined`.
+   */
+  readonly currentPreviewRoleCode?: string | null;
 }
 
 /**
@@ -61,6 +84,8 @@ export function ClinicAdminHeader({
   onSignOut,
   signingOut,
   onToggleSidebar,
+  previewRoles,
+  currentPreviewRoleCode,
 }: ClinicAdminHeaderProps): ReactElement {
   const { lang } = useLanguage();
   const copy = getClinicAdminCopy(lang);
@@ -159,6 +184,12 @@ export function ClinicAdminHeader({
         </div>
 
         <div className="ih-clinic-admin-header__actions">
+          {previewRoles !== undefined && previewRoles !== null && (
+            <RolePreviewSwitcher
+              roles={previewRoles}
+              currentRoleCode={currentPreviewRoleCode ?? null}
+            />
+          )}
           <LanguageSwitch />
           <NotificationBell />
           <form onSubmit={onSignOut} className="ih-clinic-admin-header__signout-form">

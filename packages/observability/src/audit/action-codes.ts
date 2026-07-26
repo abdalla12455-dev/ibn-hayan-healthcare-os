@@ -182,6 +182,47 @@ export type AuditSystemActionCode =
   (typeof AUDIT_SYSTEM_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Role Preview (Demo Role Preview Mode v1 — development-only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Demo Role Preview Mode action codes.
+ *
+ * Emitted by the role-preview module
+ * (`apps/api/src/modules/dev/role-preview/`) when a preview session
+ * is created (role switch), bootstrapped (initial logged-out
+ * selection), or ended. The module is development-only; these
+ * action codes are emitted ONLY when the feature flag is enabled
+ * and `NODE_ENV !== 'production'`. They never appear in production
+ * audit logs.
+ *
+ * Per the Demo Role Preview Mode v1 specification, the audit event
+ * metadata includes the role code being switched to (for `created`
+ * and `bootstrapped`) and the endpoint name. The event does NOT
+ * include any credential material, any session token, any password,
+ * any bootstrap nonce, any bootstrap nonce hash, any CSRF token,
+ * any internal UUID beyond the actor's user ID and the new
+ * session's ID (which are already part of the audit event's
+ * standard fields).
+ *
+ * The `role_preview.session.bootstrapped` action code is emitted
+ * when a logged-out operator selects a canonical role through the
+ * one-time bootstrap challenge flow. The audit event for
+ * `bootstrapped` is emitted in the same Prisma transaction as the
+ * new session creation, so it commits or rolls back atomically
+ * with the session. The metadata carries only `endpoint` (value
+ * `role_preview_bootstrap_select`) and `roleCode`.
+ */
+export const ROLE_PREVIEW_ACTION_CODES = [
+  'role_preview.session.created',
+  'role_preview.session.ended',
+  'role_preview.session.bootstrapped',
+] as const;
+
+export type RolePreviewActionCode =
+  (typeof ROLE_PREVIEW_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -200,6 +241,7 @@ export const AUDIT_ACTION_CODES = [
   ...FACILITY_CONTEXT_ACTION_CODES,
   ...RBAC_ACTION_CODES,
   ...AUDIT_SYSTEM_ACTION_CODES,
+  ...ROLE_PREVIEW_ACTION_CODES,
 ] as const;
 
 /**
@@ -255,6 +297,9 @@ export function inferCategoryFromAction(
   }
   if (action.startsWith('audit.')) {
     return 'audit';
+  }
+  if (action.startsWith('role_preview.')) {
+    return 'role_preview';
   }
   return null;
 }
