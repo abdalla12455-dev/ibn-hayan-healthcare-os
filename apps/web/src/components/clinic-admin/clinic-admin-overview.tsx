@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useLanguage } from '@/components/i18n/language-context';
 import { getClinicAdminCopy } from './clinic-admin-copy';
 import { getClinicAdminOverview } from '@/lib/api/clinic-admin';
+import type { ClinicAdminOverviewClientResult } from '@/lib/api/clinic-admin';
 import type { ApiError } from '@/lib/api/api-error';
 import type {
   ClinicAdminOverviewResponse,
@@ -83,6 +84,34 @@ import type {
  * might pass `false`, but the page never did) and duplicated the
  * shell's existing gate. The prop was removed to keep the
  * component's contract honest.
+ *
+ * ────────────────────────────────────────────────────────────────────
+ * Request isolation (component-scoped in-flight Promise)
+ * ────────────────────────────────────────────────────────────────────
+ *
+ * The component owns a component-scoped `useRef<Promise<...> | null>`
+ * (`inflightRef`) that stores the in-flight Overview request Promise.
+ * The ref is the deduplication boundary for the React Strict Mode
+ * effect replay: the first effect execution creates the Promise and
+ * stores it in the ref; the second effect execution (on the SAME
+ * component instance) reuses it. Only ONE underlying `fetch` call
+ * reaches the server per Strict Mode mount cycle.
+ *
+ * The ref is NOT shared across:
+ * - separate component instances (each instance has its own ref);
+ * - genuine unmount + remount (the ref is destroyed on unmount);
+ * - authenticated-context changes (the shell redirects on logout,
+ *   tenant/organisation/facility change, and Role Preview entry/exit,
+ *   unmounting this component; the remount creates a fresh ref);
+ * - two simultaneously mounted components (each has its own ref).
+ *
+ * This design replaces the previous module-level URL-keyed in-flight
+ * registry, which shared a Promise across every authenticated
+ * session, tenant, organisation, facility, Role Preview state, and
+ * concurrently mounted Clinic Admin surface in the same browser tab.
+ * See the `inflightRef` declaration below and the client docstring in
+ * `apps/web/src/lib/api/clinic-admin/clinic-admin.client.ts` for the
+ * full rationale.
  */
 
 type LoadState =
@@ -107,29 +136,122 @@ export function ClinicAdminOverview(): ReactElement {
   // `useEffect` includes `fetchTrigger` in its deps, so incrementing
   // the trigger re-runs the effect (and starts a new fetch).
   //
-  // The `cancelled` flag in the effect's closure ensures that a
-  // stale fetch's result is NOT applied: when the effect re-runs
-  // (on mount, Strict Mode re-mount, or retry), the previous
-  // closure's cleanup sets `cancelled = true`, so the previous
-  // fetch's `.then()` callback is a no-op.
+  // ────────────────────────────────────────────────────────────────
+  // Component-scoped in-flight Promise (request isolation)
+  // ────────────────────────────────────────────────────────────────
   //
-  // This pattern is the standard React way to fetch in `useEffect`
-  // under Strict Mode. The previous `fetchedRef` pattern was
-  // incorrect: in Strict Mode, the first mount's cleanup set
-  // `cancelled = true`, the second mount saw `fetchedRef.current =
-  // true` and returned early (NO new fetch), and the first fetch's
-  // result was discarded — leaving the component in the loading
-  // state forever. The `cancelled` flag pattern correctly handles
-  // Strict Mode: two fetches happen, but only the second one's
-  // result is applied.
+  // `inflightRef` stores the in-flight Overview request Promise for
+  // THIS mounted component instance. The ref is the deduplication
+  // boundary: it is reused across the React Strict Mode effect
+  // replay (mount → cleanup → re-mount-on-same-instance), so a
+  // single Strict Mode mount cycle produces exactly ONE underlying
+  // `fetch` call. The ref is NOT shared across:
+  // - separate component instances (each instance has its own ref);
+  // - genuine unmount + remount (the ref is destroyed on unmount);
+  // - authenticated-context changes (the shell redirects on logout,
+  //   tenant/org/facility change, and Role Preview entry/exit,
+  //   unmounting this component; the remount creates a fresh ref);
+  // - two simultaneously mounted components (each has its own ref).
+  //
+  // The ref is cleared:
+  // - when the Promise settles (via `.finally()`, so a later
+  //   navigation or retry makes a fresh request);
+  // - before an explicit retry (the retry handler sets the ref to
+  //   `null` before incrementing `fetchTrigger`, so the new effect
+  //   run starts a fresh fetch even if the previous fetch is still
+  //   pending).
+  //
+  // The ref is NOT cleared by the effect's cleanup function. The
+  // cleanup only sets `cancelled = true` (to prevent stale state
+  // updates). This is critical for the Strict Mode replay: if the
+  // cleanup cleared the ref, the second effect run would see an
+  // empty ref and start a fresh fetch, defeating the deduplication.
+  //
+  // The ref holds a Promise only while it is in flight. It NEVER
+  // holds resolved data — the Promise is removed when it settles,
+  // so a later navigation makes a fresh request (no persistent
+  // stale-data caching).
+  //
+  // The ref contains NO tenant, organisation, facility, user,
+  // session, or cookie values. It contains only a Promise object
+  // (or `null`). The Promise itself carries no business-data
+  // identifiers in its identity; the resolved value is parsed by
+  // the client and applied to component state, never persisted in
+  // the ref.
+  //
+  // This design satisfies the request-isolation correction Phase 3:
+  // 1. The Promise is kept inside the mounted component (useRef).
+  // 2. The Promise is stored in a React reference.
+  // 3. The Promise is reused during the Strict Mode effect replay.
+  // 4. Each independently mounted component instance owns its own
+  //    request (its own ref).
+  // 5. The ref is cleared after settlement.
+  // 6. The ref is cleared before an explicit retry.
+  // 7. A completed response does NOT become persistent cached data.
+  // 8. One authenticated context cannot share a Promise with
+  //    another context (each component instance has its own ref;
+  //    context changes unmount the component).
+  // 9. One browser navigation cannot share a settled response with
+  //    a later navigation (the ref is destroyed on unmount).
+  // 10. One underlying request is preserved during the Strict Mode
+  //     effect replay.
+  // 11. Cancellation of stale state updates after cleanup is
+  //     preserved (the `cancelled` flag).
+  // 12. The shared Promise is NOT cancelled when the first Strict
+  //     Mode effect cleanup runs (the cleanup only sets `cancelled`,
+  //     it does NOT clear the ref or abort the fetch).
+  // 13. No tenant/organisation/facility/user/session/cookie values
+  //     are stored in a module-global cache (there is no
+  //     module-global cache).
+  // 14. No dependency is added.
+  // 15. The backend contract is unchanged.
+  // 16. The audit contract is unchanged.
   const [fetchTrigger, setFetchTrigger] = useState(0);
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
+  const inflightRef = useRef<Promise<ClinicAdminOverviewClientResult> | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
+
+    // Reuse the in-flight Promise if one exists for this component
+    // instance. This is the deduplication mechanism for the React
+    // Strict Mode effect replay: the first effect execution creates
+    // the Promise and stores it in the ref; the second effect
+    // execution (on the SAME component instance) reuses it. Only ONE
+    // underlying `fetch` call reaches the server.
+    //
+    // The ref is NOT cleared here — it is cleared by the Promise's
+    // `.finally()` when it settles, and by the retry handler before
+    // incrementing `fetchTrigger`.
+    let promise = inflightRef.current;
+    if (promise === null) {
+      promise = getClinicAdminOverview();
+      inflightRef.current = promise;
+
+      // Clear the ref when the Promise settles. This ensures:
+      // - a later navigation makes a fresh request (no persistent
+      //   stale-data caching);
+      // - an explicit retry after failure makes a fresh request;
+      // - the ref never holds resolved data.
+      //
+      // The guard `if (inflightRef.current === promise)` ensures we
+      // only clear the ref if it still points to THIS Promise. If
+      // the user clicked retry while this Promise was pending, the
+      // retry handler set the ref to `null` (or to a new Promise),
+      // so this `.finally()` is a no-op — it does NOT clobber the
+      // retry's new Promise.
+      void promise.finally(() => {
+        if (inflightRef.current === promise) {
+          inflightRef.current = null;
+        }
+      });
+    }
+
     void (async () => {
       setState({ kind: 'loading' });
-      const result = await getClinicAdminOverview();
+      const result = await promise!;
       if (cancelled) {
         return;
       }
@@ -140,6 +262,11 @@ export function ClinicAdminOverview(): ReactElement {
       }
     })();
     return () => {
+      // The cleanup sets `cancelled = true` so the previous effect's
+      // `.then()` callback is a no-op. The cleanup does NOT clear
+      // `inflightRef.current` and does NOT abort the fetch. This is
+      // critical for the Strict Mode replay: the second effect
+      // execution must see the same in-flight Promise.
       cancelled = true;
     };
   }, [fetchTrigger]);
@@ -167,9 +294,15 @@ export function ClinicAdminOverview(): ReactElement {
         lang={lang}
         overviewCopy={overviewCopy}
         onRetry={() => {
-          // Increment `fetchTrigger` to re-run the `useEffect` and
-          // start a new fetch. The previous fetch's `cancelled` flag
-          // ensures its result is NOT applied.
+          // Clear the in-flight Promise ref BEFORE incrementing
+          // `fetchTrigger`. This ensures the new effect run starts a
+          // fresh fetch even if the previous fetch is still pending.
+          // The previous fetch's `.finally()` will fire when it
+          // settles, but the guard `if (inflightRef.current ===
+          // promise)` will be false (the ref now points to the new
+          // fetch's Promise, or to `null`), so it will NOT clobber
+          // the retry's new Promise.
+          inflightRef.current = null;
           setFetchTrigger((n) => n + 1);
         }}
       />

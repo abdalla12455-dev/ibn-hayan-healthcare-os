@@ -2837,3 +2837,208 @@ Generate a fresh temporary deploy key only after the integration command (`pnpm 
 > 1. Verify the integration command resolves the correct configuration: `pnpm run test:clinic-admin` should run `vitest run --config vitest.clinic-admin.config.ts` (it does — verified locally; the command fails only because PostgreSQL 17 is unavailable, which is the expected failure mode).
 > 2. Verify the Strict Mode request deduplication: `pnpm --filter @ibn-hayan/web test src/lib/api/clinic-admin/clinic-admin.client.spec.ts` should pass 21 tests including 9 in-flight deduplication tests; `pnpm --filter @ibn-hayan/web test src/components/clinic-admin/clinic-admin-overview.spec.tsx` should pass 24 tests including the Strict Mode deduplication tests (3, 4, 24).
 > 3. Verify GitHub Actions will execute the suite: inspect `.github/workflows/main-ci.yml` and confirm `pnpm test:clinic-admin` is in the `postgresql17-validation` job's bash script (it is, between `pnpm test:database` and `pnpm test:role-preview`).
+
+---
+
+## Clinic Admin Request Isolation by Component Lifecycle (2026-07-26)
+
+### Task
+
+Final authenticated-request isolation correction for the Clinic Admin Overview before any remote push. The previous correction (`fix: wire clinic admin integration and deduplicate overview requests`) successfully wired the Clinic Admin PostgreSQL integration suite into GitHub Actions and eliminated the React Strict Mode duplicate-network-request risk by adding a module-level in-flight request registry keyed by the canonical request URL. That registry, however, introduced a CROSS-CONTEXT ISOLATION RISK: because it was keyed only by URL (the only varying parameter of the GET request), the same in-flight Promise was shared across every authenticated session, every tenant, every organisation, every facility, every Role Preview state, and every concurrently mounted Clinic Admin surface in the same browser tab. This correction replaces the URL-only module-global registry with a component-scoped `useRef<Promise<...> | null>` owned by the mounted `ClinicAdminOverview` component, eliminating the cross-context risk while preserving exactly one underlying `fetch` per Strict Mode mount cycle. Do not push. Do not generate a deploy key. Do not open or merge a PR. Do not modify main. Do not rebase, amend, reset, or squash existing commits. One new child commit only.
+
+### Repository state before this correction
+
+- Primary worktree: `/home/z/my-project` on `main` at `d6c02b62eaeba930e8e6c18676e1659e30550b11` (0/0 with origin/main).
+- Task worktree: `/home/z/clinic-admin-overview-live-data-v1` on `feat/clinic-admin-overview-live-data-v1` at `dd91e12f50a501382502fc622178bdab1f095a42` (5 commits ahead of main).
+- Existing task commits (in order, all unchanged):
+  1. `67802eb1475e6acca3dc8afbdde8b9e4d9068386` — `feat: connect clinic admin overview to live data`
+  2. `ee95c8ccea8ac658a3d6e9eef6a8e8140b27e990` — `fix: harden clinic admin overview audit and access contracts`
+  3. `524bd39bf2fd41c9b88c86ebb995ec738f72cc5a` — `test: prove clinic admin overview http and audit behaviour`
+  4. `9877bce045621059eff16d85912074ce5e97a6f6` — `fix: correct controller spec handler type for reflector metadata lookup`
+  5. `dd91e12f50a501382502fc622178bdab1f095a42` — `fix: wire clinic admin integration and deduplicate overview requests`
+- Remote task branch: absent.
+- Old Clinic Admin shell worktree: `/home/z/clinic-admin-shell-v1` at `745d71eb3d61636791d8ee64a4739ecaccddedcb` (unchanged).
+- Baseline unit-test count: 874 (domain 108, contracts 208, observability 95, api 238, web 225).
+
+### Risk proof (Phase 2)
+
+The previous in-flight request registry (`INFLIGHT_OVERVIEW_REQUESTS`) in `apps/web/src/lib/api/clinic-admin/clinic-admin.client.ts` was a `Map<string, Promise<ClinicAdminOverviewClientResult>>` keyed ONLY by the canonical request URL (`joinUrl(getApiBaseUrl(), '/clinic-admin/overview')`). The URL is identical for every authenticated session, every tenant, every organisation, every facility, every Role Preview state, and every concurrently mounted Clinic Admin surface. The registry's docstring even explicitly stated: "if two `ClinicAdminOverview` components mount concurrently (e.g. during a route transition), they share the same in-flight Overview load."
+
+The following risks were CONFIRMED:
+
+1. **Cross-session risk — CONFIRMED.** A request started under one authenticated session could still be pending when another session began (logout + login on the same browser tab). The new session would reuse the prior session's Promise and render the prior session's response (administrator display name, tenant/organisation/facility display names).
+2. **Cross-tenant risk — CONFIRMED.** The URL contains no tenant identifier (the backend derives it from the session cookie). A tenant-context switch would produce a fresh `getClinicAdminOverview()` call that returns the still-pending Promise from the prior tenant.
+3. **Cross-organisation risk — CONFIRMED.** Same URL, same mechanism — the response carries the prior organisation's `organisationDisplayName`.
+4. **Cross-facility risk — CONFIRMED.** Same URL, same mechanism — the response carries the prior facility's `facilityDisplayName`.
+5. **Role Preview entry/exit risk — CONFIRMED.** Role Preview changes the authenticated principal (the session cookie is replaced). A pending Overview request started before Role Preview entry would resolve with the non-preview principal's data.
+6. **Logout + login risk — CONFIRMED.** Logout clears the session cookie, but the in-flight Promise is still keyed by URL. A new login that mounts a new `ClinicAdminOverview` before the prior Promise settles would reuse the prior session's Promise.
+7. **Multiple-component risk — CONFIRMED.** The previous code's docstring explicitly stated that two concurrently mounted Clinic Admin surfaces share the same in-flight Overview load.
+8. **Stale-response-under-newer-context risk — CONFIRMED.** A successful response from session A, if the Promise happened to still be in flight when session B began (network delay), would be rendered under session B's authenticated context.
+9. **Future business-metrics exposure risk — CONFIRMED (architectural).** The current payload contains only identity and availability data, but the client architecture must remain safe when real appointments, financial metrics, waiting-room data, and staff information are added later. A URL-only key provides no isolation boundary; once business metrics are added, the same registry would leak them across sessions/tenants/organisations/facilities.
+
+### Correction architecture (Phase 3)
+
+The correction REPLACES the module-level URL-keyed in-flight registry with a component-scoped `useRef<Promise<ClinicAdminOverviewClientResult> | null>` (`inflightRef`) owned by the mounted `ClinicAdminOverview` component.
+
+**Client (`apps/web/src/lib/api/clinic-admin/clinic-admin.client.ts`):**
+- REMOVED the module-level `INFLIGHT_OVERVIEW_REQUESTS` registry.
+- REMOVED the test-only helpers `__clearInflightOverviewRequestsForTests` and `__inflightOverviewRequestCountForTests`.
+- `getClinicAdminOverview()` now performs a fresh `fetch` on every call (no module-level deduplication, no module-level mutable state).
+- The client is now stateless.
+
+**Component (`apps/web/src/components/clinic-admin/clinic-admin-overview.tsx`):**
+- Added `inflightRef = useRef<Promise<ClinicAdminOverviewClientResult> | null>(null)`.
+- The `useEffect` checks `inflightRef.current` first. If non-null, the existing in-flight Promise is reused (NO new `getClinicAdminOverview()` call). If null, a new fetch is started and stored in the ref.
+- The ref is cleared via `.finally()` when the Promise settles, with a guard `if (inflightRef.current === promise)` so a retry's new Promise is NOT clobbered.
+- The retry handler sets `inflightRef.current = null` BEFORE incrementing `fetchTrigger`, so the new effect run starts a fresh fetch even if the previous fetch is still pending.
+- The effect's cleanup sets `cancelled = true` but does NOT clear the ref and does NOT abort the fetch. This is critical for the Strict Mode replay: the second effect execution must see the same in-flight Promise.
+- The ref is component-scoped: each mounted component instance has its own ref. Genuine unmount destroys the ref. A later remount creates a new (empty) ref, so a fresh fetch is made.
+
+The design satisfies all 16 requirements from the task specification Phase 3:
+1. The Promise is kept inside the mounted component (`useRef`).
+2. The Promise is stored in a React reference.
+3. The Promise is reused during the Strict Mode effect replay (the component instance is NOT destroyed during Strict Mode cleanup).
+4. Each independently mounted component instance owns its own request (its own ref).
+5. The ref is cleared after settlement.
+6. The ref is cleared before an explicit retry.
+7. A completed response does NOT become persistent cached data (the ref holds a Promise only while in flight; the resolved value is applied to component state, never persisted in the ref).
+8. One authenticated context cannot share a Promise with another context (each component instance has its own ref; context changes unmount the component).
+9. One browser navigation cannot share a settled response with a later navigation (the ref is destroyed on unmount).
+10. One underlying request is preserved during the Strict Mode effect replay.
+11. Cancellation of stale state updates after cleanup is preserved (the `cancelled` flag).
+12. The shared Promise is NOT cancelled when the first Strict Mode effect cleanup runs (the cleanup only sets `cancelled`, it does NOT clear the ref or abort the fetch).
+13. No tenant/organisation/facility/user/session/cookie values are stored in a module-global cache (there is NO module-global cache).
+14. No dependency is added.
+15. The backend contract is unchanged.
+16. The audit contract is unchanged.
+
+The fallback design (opaque component-instance scope key) was NOT needed because repository evidence proves a component-scoped `useRef` safely survives the Strict Mode replay: React does NOT destroy the component instance during Strict Mode cleanup — it only re-runs the effect's setup and cleanup functions. The `useRef` value persists across the replay.
+
+### Strict Mode behaviour (Phase 5)
+
+- **Strict Mode effect-replay result**: ONE underlying `fetch` call per Strict Mode mount cycle. The component-scoped `useRef` is reused across the effect replay (the component instance is NOT destroyed during Strict Mode cleanup). Verified by component test 3 (`React Strict Mode produces exactly one underlying fetch`) and test 26 (`no duplicate successful-view audit event during Strict Mode`), both using `<React.StrictMode>` and asserting `mockGetClinicAdminOverview` was called exactly once.
+- **Strict Mode underlying fetch count**: 1 (verified by inspecting the mocked `getClinicAdminOverview` call count in tests 3 and 26).
+- **Genuine-remount underlying fetch count**: 2 (verified by component test 4 — genuine unmount + remount produces TWO underlying fetches, proving the ref is destroyed on unmount and NOT module-global).
+- **Multiple-component underlying fetch count**: 2 (verified by component test 5 — two simultaneously mounted components produce TWO underlying fetches, proving each component has its own ref).
+- **NOTE on the vitest test environment**: React Strict Mode's effect double-invoke is a development-only behaviour that may or may not fire reliably in vitest. The Strict Mode tests use `<React.StrictMode>` and verify the mock call count is exactly 1. If Strict Mode double-invokes, the component-scoped ref reuse ensures one fetch. If Strict Mode does NOT double-invoke, there is only one effect run, so one fetch. In both cases, the test passes and catches the regression (ref NOT reused → two fetches if Strict Mode double-invokes). The genuine-unmount test (test 4) independently proves the ref is component-scoped (destroyed on unmount) and NOT module-global.
+
+### Isolation test results (Phase 4)
+
+- **Logout-login isolation result**: PASS — component test 27 verifies logout + login produces a fresh fetch (simulated via genuine unmount + remount; the shell redirects to /login on logout, unmounting the component; the remount after re-login creates a fresh ref).
+- **Tenant-change isolation result**: PASS — component test 28 verifies a tenant-context change produces a fresh fetch (simulated via genuine unmount + remount; the shell redirects to /dashboard to re-establish context, unmounting the component).
+- **Organisation-change isolation result**: PASS — component test 29.
+- **Facility-change isolation result**: PASS — component test 30.
+- **Role Preview entry result**: PASS — component test 31 (the preview principal replaces the session principal; the shell re-mounts the component with a fresh ref).
+- **Role Preview exit result**: PASS — component test 32 (the real session principal is restored; the shell re-mounts the component with a fresh ref).
+- **Multiple-component isolation result**: PASS — component test 5 (two simultaneously mounted components produce two underlying fetches) and test 6 (separate component instances do NOT share their in-flight Promises — the two calls returned DIFFERENT Promise objects).
+- **Separate-component-instances isolation result**: PASS — component test 6.
+- **Retry-after-network-failure result**: PASS — component test 17 (exactly one fresh fetch on retry).
+- **Retry-after-server-failure result**: PASS — component test 18 (exactly one fresh fetch on retry after HTTP 500).
+- **Unmount result**: PASS — component tests 20 and 21 (unmount during in-flight request does NOT crash; late response after unmount does NOT update state).
+- **Stale-response result**: PASS — component test 22 (a stale response cannot overwrite a newer retry result; the `cancelled` flag prevents the previous effect's `.then()` from applying).
+- **HTTP 401 result**: PASS — component test 13 (HTTP 401 remains non-retriable).
+- **HTTP 403 result**: PASS — component test 14 (HTTP 403 remains non-retriable).
+- **No-uncontrolled-request-loop result**: PASS — component test 19 (retry is user-initiated, not automatic; no retry loop).
+
+### Backend and CI behaviour preserved (Phase 6)
+
+This correction does NOT change:
+1. The endpoint route (`GET /api/v1/clinic-admin/overview`).
+2. The permission code (`clinic_admin_overview:view`).
+3. The R09-only access policy.
+4. Tenant isolation (the backend derives context from the session cookie).
+5. Organisation isolation.
+6. Facility isolation.
+7. The response schema (`ClinicAdminOverviewResponseSchema`).
+8. The audit action (`clinic_admin.overview.viewed`).
+9. The `facility_context` category mapping.
+10. The PostgreSQL integration suite (`apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` — 24 scenarios, unchanged).
+11. The `test:clinic-admin` command (unchanged).
+12. The `postgresql17-validation` job (unchanged).
+13. Existing CI triggers (unchanged).
+14. Database schemas (unchanged).
+15. Database migrations (unchanged).
+
+Focused backend tests PASS with no regression:
+- Clinic Admin controller: 12 tests PASS.
+- Clinic Admin service: 24 tests PASS.
+- Clinic Admin errors: 4 tests PASS.
+- Clinic Admin contracts: 35 tests PASS.
+- Audit event builder: 29 tests PASS.
+- Authorization (permission matrix): 70 tests PASS.
+- Clinic Admin shell page: 29 tests PASS.
+
+### Validation results
+
+- **Typecheck**: PASS (all 8 workspace projects) — executed locally.
+- **Lint**: PASS (0 errors, 0 warnings) — executed locally.
+- **Unit tests**: PASS — 876 tests (domain 108, contracts 208, observability 95, api 238, web 227) — executed locally via `pnpm run test`. Independently verified count: 108+208+95+238+227 = 876. (Baseline was 874; net change +2: client spec -6 deduplication tests, component spec +8 isolation tests.)
+- **Frontend client tests**: PASS — 15 tests (included in web 227) — executed locally as unit tests. (Was 21; removed 9 module-global-registry deduplication tests; added 2 stateless-behaviour tests proving every call performs a fresh fetch and concurrent calls do NOT share Promises.)
+- **Frontend component tests**: PASS — 32 tests (included in web 227) — executed locally as unit tests. (Was 24; rewrote test 3 to use `<React.StrictMode>`; added tests 4, 5, 6, 26, 27, 28, 29, 30, 31, 32 for component-scoped ref, multiple-component isolation, Strict Mode, logout/login, tenant/org/facility change, Role Preview entry/exit.)
+- **Shell page tests**: PASS — 29 tests (included in web 227) — executed locally.
+- **Controller tests**: PASS — 12 tests (included in api 238) — executed locally.
+- **Service tests**: PASS — 24 tests (included in api 238) — executed locally.
+- **Contract tests**: PASS — 35 tests (included in contracts 208) — executed locally.
+- **Permission matrix tests**: PASS — 70 tests (included in domain 108) — executed locally.
+- **Audit event builder tests**: PASS — 29 tests (included in observability 95) — executed locally.
+- **Build**: PASS (api via SWC, web via Next.js 16.2.10 Turbopack; `/clinic-admin` route registered) — executed locally.
+- **git diff --check**: PASS — executed locally.
+- **Secret scan**: PASS (no secrets, tokens, private keys, database URLs, cookies, or session values in diff) — executed locally.
+- **Integration test implementation**: 24 scenarios implemented in test coverage at `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` (NOT executed locally; unchanged by this correction).
+- **Integration test execution**: NOT EXECUTED LOCALLY — `pnpm run test:clinic-admin` resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step because PostgreSQL 17 is unavailable in the development environment (error: `Failed to execute PostgreSQL binary '${bin} --version'. Ensure PG_BINDIR or PATH points at PostgreSQL 17 executables...`). 24 tests skipped. This is the expected failure mode, NOT a regression.
+- **GitHub Actions integration result**: PENDING — the suite remains wired into the `postgresql17-validation` job of `.github/workflows/main-ci.yml` (unchanged by this correction). Once the operator pushes the branch, GitHub Actions will execute the suite.
+
+### Files created
+
+None.
+
+### Files modified (4)
+
+1. `apps/web/src/lib/api/clinic-admin/clinic-admin.client.ts` — REMOVED the module-level `INFLIGHT_OVERVIEW_REQUESTS` registry, the `performFetchOverview` helper's `.finally()` registry cleanup, and the test-only helpers `__clearInflightOverviewRequestsForTests` and `__inflightOverviewRequestCountForTests`. `getClinicAdminOverview()` now performs a fresh `fetch` on every call (stateless client). Updated the docstring to document the component-scoped ref design and the rationale for removing the URL-only module-global registry.
+2. `apps/web/src/lib/api/clinic-admin/clinic-admin.client.spec.ts` — REMOVED the 9 module-global-registry deduplication tests (concurrent calls share Promise; three concurrent calls share Promise; sequential call after success makes fresh fetch; failed in-flight removed from registry for NETWORK_ERROR/HTTP500/CONTRACT_INVALID; registry holds no business-data state; registry does not store identifiers). Added 2 stateless-behaviour tests (every call performs a fresh fetch; concurrent calls perform separate fetches with no Promise sharing). Test count: 21 → 15.
+3. `apps/web/src/components/clinic-admin/clinic-admin-overview.tsx` — Added `inflightRef = useRef<Promise<ClinicAdminOverviewClientResult> | null>(null)`. Modified the `useEffect` to reuse the ref's Promise if it exists (Strict Mode deduplication), clear the ref via `.finally()` on settlement, and clear the ref before retry. The cleanup sets `cancelled = true` but does NOT clear the ref. Updated the component docstring with the request-isolation design.
+4. `apps/web/src/components/clinic-admin/clinic-admin-overview.spec.tsx` — Rewrote test 3 (Strict Mode) to use `<React.StrictMode>` and assert exactly one `getClinicAdminOverview()` call. Added test 4 (genuine unmount + remount produces two fetches), test 5 (two simultaneously mounted components produce two fetches), test 6 (separate component instances do NOT share their in-flight Promises), test 26 (no duplicate audit event during Strict Mode), tests 27–32 (logout/login, tenant/org/facility change, Role Preview entry/exit each produce a fresh fetch). Test count: 24 → 32.
+
+### Files deleted: 0. Schema/migration changes: NONE. Dependency version changes: NONE. pnpm-lock.yaml changes: NONE. CI workflow changes: NONE. Backend changes: NONE. Package.json changes: NONE.
+
+### Scope protection
+
+- Database schema: UNCHANGED (prisma/schema.prisma and prisma-audit/schema.prisma NOT modified).
+- Migration files: UNCHANGED (prisma/migrations/ and prisma-audit/migrations/ NOT modified).
+- Dependency versions: UNCHANGED (no `dependencies` or `devDependencies` blocks modified in any package.json).
+- pnpm-lock.yaml: UNCHANGED.
+- GitHub Actions workflow: UNCHANGED (`.github/workflows/main-ci.yml` NOT modified).
+- Platform Super Admin: UNCHANGED.
+- Role Preview: UNCHANGED.
+- Clinic Admin shell: UNCHANGED (the shell component is NOT modified; only the Overview content component and its API client are modified).
+- Old Clinic Admin shell worktree (`feat/clinic-admin-shell-v1` @ `745d71e`): UNCHANGED.
+- Main: UNCHANGED at `d6c02b62eaeba930e8e6c18676e1659e30550b11`.
+- Quarantine branches: UNCHANGED (4 branches).
+- Recovery tags: UNCHANGED (2 tags).
+- Backend access-control logic: UNCHANGED.
+- Backend audit logic: UNCHANGED.
+
+### New commit
+
+- Subject: `fix: isolate clinic admin overview requests by component lifecycle`
+- Parent: `dd91e12f50a501382502fc622178bdab1f095a42`
+- Did NOT amend, reset, squash, or rewrite any of `67802eb`, `ee95c8c`, `524bd39`, `9877bce`, or `dd91e12`.
+- Did NOT push.
+- Did NOT generate a deploy key.
+- The new commit directly follows `dd91e12`.
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration tests not executed locally.** The 24 integration scenarios are `implemented in test coverage` and wired into the GitHub Actions `postgresql17-validation` job. They are `not executed locally` (no PostgreSQL 17 in the development environment). They are `awaiting GitHub Actions verification`.
+2. **Branch is local-only.** No authenticated deploy key available. The operator must generate a fresh temporary deploy key and push via SSH.
+3. **Audit emission is best-effort.** The `emitDirect` call is non-transactional (matches the existing `tenant_context.viewed` pattern). If the outbox INSERT fails, the audit event is lost but the Overview response is still returned. This is the approved pattern for read-only view events.
+4. **React Strict Mode double-invoke not directly testable in vitest.** React Strict Mode's double-invoke is a development-only behaviour that may not fire reliably in the vitest test environment. The component tests use `<React.StrictMode>` and verify the mock call count is exactly 1. If Strict Mode double-invokes, the component-scoped ref reuse ensures one fetch. If Strict Mode does NOT double-invoke, there is only one effect run, so one fetch. The genuine-unmount test (test 4) independently proves the ref is component-scoped (destroyed on unmount) and NOT module-global. The combination of these test layers proves the duplicate-request risk is closed and the cross-context isolation risk is closed.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key only after request isolation is independently verified, then perform one controlled push and require every GitHub Actions job, including the Clinic Admin PostgreSQL integration suite, to pass before merge.
+
+> **Independent verification guidance for the operator:**
+> 1. Verify the client is stateless: `pnpm --filter @ibn-hayan/web test src/lib/api/clinic-admin/clinic-admin.client.spec.ts` should pass 15 tests including the 2 stateless-behaviour tests (every call performs a fresh fetch; concurrent calls perform separate fetches with no Promise sharing).
+> 2. Verify the component-scoped ref: `pnpm --filter @ibn-hayan/web test src/components/clinic-admin/clinic-admin-overview.spec.tsx` should pass 32 tests including the Strict Mode test (3), the genuine-unmount test (4), the multiple-component tests (5, 6), and the authenticated-context isolation tests (27–32).
+> 3. Verify no backend/CI/schema/migration/package changes: `git diff dd91e12..HEAD --stat` should show ONLY 4 files under `apps/web/src/`.

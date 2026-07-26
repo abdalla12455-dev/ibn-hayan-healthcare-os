@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  getClinicAdminOverview,
-  __clearInflightOverviewRequestsForTests,
-  __inflightOverviewRequestCountForTests,
-} from './clinic-admin.client';
+import { getClinicAdminOverview } from './clinic-admin.client';
 
 /**
  * Unit tests for the Clinic Admin Overview API client.
@@ -20,19 +16,29 @@ import {
  *   request body or query string (the request is a parameterless
  *   GET; the server derives context from the session cookie).
  *
- * In-flight request deduplication tests (added by the
- * `fix: wire clinic admin integration and deduplicate overview requests`
- * commit) verify that:
- * - Concurrent calls share the same in-flight Promise.
- * - Exactly one underlying `fetch` call is made for concurrent
- *   identical requests.
- * - The in-flight Promise is removed from the registry after it
- *   settles (success OR failure).
- * - A later call after settling makes a fresh request.
- * - A retry after a network failure makes a fresh request.
- * - A retry after HTTP 500 makes a fresh request.
- * - A successful completed request is not permanently cached.
- * - The registry does not hold business-data state.
+ * ────────────────────────────────────────────────────────────────────
+ * Component-scoped request isolation (current design)
+ * ────────────────────────────────────────────────────────────────────
+ *
+ * The client itself is now STATELESS: it holds no module-level
+ * mutable state. Every call to `getClinicAdminOverview()` performs
+ * a fresh `fetch`. The Strict Mode deduplication responsibility has
+ * moved INTO the mounted `ClinicAdminOverview` component, which
+ * owns a component-scoped `useRef<Promise<...> | null>` to reuse
+ * the in-flight Promise across the Strict Mode effect replay.
+ *
+ * The previous design (a module-level `INFLIGHT_OVERVIEW_REQUESTS`
+ * registry keyed by URL) was REMOVED because it shared a Promise
+ * across every authenticated session, tenant, organisation,
+ * facility, Role Preview state, and concurrently mounted Clinic
+ * Admin surface in the same browser tab — a cross-context
+ * isolation risk.
+ *
+ * The component-level isolation tests (separate component instances,
+ * genuine unmount + remount, logout + login, tenant/organisation/
+ * facility/Role-Preview transitions, two simultaneously mounted
+ * components, Strict Mode effect replay) live in
+ * `apps/web/src/components/clinic-admin/clinic-admin-overview.spec.tsx`.
  *
  * Per the live-data task specification Phase 6, the client must
  * surface the following result states to the calling component:
@@ -42,6 +48,10 @@ import {
  * - server failure (5xx);
  * - network failure;
  * - contract invalid.
+ *
+ * Per the request-isolation correction Phase 3, every call to
+ * `getClinicAdminOverview()` performs a fresh `fetch` — there is no
+ * module-level deduplication, and no module-level mutable state.
  */
 
 const okResponse = {
@@ -69,12 +79,10 @@ const okResponse = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  __clearInflightOverviewRequestsForTests();
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
-  __clearInflightOverviewRequestsForTests();
 });
 
 function mockFetchSuccess(body: unknown, status = 200): void {
@@ -112,38 +120,6 @@ function mockFetchInvalidJson(): void {
       json: () => Promise.reject(new Error('invalid json')),
     } as unknown as Response),
   );
-}
-
-/**
- * Mock `fetch` with a controllable Promise. Returns a tuple of
- * `[fetchSpy, resolve]` where `resolve` is called to settle the
- * in-flight Promise. Used by the deduplication tests to keep the
- * Promise pending while assertions are made.
- */
-function mockFetchControllable(): readonly [
-  ReturnType<typeof vi.fn>,
-  (value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void,
-] {
-  let resolveFn:
-    | ((value: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)
-    | null = null;
-  const fetchSpy = vi.fn().mockReturnValue(
-    new Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>(
-      (resolve) => {
-        resolveFn = resolve;
-      },
-    ),
-  );
-  vi.stubGlobal('fetch', fetchSpy);
-  const resolve = (
-    value: { ok: boolean; status: number; json: () => Promise<unknown> },
-  ): void => {
-    if (resolveFn === null) {
-      throw new Error('resolveFn not yet captured');
-    }
-    resolveFn(value);
-  };
-  return [fetchSpy, resolve] as const;
 }
 
 describe('getClinicAdminOverview — basic request behaviour', () => {
@@ -336,68 +312,13 @@ describe('getClinicAdminOverview — basic request behaviour', () => {
   });
 });
 
-describe('getClinicAdminOverview — in-flight request deduplication', () => {
-  it('concurrent calls share the same in-flight Promise and produce exactly one underlying fetch', async () => {
-    const [fetchSpy, resolve] = mockFetchControllable();
-
-    // Start two concurrent requests. Both should share the same
-    // in-flight Promise.
-    const promiseA = getClinicAdminOverview();
-    const promiseB = getClinicAdminOverview();
-
-    // Exactly one underlying fetch call has been made.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // Both promises are the same object reference (deduplication).
-    expect(promiseA).toBe(promiseB);
-
-    // Resolve the in-flight request.
-    resolve({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(okResponse),
-    });
-
-    const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
-
-    // Both calls receive the same result.
-    expect(resultA).toEqual(resultB);
-    expect(resultA.ok).toBe(true);
-
-    // Still exactly one fetch call.
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // The registry is empty after the Promise settles.
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-  });
-
-  it('three concurrent calls produce exactly one underlying fetch', async () => {
-    const [fetchSpy, resolve] = mockFetchControllable();
-
-    const promiseA = getClinicAdminOverview();
-    const promiseB = getClinicAdminOverview();
-    const promiseC = getClinicAdminOverview();
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(promiseA).toBe(promiseB);
-    expect(promiseB).toBe(promiseC);
-
-    resolve({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(okResponse),
-    });
-
-    await Promise.all([promiseA, promiseB, promiseC]);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-  });
-
-  it('a sequential call after a successful request makes a fresh fetch (no persistent caching)', async () => {
-    // Stub fetch once with a function that always succeeds. This
-    // keeps the same spy across both calls so we can verify the
-    // total call count.
+describe('getClinicAdminOverview — stateless request behaviour (no module-level registry)', () => {
+  it('every call performs a fresh fetch (no module-level deduplication)', async () => {
+    // The client no longer maintains a module-level in-flight
+    // registry. Every call to getClinicAdminOverview() performs a
+    // fresh fetch. The Strict Mode deduplication responsibility
+    // has moved INTO the mounted component, which owns a
+    // component-scoped useRef.
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -405,145 +326,38 @@ describe('getClinicAdminOverview — in-flight request deduplication', () => {
     } as unknown as Response);
     vi.stubGlobal('fetch', fetchSpy);
 
-    // First call: makes a fetch.
+    // Two sequential calls.
     await getClinicAdminOverview();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // Wait a microtask to ensure the .finally() cleanup runs.
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Second call: the registry is empty (the previous Promise has
-    // settled and been removed), so a new fetch is made.
     await getClinicAdminOverview();
+
+    // Two underlying fetch calls — no deduplication at the client
+    // level.
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('a failed in-flight request is removed from the registry (retry after network failure makes a fresh fetch)', async () => {
-    // First call: network failure.
-    mockFetchNetworkError(new Error('connection refused'));
-    const fetchSpy1 = vi.mocked(globalThis.fetch);
-
-    const result1 = await getClinicAdminOverview();
-    expect(result1.ok).toBe(false);
-    if (!result1.ok) {
-      expect(result1.error.category).toBe('NETWORK_ERROR');
-    }
-    expect(fetchSpy1).toHaveBeenCalledTimes(1);
-
-    // The registry is empty after the failed Promise settles.
-    await new Promise((r) => setTimeout(r, 0));
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-
-    // Second call: the registry is empty, so a fresh fetch is made.
-    mockFetchSuccess(okResponse);
-    const fetchSpy2 = vi.mocked(globalThis.fetch);
-
-    const result2 = await getClinicAdminOverview();
-    expect(result2.ok).toBe(true);
-    expect(fetchSpy2).toHaveBeenCalledTimes(1);
-  });
-
-  it('a failed in-flight request is removed from the registry (retry after HTTP 500 makes a fresh fetch)', async () => {
-    // First call: HTTP 500.
-    mockFetchHttpError(500);
-    const fetchSpy1 = vi.mocked(globalThis.fetch);
-
-    const result1 = await getClinicAdminOverview();
-    expect(result1.ok).toBe(false);
-    if (!result1.ok) {
-      expect(result1.error.category).toBe('HTTP_ERROR');
-      expect(result1.error.statusCode).toBe(500);
-    }
-    expect(fetchSpy1).toHaveBeenCalledTimes(1);
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-
-    // Second call: fresh fetch.
-    mockFetchSuccess(okResponse);
-    const fetchSpy2 = vi.mocked(globalThis.fetch);
-
-    const result2 = await getClinicAdminOverview();
-    expect(result2.ok).toBe(true);
-    expect(fetchSpy2).toHaveBeenCalledTimes(1);
-  });
-
-  it('a failed in-flight request is removed from the registry (retry after CONTRACT_INVALID makes a fresh fetch)', async () => {
-    // First call: contract invalid (missing 'administrator').
-    mockFetchSuccess({
-      activeContext: okResponse.activeContext,
-      regions: okResponse.regions,
-      generatedAt: '2026-07-26T10:00:00.000Z',
-    });
-    const fetchSpy1 = vi.mocked(globalThis.fetch);
-
-    const result1 = await getClinicAdminOverview();
-    expect(result1.ok).toBe(false);
-    if (!result1.ok) {
-      expect(result1.error.category).toBe('CONTRACT_INVALID');
-    }
-    expect(fetchSpy1).toHaveBeenCalledTimes(1);
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-
-    // Second call: fresh fetch.
-    mockFetchSuccess(okResponse);
-    const fetchSpy2 = vi.mocked(globalThis.fetch);
-
-    const result2 = await getClinicAdminOverview();
-    expect(result2.ok).toBe(true);
-    expect(fetchSpy2).toHaveBeenCalledTimes(1);
-  });
-
-  it('the registry holds no business-data state (only Promises)', async () => {
-    // The registry is a Map<string, Promise>. The key is the URL
-    // only; the value is a Promise. The Promise's eventual value is
-    // NOT stored in the registry — only the Promise object itself
-    // is held while in flight. After the Promise settles, the entry
-    // is removed.
-    //
-    // This test verifies that after a successful request, the
-    // registry is empty (no resolved data is cached).
-    mockFetchSuccess(okResponse);
-
-    await getClinicAdminOverview();
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
-  });
-
-  it('the registry does not store tenant/organisation/facility identifiers', async () => {
-    // The registry key is the canonical request URL
-    // (`/clinic-admin/overview` relative to the API base URL). The
-    // URL contains no tenant, organisation, or facility
-    // identifiers (the server derives them from the session
-    // cookie). This test verifies the registry holds at most one
-    // entry per URL (no per-identifier entries).
-    const [fetchSpy, resolve] = mockFetchControllable();
-
-    // Start a request.
-    getClinicAdminOverview();
-
-    // The registry has exactly one entry (the in-flight Promise for
-    // the URL).
-    expect(__inflightOverviewRequestCountForTests()).toBe(1);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // The URL passed to fetch contains no tenant/organisation/
-    // facility identifiers.
-    const [url] = fetchSpy.mock.calls[0]!;
-    expect(String(url)).not.toContain('tenantId');
-    expect(String(url)).not.toContain('organisationId');
-    expect(String(url)).not.toContain('facilityId');
-
-    // Resolve and verify the registry is cleared.
-    resolve({
+  it('concurrent calls perform separate fetches (no Promise sharing at the client level)', async () => {
+    // The client no longer shares a Promise between concurrent
+    // callers. Each call gets its own underlying fetch. This is
+    // the OPPOSITE of the previous design, which shared a single
+    // Promise between concurrent callers via a URL-keyed
+    // module-level registry. The new design moves the
+    // deduplication responsibility into the component, which
+    // owns a component-scoped useRef that is NOT shared across
+    // authenticated contexts.
+    const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: () => Promise.resolve(okResponse),
-    });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(__inflightOverviewRequestCountForTests()).toBe(0);
+    } as unknown as Response);
+    vi.stubGlobal('fetch', fetchSpy);
+
+    // Two concurrent calls.
+    const promiseA = getClinicAdminOverview();
+    const promiseB = getClinicAdminOverview();
+    await Promise.all([promiseA, promiseB]);
+
+    // Two underlying fetch calls — no Promise sharing at the
+    // client level.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });
