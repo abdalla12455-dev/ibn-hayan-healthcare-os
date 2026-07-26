@@ -7,18 +7,19 @@ import type {
   FacilityRepository,
 } from '@ibn-hayan/domain';
 import type { AuthService, AuditRequestContext } from '../auth/auth.service.js';
+import type { AuditHelperService } from '../audit/audit-helper.service.js';
 
 /**
  * Focused unit tests for the Clinic Admin Overview service.
  *
  * These tests verify the service's read-side orchestration logic
  * WITHOUT requiring PostgreSQL 17 or a full Nest application
- * bootstrap. The repository ports and the `AuthService` are mocked
- * via plain JS object stubs (no `vi.mock` of modules, no NestJS
- * DI container). This pattern matches the existing
- * `apps/api/src/health/health.service.spec.ts` pattern.
+ * bootstrap. The repository ports, the `AuthService`, and the
+ * `AuditHelperService` are mocked via plain JS object stubs (no
+ * `vi.mock` of modules, no NestJS DI container). This pattern matches
+ * the existing `apps/api/src/health/health.service.spec.ts` pattern.
  *
- * Coverage map (per the pre-push audit task Phase 4):
+ * Coverage map (per the audit-semantics restoration task Phase 2):
  *
  * 1. R09 with valid context receives the overview payload.
  * 2. Missing session returns null (controller maps to 401).
@@ -34,13 +35,14 @@ import type { AuthService, AuditRequestContext } from '../auth/auth.service.js';
  * 12. The response regions array contains exactly 9 entries with the
  *     approved availability declarations.
  * 13. The response does NOT carry raw UUIDs (only display names).
- * 14. The service does NOT emit a `clinic_admin.overview.viewed`
- *     audit event (regression test — the `clinic_admin` category
- *     is NOT accepted by the database CHECK constraint; the audit
- *     trail is provided by the AuthorizationGuard's
- *     `authorization.decision.allowed` event).
- * 15. The service does NOT depend on `AuditHelperService` (the
- *     constructor has no `auditHelper` parameter).
+ * 14. The service emits `clinic_admin.overview.viewed` (mapped to
+ *     `facility_context` category) AFTER the operation succeeds.
+ * 15. The constructor accepts an `AuditHelperService` dependency.
+ * 16-18. Repository findById calls use session-derived tenantId.
+ * 19-21. The audit event is NOT emitted on failure paths.
+ * 22. The audit event metadata carries only the endpoint name.
+ * 23. The audit event uses session-derived actor/session/tenant.
+ * 24. The audit event is NOT emitted when auditContext is undefined.
  *
  * The PostgreSQL 17 integration test (which would verify the
  * complete HTTP path including the AuthorizationGuard, the
@@ -214,15 +216,51 @@ function makeStubs(
     getSessionFromCookie: authServiceGetSession,
   } as unknown as AuthService;
 
+  // AuditHelperService mock: capture the emitDirect calls so tests
+  // can assert the audit event is emitted (or NOT emitted) on each
+  // code path. The mock returns `{ ok: true }` to simulate a
+  // successful outbox INSERT.
+  //
+  // The mock is typed to accept an `AuditEventBuildInput`-shaped
+  // argument so tests can access `mock.calls[0][0]` without
+  // `@typescript-eslint/no-unsafe-member-access` errors.
+  type EmitCallArg = {
+    readonly action: string;
+    readonly outcome: string;
+    readonly source: string;
+    readonly tenantId?: string;
+    readonly actorType?: string;
+    readonly actorId?: string;
+    readonly sessionId?: string;
+    readonly requestId?: string;
+    readonly correlationId?: string | null;
+    readonly ipAddress?: string | null;
+    readonly userAgent?: string | null;
+    readonly scope?: string;
+    readonly metadata?: unknown;
+  };
+  const auditHelperEmitDirect = vi.fn(
+    (_input: EmitCallArg): Promise<{ ok: true }> =>
+      Promise.resolve({ ok: true }),
+  );
+  const auditHelper = {
+    emitDirect: auditHelperEmitDirect,
+    emit: auditHelperEmitDirect,
+    emitOrFail: vi.fn().mockResolvedValue(undefined),
+    computeFailedLoginIdentifierHash: vi.fn(),
+  } as unknown as AuditHelperService;
+
   return {
     tenants,
     organisations,
     facilities,
     authService,
+    auditHelper,
     tenantsFindById,
     organisationsFindById,
     facilitiesFindById,
     authServiceGetSession,
+    auditHelperEmitDirect,
   };
 }
 
@@ -232,6 +270,7 @@ function makeService(stubs: ReturnType<typeof makeStubs>) {
     stubs.organisations,
     stubs.facilities,
     stubs.authService,
+    stubs.auditHelper,
   );
 }
 
@@ -454,53 +493,56 @@ describe('ClinicAdminOverviewService', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Audit-emission regression coverage.
+  // Audit-emission coverage (restored explicit successful-view event).
   //
-  // The original live-data batch had the service emit an explicit
-  // `clinic_admin.overview.viewed` audit event via `AuditHelperService`.
-  // The `clinic_admin` category was NOT accepted by the
-  // `audit_events_category_check` CHECK constraint in the dedicated
-  // audit database, so the outbox INSERT would succeed but the
-  // dispatcher's projection would fail, leaving the outbox row pending
-  // forever and silently breaking the audit trail. The correction
-  // removed the `AuditHelperService` dependency from the service
-  // entirely. The audit trail is now provided by the
-  // `AuthorizationGuard`'s existing `authorization.decision.allowed`
-  // event (category `authorization`, which IS in the database CHECK
-  // constraint).
+  // The service emits `clinic_admin.overview.viewed` via
+  // `auditHelper.emitDirect(...)` AFTER the Overview operation
+  // completes successfully. The action is mapped to the existing
+  // `facility_context` category by `inferCategoryFromAction` (see
+  // `packages/observability/src/audit/action-codes.ts`). The
+  // `facility_context` category IS accepted by the
+  // `audit_events_category_check` CHECK constraint — no migration is
+  // required.
   //
-  // These tests prove the service no longer depends on
-  // `AuditHelperService` and no longer attempts to emit a
-  // `clinic_admin` audit event. They guard against a regression where
-  // the dependency is reintroduced without a corresponding database
-  // migration.
+  // These tests prove:
+  //   14. The event IS emitted after a successful operation.
+  //   15. The constructor accepts an `AuditHelperService` dependency.
+  //   19. The event is NOT emitted when context resolution fails
+  //       (null return for missing session).
+  //   20. The event is NOT emitted when the service throws
+  //       (missing active context).
+  //   21. The event is NOT emitted when the facility belongs to
+  //       another organisation.
+  //   22. The event metadata carries only `{ endpoint: 'clinic_admin_overview_view' }`.
+  //   23. The event uses session-derived actorId, sessionId, tenantId.
+  //   24. The event is NOT emitted when auditContext is undefined.
   // -------------------------------------------------------------------------
 
-  it('14. does NOT emit a clinic_admin.overview.viewed audit event (the category is database-incompatible)', async () => {
+  it('14. emits clinic_admin.overview.viewed AFTER the operation succeeds (mapped to facility_context category)', async () => {
     const stubs = makeStubs();
     const service = makeService(stubs);
 
-    // The service should complete successfully without throwing.
     const result = await service.loadOverview('valid-cookie', auditContext);
     expect(result).not.toBeNull();
 
-    // The service no longer has an `auditHelper` property. If a
-    // future regression reintroduces the dependency, this assertion
-    // will fail because the property would exist.
-    expect(
-      (service as unknown as { auditHelper?: unknown }).auditHelper,
-    ).toBeUndefined();
+    // The audit event MUST be emitted exactly once.
+    expect(stubs.auditHelperEmitDirect).toHaveBeenCalledTimes(1);
+    const call = stubs.auditHelperEmitDirect.mock.calls[0]![0];
+    expect(call.action).toBe('clinic_admin.overview.viewed');
+    expect(call.outcome).toBe('success');
+    expect(call.source).toBe('api');
+    // The metadata MUST carry only the endpoint name.
+    expect(call.metadata).toEqual({
+      endpoint: 'clinic_admin_overview_view',
+    });
   });
 
-  it('15. the constructor does NOT accept an AuditHelperService dependency', () => {
+  it('15. the constructor accepts an AuditHelperService dependency (5 parameters)', () => {
     // The service's constructor signature is:
-    //   (tenants, organisations, facilities, authService)
-    // The original live-data batch had a 5th parameter `auditHelper`.
-    // The correction removed it. This test verifies the constructor
-    // length is 4 (not 5), which structurally prevents a future
-    // regression from silently re-adding the dependency without
-    // updating the tests.
-    expect(ClinicAdminOverviewService.length).toBe(4);
+    //   (tenants, organisations, facilities, authService, auditHelper)
+    // The audit-semantics restoration re-added the 5th parameter.
+    // This test verifies the constructor length is 5.
+    expect(ClinicAdminOverviewService.length).toBe(5);
   });
 
   it('16. the tenant repository findById is called with the active membership tenantId (no caller-supplied scope)', async () => {
@@ -534,5 +576,120 @@ describe('ClinicAdminOverviewService', () => {
       TENANT_ID,
       FACILITY_ID,
     );
+  });
+
+  it('19. does NOT emit the audit event when context resolution fails (missing session returns null)', async () => {
+    const stubs = makeStubs({ authResult: null });
+    const service = makeService(stubs);
+
+    const result = await service.loadOverview(undefined, auditContext);
+    expect(result).toBeNull();
+
+    // The audit event MUST NOT be emitted on the null-return path.
+    expect(stubs.auditHelperEmitDirect).not.toHaveBeenCalled();
+  });
+
+  it('20. does NOT emit the audit event when the service throws (missing active context)', async () => {
+    const stubs = makeStubs({
+      authResult: makeAuthResult({
+        session: makeSession({ activeTenantMembershipId: null }),
+      }),
+    });
+    const service = makeService(stubs);
+
+    await expect(
+      service.loadOverview('valid-cookie', auditContext),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED' } },
+    });
+
+    // The audit event MUST NOT be emitted on the throw path.
+    expect(stubs.auditHelperEmitDirect).not.toHaveBeenCalled();
+  });
+
+  it('21. does NOT emit the audit event when the facility belongs to another organisation', async () => {
+    const otherOrgId = '00000000-0000-0000-0000-000000000099';
+    const stubs = makeStubs({
+      facility: {
+        ...makeActiveFacility(),
+        organisationId: otherOrgId,
+      },
+    });
+    const service = makeService(stubs);
+
+    await expect(
+      service.loadOverview('valid-cookie', auditContext),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED' } },
+    });
+
+    // The audit event MUST NOT be emitted on the cross-organisation
+    // throw path. A successful-view event would be misleading if the
+    // operation actually failed.
+    expect(stubs.auditHelperEmitDirect).not.toHaveBeenCalled();
+  });
+
+  it('22. the audit event metadata carries only the endpoint name (no sensitive business payload)', async () => {
+    const stubs = makeStubs();
+    const service = makeService(stubs);
+
+    await service.loadOverview('valid-cookie', auditContext);
+
+    expect(stubs.auditHelperEmitDirect).toHaveBeenCalledTimes(1);
+    const call = stubs.auditHelperEmitDirect.mock.calls[0]![0];
+    const metadata = call.metadata as Record<string, unknown>;
+    const metadataKeys = Object.keys(metadata).sort();
+    expect(metadataKeys).toEqual(['endpoint']);
+    expect(metadata.endpoint).toBe('clinic_admin_overview_view');
+    // The metadata MUST NOT contain display names, UUIDs, or business
+    // payload. The standard actor/session/tenant fields are passed as
+    // top-level fields (not inside metadata).
+    const metadataJson = JSON.stringify(metadata);
+    expect(metadataJson).not.toContain('Tenant Alpha');
+    expect(metadataJson).not.toContain('Organisation Alpha');
+    expect(metadataJson).not.toContain('Facility Alpha');
+    expect(metadataJson).not.toContain('Operator Alpha');
+    expect(metadataJson).not.toContain(TENANT_ID);
+    expect(metadataJson).not.toContain(ORG_ID);
+    expect(metadataJson).not.toContain(FACILITY_ID);
+    expect(metadataJson).not.toContain(USER_ID);
+    expect(metadataJson).not.toContain(SESSION_ID);
+  });
+
+  it('23. the audit event uses session-derived actorId, sessionId, and tenantId (no caller-supplied scope)', async () => {
+    const stubs = makeStubs();
+    const service = makeService(stubs);
+
+    await service.loadOverview('valid-cookie', auditContext);
+
+    expect(stubs.auditHelperEmitDirect).toHaveBeenCalledTimes(1);
+    const call = stubs.auditHelperEmitDirect.mock.calls[0]![0];
+    // The actorId MUST be the authenticated user's id (from the
+    // session), not a caller-supplied value.
+    expect(call.actorId).toBe(USER_ID);
+    // The sessionId MUST be the authenticated session's id.
+    expect(call.sessionId).toBe(SESSION_ID);
+    // The tenantId MUST be the active membership's tenant id (resolved
+    // from the session), not a caller-supplied value.
+    expect(call.tenantId).toBe(TENANT_ID);
+    // The actorType MUST be 'USER' (the authenticated principal).
+    expect(call.actorType).toBe('USER');
+  });
+
+  it('24. does NOT emit the audit event when auditContext is undefined', async () => {
+    const stubs = makeStubs();
+    const service = makeService(stubs);
+
+    // Call without auditContext. The service should still return the
+    // overview payload, but the audit event is NOT emitted (because
+    // the service cannot construct the audit request context).
+    const result = await service.loadOverview('valid-cookie', undefined);
+    expect(result).not.toBeNull();
+
+    // The audit event MUST NOT be emitted when auditContext is
+    // undefined. This matches the session-context module's pattern
+    // (see `if (auditContext !== undefined)` guard in
+    // `session-context.service.ts`).
+    expect(stubs.auditHelperEmitDirect).not.toHaveBeenCalled();
   });
 });

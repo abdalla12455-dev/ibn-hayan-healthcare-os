@@ -2548,3 +2548,133 @@ A dedicated Clinic Admin Overview PostgreSQL 17 integration test (covering the f
 ### Immediate next task
 
 Generate a fresh temporary deploy key only after this correction is independently verified, then perform one controlled push of the complete Clinic Admin Overview branch (`feat/clinic-admin-overview-live-data-v1`) and require both GitHub Actions jobs to pass before merge.
+
+---
+
+## Clinic Admin Overview HTTP and Audit Path Verification (2026-07-26)
+
+### Task
+
+Final local pre-push verification of the Clinic Admin Overview implementation. Resolve the audit-semantics question (restore `clinic_admin.overview.viewed` mapped to existing `facility_context` category), prove the complete HTTP access-control path with focused controller and integration coverage, verify permission isolation, verify frontend request lifecycle, and create one new child correction commit.
+
+### Repository state
+
+- Primary worktree: `/home/z/my-project` on `main` at `d6c02b62eaeba930e8e6c18676e1659e30550b11` (0/0 with origin/main).
+- Task worktree: `/home/z/clinic-admin-overview-live-data-v1` on `feat/clinic-admin-overview-live-data-v1`.
+- First task commit: `67802eb1475e6acca3dc8afbdde8b9e4d9068386` (unchanged).
+- Second correction commit: `ee95c8ccea8ac658a3d6e9eef6a8e8140b27e990` (unchanged).
+- New child commit: created directly after `ee95c8c`.
+- Branch divergence from main: 3 ahead, 0 behind.
+- Remote task branch: absent.
+- Old Clinic Admin shell worktree: `/home/z/clinic-admin-shell-v1` at `745d71e` (unchanged).
+
+### Audit-semantics decision
+
+The previous correction (ee95c8c) removed `clinic_admin.overview.viewed` and relied only on `authorization.decision.allowed`. This was architecturally INCORRECT:
+
+- The session-context module (`GET /api/v1/context`) emits BOTH `authorization.decision.allowed` (guard) AND `tenant_context.viewed` (service) — the established repository convention for read-only endpoints.
+- The two events carry DIFFERENT signals: `allowed` proves authorization; `viewed` proves service completion.
+- The previous correction's claim "no audit signal is lost" was false — the "service completed successfully" signal was lost.
+
+**Restored** `clinic_admin.overview.viewed` action code, mapped to existing `facility_context` category (narrowest semantically correct existing category — the Overview is facility-scoped, requires active facility, includes facilityDisplayName, fails closed if facility is missing). The `facility_context` category IS in the `audit_events_category_check` CHECK constraint — no migration required.
+
+### Final audit configuration
+
+- **Action**: `clinic_admin.overview.viewed`
+- **Category**: `facility_context` (mapped via `inferCategoryFromAction`)
+- **Transactional outbox**: compatible (JSONB, no category CHECK)
+- **Audit-store database**: compatible (`facility_context` IS in the CHECK constraint)
+- **Dispatcher**: compatible (inserts category directly)
+- **Metadata**: `{ endpoint: 'clinic_admin_overview_view' }` only — no sensitive payload
+- **Emission**: `emitDirect` (best-effort, non-transactional), after success only
+
+### Permission matrix correction
+
+Replaced `PERMISSION_CODES` (R09) and `PERMISSION_CODES.filter(...)` (R13 and others) with explicit permission lists:
+
+- `HUMAN_CONTEXT_PERMISSIONS`: 7 context permissions (R01-R13)
+- `CLINIC_ADMIN_PERMISSIONS`: 8 permissions (R09 only — 7 context + `clinic_admin_overview:view`)
+- R14: `[]` (unchanged)
+
+This eliminates the future privilege-expansion risk: adding a new permission to `PERMISSION_CODES` does NOT automatically grant it to any role. R09 is no longer a "hidden global super-administrator."
+
+### Frontend lifecycle fixes
+
+Fixed two bugs in `clinic-admin-overview.tsx`:
+
+1. **Strict Mode bug**: the `fetchedRef` pattern caused the component to stay in loading state forever (second mount saw `fetchedRef.current=true` and didn't fetch; first fetch was cancelled). Replaced with `fetchTrigger` state counter + `cancelled` flag.
+2. **Retry bug**: `useEffect` had empty deps `[]`, so retry didn't trigger a new fetch. Added `fetchTrigger` to deps; retry increments the trigger.
+
+### Files created (4)
+
+1. `apps/api/src/modules/clinic-admin/clinic-admin.controller.spec.ts` — 12 controller tests
+2. `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` — 24 integration scenarios (PG17, not run locally)
+3. `apps/api/vitest.clinic-admin.config.ts` — vitest config for integration tests
+4. `apps/web/src/components/clinic-admin/clinic-admin-overview.spec.tsx` — 21 component tests
+
+### Files modified (11)
+
+1. `packages/observability/src/audit/action-codes.ts` — restored `CLINIC_ADMIN_ACTION_CODES`, mapped `clinic_admin.` → `facility_context`
+2. `packages/observability/src/audit/categories.ts` — updated comment
+3. `packages/observability/src/audit/audit-event-builder.spec.ts` — updated regression tests (6 tests)
+4. `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.ts` — added AuditHelperService, emit event after success
+5. `apps/api/src/modules/clinic-admin/clinic-admin-overview.service.spec.ts` — updated tests (24 tests)
+6. `apps/api/src/modules/clinic-admin/clinic-admin.controller.ts` — updated docstring
+7. `apps/api/src/modules/clinic-admin/clinic-admin.module.ts` — imported AuditModule
+8. `apps/web/src/components/clinic-admin/clinic-admin-overview.tsx` — fixed Strict Mode + retry bugs
+9. `packages/domain/src/authorization/role-permissions.ts` — explicit permission lists
+10. `packages/domain/src/authorization/authorization.spec.ts` — 5 future-expansion tests
+11. `packages/contracts/src/clinic-admin/clinic-admin.schema.spec.ts` — 3 Phase 7 contract tests
+
+### Validation results
+
+- **Typecheck**: PASS (all 8 workspace projects)
+- **Lint**: PASS (0 errors, 0 warnings)
+- **Unit tests**: PASS — 863 tests (domain 108, contracts 208, observability 95, api 238, web 214)
+- **Build**: PASS (api via SWC, web via Next.js 16.2.10 Turbopack)
+- **git diff --check**: PASS
+- **Secret scan**: PASS (no secrets in diff)
+- **PostgreSQL 17 integration**: NOT RUN LOCALLY (no PostgreSQL 17; GitHub Actions remains authoritative)
+
+### Test count breakdown
+
+- Pre-existing baseline (after ee95c8c): 812 unit tests
+- Current: 863 unit tests
+- Net increase: +51 tests
+  - domain: +5 (future-expansion regression tests)
+  - contracts: +3 (Phase 7 contract rules)
+  - observability: +4 (replaced 2 regression tests with 6 new mapping tests)
+  - api: +18 (6 service audit tests + 12 controller tests)
+  - web: +21 (component lifecycle tests)
+
+### Scope protection
+
+- Database schema: UNCHANGED
+- Migration files: UNCHANGED
+- package.json: UNCHANGED
+- pnpm-lock.yaml: UNCHANGED
+- CI workflow: UNCHANGED
+- Platform Super Admin: UNCHANGED
+- Clinic Admin shell branch: UNCHANGED
+- Main: UNCHANGED
+- Quarantine branches: UNCHANGED
+- Recovery tags: UNCHANGED
+
+### New commit
+
+- Subject: `test: prove clinic admin overview http and audit behaviour`
+- Parent: `ee95c8ccea8ac658a3d6e9eef6a8e8140b27e990`
+- Did NOT amend, reset, squash, or rewrite `67802eb` or `ee95c8c`.
+- Did NOT push.
+- Did NOT generate a deploy key.
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration tests not run locally.** The 24 integration scenarios exist but cannot run without PostgreSQL 17. GitHub Actions remains authoritative.
+2. **Integration test not wired into CI.** The `vitest.clinic-admin.config.ts` and test file exist but are NOT yet referenced in `package.json` scripts or the CI workflow (no modification authorised). A future task must add the script and CI entry.
+3. **Branch is local-only.** No authenticated deploy key available. The operator must generate a fresh temporary deploy key and push via SSH.
+4. **Audit emission is best-effort.** The `emitDirect` call is non-transactional (matches the existing `tenant_context.viewed` pattern). If the outbox INSERT fails, the audit event is lost but the Overview response is still returned. This is the approved pattern for read-only view events.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key only after the complete HTTP and audit behaviour is verified, then perform one controlled push of the full Clinic Admin Overview branch and require both GitHub Actions jobs to pass before merge.

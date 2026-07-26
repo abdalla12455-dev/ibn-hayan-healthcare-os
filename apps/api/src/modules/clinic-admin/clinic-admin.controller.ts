@@ -59,16 +59,27 @@ import { ClinicAdminOverviewService } from './clinic-admin-overview.service.js';
  * `AUTHORIZATION_FORBIDDEN` (or `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`)
  * code with a non-revealing message.
  *
- * Audit trail: the controller does NOT emit an explicit Clinic-Admin-
- * specific audit event. The `AuthorizationGuard` (applied via
- * `@UseGuards(AuthorizationGuard)`) emits an
- * `authorization.decision.allowed` event for every authorized request
- * (category `authorization`, accepted by the database CHECK
- * constraint) with `permissionCode='clinic_admin_overview:view'`, the
- * endpoint path, the HTTP method, the actor, the session, the tenant,
- * and the role codes. This is the audit trail for the Overview
- * endpoint. See `packages/observability/src/audit/categories.ts` for
- * the rationale on why no `clinic_admin`-specific event is emitted.
+ * Audit trail: the controller does NOT emit an audit event itself.
+ * The audit trail for the endpoint is provided by TWO events:
+ * 1. The `AuthorizationGuard`'s `authorization.decision.allowed` event
+ *    (category `authorization`), emitted for every authorized request
+ *    with `permissionCode='clinic_admin_overview:view'`, the endpoint
+ *    path, the HTTP method, the actor, the session, the tenant, and
+ *    the role codes. This event proves the request was authorized.
+ * 2. The service's `clinic_admin.overview.viewed` event (category
+ *    `facility_context`, mapped from the `clinic_admin.` prefix — see
+ *    `packages/observability/src/audit/action-codes.ts`
+ *    `inferCategoryFromAction`), emitted AFTER the Overview operation
+ *    completes successfully. This event proves the service returned a
+ *    response. The `facility_context` category IS accepted by the
+ *    `audit_events_category_check` CHECK constraint — no migration is
+ *    required.
+ *
+ * This two-event pattern matches the established repository convention
+ * for read-only endpoints (cf. the session-context module's
+ * `tenant_context.viewed` event). See
+ * `packages/observability/src/audit/categories.ts` for the full
+ * rationale on the category mapping.
  */
 @ApiTags('clinic-admin')
 @Controller('clinic-admin')

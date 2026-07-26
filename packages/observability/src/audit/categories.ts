@@ -42,32 +42,31 @@
  * rolls back the session creation and surfaces as an HTTP 500.
  *
  * NOTE on the absence of a `clinic_admin` category: the Clinic
- * Admin Overview live-data batch originally introduced a
- * `clinic_admin` category and a `clinic_admin.overview.viewed`
- * action code. The category was added to this TypeScript union
- * but NO corresponding database migration was added to extend
- * the `audit_events_category_check` CHECK constraint in the
- * dedicated audit database (which allows only the eight categories
- * listed below). The result would have been: outbox INSERT
- * succeeds (the transactional `audit_outbox_events` table stores
- * the event as JSONB with no category CHECK), but the dispatcher's
- * projection into `audit_events` fails with a CHECK constraint
- * violation, leaving the outbox row pending forever and silently
- * breaking the audit trail. This is the exact bug pattern that
- * migration `20260726000000_audit_category_extend_for_role_preview`
- * fixed for `role_preview` — but the live-data task specification
- * forbade schema/migration changes. The correction removed the
- * `clinic_admin` category and the `clinic_admin.overview.viewed`
- * action code from the TypeScript catalogues and removed the
- * explicit audit emission from the Clinic Admin Overview service.
- * The audit trail for `/api/v1/clinic-admin/overview` is now
- * provided by the `AuthorizationGuard`'s existing
- * `authorization.decision.allowed` event (category `authorization`,
- * which IS in the database CHECK constraint), which is emitted for
- * every authorized request with `permissionCode='clinic_admin_overview:view'`,
- * the endpoint path, the HTTP method, the actor, the session, the
- * tenant, and the role codes. This is MORE metadata than the
- * removed explicit emission carried, so no audit signal is lost.
+ * Admin Overview surface at `/api/v1/clinic-admin/overview` emits
+ * a `clinic_admin.overview.viewed` action code (registered in
+ * `action-codes.ts` under `CLINIC_ADMIN_ACTION_CODES`), but this
+ * action is mapped to the existing `facility_context` category by
+ * `inferCategoryFromAction` — NOT to a new `clinic_admin` category.
+ * The `facility_context` category IS accepted by the
+ * `audit_events_category_check` CHECK constraint in the dedicated
+ * audit database, so no migration is required. The mapping is the
+ * narrowest semantically correct choice: the Overview is facility-
+ * scoped (requires active facility, includes facilityDisplayName,
+ * fails closed if facility is missing). This preserves both audit
+ * signals for the endpoint — the guard's
+ * `authorization.decision.allowed` event (proves authorization) and
+ * the service's `clinic_admin.overview.viewed` event (proves the
+ * Overview operation completed successfully) — matching the
+ * established two-event pattern for read-only endpoints (cf. the
+ * session-context module's `tenant_context.viewed` event).
+ *
+ * History: the original live-data batch (commit 67802eb) introduced
+ * a `clinic_admin` category, which was NOT in the database CHECK
+ * constraint. The first correction (commit ee95c8c) removed the
+ * action code entirely, weakening the audit trail by losing the
+ * "service completed successfully" signal. This restoration re-adds
+ * the action code mapped to the existing `facility_context` category,
+ * preserving both audit signals without requiring a database migration.
  */
 export type AuditEventCategory =
   | 'security'

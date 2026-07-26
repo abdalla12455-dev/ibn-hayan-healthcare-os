@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useLanguage } from '@/components/i18n/language-context';
 import { getClinicAdminCopy } from './clinic-admin-copy';
 import { getClinicAdminOverview } from '@/lib/api/clinic-admin';
@@ -103,14 +103,29 @@ export function ClinicAdminOverview(): ReactElement {
   const copy = getClinicAdminCopy(lang);
   const overviewCopy = getClinicAdminOverviewCopy(lang);
 
-  const fetchedRef = useRef(false);
+  // `fetchTrigger` is a counter that increments on retry. The
+  // `useEffect` includes `fetchTrigger` in its deps, so incrementing
+  // the trigger re-runs the effect (and starts a new fetch).
+  //
+  // The `cancelled` flag in the effect's closure ensures that a
+  // stale fetch's result is NOT applied: when the effect re-runs
+  // (on mount, Strict Mode re-mount, or retry), the previous
+  // closure's cleanup sets `cancelled = true`, so the previous
+  // fetch's `.then()` callback is a no-op.
+  //
+  // This pattern is the standard React way to fetch in `useEffect`
+  // under Strict Mode. The previous `fetchedRef` pattern was
+  // incorrect: in Strict Mode, the first mount's cleanup set
+  // `cancelled = true`, the second mount saw `fetchedRef.current =
+  // true` and returned early (NO new fetch), and the first fetch's
+  // result was discarded — leaving the component in the loading
+  // state forever. The `cancelled` flag pattern correctly handles
+  // Strict Mode: two fetches happen, but only the second one's
+  // result is applied.
+  const [fetchTrigger, setFetchTrigger] = useState(0);
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
 
   useEffect(() => {
-    if (fetchedRef.current) {
-      return;
-    }
-    fetchedRef.current = true;
     let cancelled = false;
     void (async () => {
       setState({ kind: 'loading' });
@@ -127,7 +142,7 @@ export function ClinicAdminOverview(): ReactElement {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fetchTrigger]);
 
   if (state.kind === 'idle' || state.kind === 'loading') {
     return (
@@ -152,8 +167,10 @@ export function ClinicAdminOverview(): ReactElement {
         lang={lang}
         overviewCopy={overviewCopy}
         onRetry={() => {
-          fetchedRef.current = false;
-          setState({ kind: 'idle' });
+          // Increment `fetchTrigger` to re-run the `useEffect` and
+          // start a new fetch. The previous fetch's `cancelled` flag
+          // ensures its result is NOT applied.
+          setFetchTrigger((n) => n + 1);
         }}
       />
     );

@@ -10,6 +10,7 @@ import {
   FACILITY_REPOSITORY,
 } from '../../infrastructure/database/index.js';
 import { AuthService, type AuditRequestContext } from '../auth/auth.service.js';
+import { AuditHelperService } from '../audit/audit-helper.service.js';
 import type {
   ClinicAdminOverviewResponse,
   RegionStatus,
@@ -51,24 +52,33 @@ import { clinicAdminOverviewContextRequired } from './clinic-admin.errors.js';
  * validation. It does NOT duplicate authentication, token parsing,
  * cookie parsing, Origin, or CSRF logic.
  *
- * Audit trail: the service does NOT emit an explicit Clinic-Admin-
- * specific audit event. The audit trail for the Overview endpoint is
- * provided by the `AuthorizationGuard`'s existing
- * `authorization.decision.allowed` event (category `authorization`,
- * which IS accepted by the `audit_events_category_check` CHECK
- * constraint in the dedicated audit database). The guard's event is
- * emitted for every authorized request with
- * `permissionCode='clinic_admin_overview:view'`, the endpoint path,
- * the HTTP method, the actor, the session, the tenant, and the role
- * codes. This is MORE metadata than a Clinic-Admin-specific
- * `clinic_admin.overview.viewed` event would have carried. The
- * original live-data batch introduced such an event under a
- * `clinic_admin` category, but that category was NOT accepted by
- * the database CHECK constraint (which allows only eight
- * categories); the correction removed the explicit emission and
- * relies on the guard's event. See
- * `packages/observability/src/audit/categories.ts` for the full
- * rationale.
+ * Audit trail: the service emits an explicit
+ * `clinic_admin.overview.viewed` audit event via
+ * `auditHelper.emitDirect(...)` AFTER the Overview operation completes
+ * successfully and returns its response. This event is mapped to the
+ * existing `facility_context` category (see
+ * `packages/observability/src/audit/action-codes.ts`
+ * `inferCategoryFromAction`), which IS accepted by the
+ * `audit_events_category_check` CHECK constraint in the dedicated audit
+ * database — no migration is required. The event proves the Overview
+ * service completed successfully, complementing the
+ * `AuthorizationGuard`'s `authorization.decision.allowed` event (which
+ * proves the request was authorized). This two-event pattern matches
+ * the established repository convention for read-only endpoints (cf.
+ * the session-context module's `tenant_context.viewed` event).
+ *
+ * Emission semantics:
+ * - The event is emitted via `emitDirect` (best-effort, non-
+ *   transactional), matching the pattern for read-only view events.
+ * - The event is emitted ONLY after the Overview operation succeeds;
+ *   it is NOT emitted when context resolution fails (null return) or
+ *   when the service throws (`clinicAdminOverviewContextRequired`).
+ * - The event does NOT recursively audit itself: the emission goes
+ *   through the outbox, the dispatcher delivers it to the audit store,
+ *   and the audit-store append does NOT trigger another audit event.
+ * - The event metadata carries only `{ endpoint: 'clinic_admin_overview_view' }`
+ *   — no sensitive context, no business payload, no display names, no
+ *   UUIDs beyond the standard actor/session/tenant fields.
  *
  * Per the live-data task specification Phase 7, the service:
  * - Requires an authenticated session.
@@ -91,6 +101,7 @@ export class ClinicAdminOverviewService {
     @Inject(FACILITY_REPOSITORY)
     private readonly facilities: FacilityRepository,
     private readonly authService: AuthService,
+    private readonly auditHelper: AuditHelperService,
   ) {}
 
   /**
@@ -209,18 +220,9 @@ export class ClinicAdminOverviewService {
     // business-domain models exist) means every business region is
     // Category 3 (`not_supported`) and every navigational region is
     // Category 4 (`navigational_only`).
-    //
-    // NOTE: The audit trail for this endpoint is provided by the
-    // `AuthorizationGuard`'s `authorization.decision.allowed` event
-    // (emitted before the service is invoked). The service does NOT
-    // emit an explicit `clinic_admin.overview.viewed` event because
-    // the `clinic_admin` category is NOT accepted by the
-    // `audit_events_category_check` CHECK constraint in the dedicated
-    // audit database. See `packages/observability/src/audit/categories.ts`
-    // for the full rationale.
     const regions = buildDefaultRegions();
 
-    return {
+    const response: ClinicAdminOverviewResponse = {
       activeContext: {
         tenantDisplayName: tenant.displayName,
         organisationDisplayName: organisation.displayName,
@@ -232,6 +234,46 @@ export class ClinicAdminOverviewService {
       regions,
       generatedAt: new Date().toISOString(),
     };
+
+    // Emit the explicit `clinic_admin.overview.viewed` audit event
+    // AFTER the Overview operation has completed successfully. This
+    // event proves the service returned a response, complementing the
+    // guard's `authorization.decision.allowed` event (which proves the
+    // request was authorized). The event is mapped to the existing
+    // `facility_context` category (see `inferCategoryFromAction` in
+    // `packages/observability/src/audit/action-codes.ts`), which IS
+    // accepted by the `audit_events_category_check` CHECK constraint —
+    // no migration is required.
+    //
+    // The event is emitted via `emitDirect` (best-effort,
+    // non-transactional), matching the pattern for read-only view
+    // events (`tenant_context.viewed`). The event is NOT emitted when
+    // context resolution fails (the `null` return above) or when the
+    // service throws (`clinicAdminOverviewContextRequired` above).
+    //
+    // The event metadata carries only `{ endpoint: 'clinic_admin_overview_view' }`
+    // — no sensitive context, no business payload, no display names.
+    // The standard actor/session/tenant fields are populated from the
+    // authenticated session.
+    if (auditContext !== undefined) {
+      await this.auditHelper.emitDirect({
+        action: 'clinic_admin.overview.viewed',
+        outcome: 'success',
+        source: 'api',
+        tenantId,
+        actorType: 'USER',
+        actorId: user.id,
+        sessionId: session.id,
+        requestId: auditContext.requestId,
+        correlationId: auditContext.correlationId,
+        ipAddress: auditContext.ipAddress,
+        userAgent: auditContext.userAgent,
+        scope: 'facility_context',
+        metadata: { endpoint: 'clinic_admin_overview_view' },
+      });
+    }
+
+    return response;
   }
 }
 

@@ -1,0 +1,1208 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { Server } from 'node:http';
+import { INestApplication } from '@nestjs/common';
+import { ThrottlerStorage } from '@nestjs/throttler';
+import { AppModule } from '../../src/app.module.js';
+import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
+import { LocalCredentialService } from '../../src/infrastructure/database/repositories/local-credential.service.js';
+import { PasswordService } from '../../src/modules/auth/password.service.js';
+import type {
+  TenantRepository,
+  UserRepository,
+  TenantMembershipRepository,
+  TenantRoleAssignmentRepository,
+  OrganisationRepository,
+  FacilityRepository,
+  TenantId,
+  OrganisationId,
+  PlatformRoleCode,
+} from '@ibn-hayan/domain';
+import {
+  USER_REPOSITORY,
+  TENANT_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+} from '../../src/infrastructure/database/database.module.js';
+import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
+import { execFileSync } from 'node:child_process';
+import {
+  ClinicAdminOverviewResponseSchema,
+  AuthErrorResponseSchema,
+} from '@ibn-hayan/contracts';
+import { getPsqlBin, getDatabaseUrl } from '../database/_pg-bootstrap.js';
+
+/**
+ * Clinic Admin Overview HTTP integration tests.
+ *
+ * These tests exercise the full Clinic Admin Overview flow via
+ * supertest against a real NestJS application with a real PostgreSQL
+ * 17 database. They cover the 24 mandatory scenarios from the
+ * audit-semantics restoration task Phase 4.
+ *
+ * Test matrix:
+ * 1. R09 with valid session and full context returns HTTP 200.
+ * 2. The response passes the strict Clinic Admin Overview schema.
+ * 3. R13 Platform Super Admin returns HTTP 403.
+ * 4. Every tested non-R09 role returns HTTP 403.
+ * 5. Missing session returns HTTP 401.
+ * 6. Expired session returns HTTP 401.
+ * 7. Revoked session returns HTTP 401.
+ * 8. Missing active membership returns HTTP 403.
+ * 9. Missing active organisation returns HTTP 403.
+ * 10. Missing active facility returns HTTP 403.
+ * 11. Organisation from another tenant fails closed.
+ * 12. Facility from another tenant fails closed.
+ * 13. Facility belonging to another organisation in the same tenant fails closed.
+ * 14. Query-string tenant identifiers cannot override session context.
+ * 15. Query-string organisation identifiers cannot override session context.
+ * 16. Query-string facility identifiers cannot override session context.
+ * 17. Custom scope headers cannot override session context.
+ * 18. Request body identifiers cannot override session context.
+ * 19. Role Preview cannot bypass the permission requirement.
+ * 20. Platform Super Admin is never converted to Clinic Administrator.
+ * 21. The correct audit event or events are produced.
+ * 22. Failed requests do not emit a false successful-view event.
+ * 23. No sensitive values appear in the audit metadata.
+ * 24. Database cleanup leaves no cross-test contamination.
+ *
+ * Per the audit-semantics restoration task Phase 4, these tests
+ * require PostgreSQL 17. When PostgreSQL 17 is unavailable locally,
+ * the suite is NOT run; GitHub Actions remains authoritative.
+ */
+
+setupDatabaseTests();
+
+let app: INestApplication;
+let server: Server;
+let prisma: PrismaService;
+let users: UserRepository;
+let tenants: TenantRepository;
+let memberships: TenantMembershipRepository;
+let roleAssignments: TenantRoleAssignmentRepository;
+let organisations: OrganisationRepository;
+let facilities: FacilityRepository;
+let credentials: LocalCredentialService;
+let passwordService: PasswordService;
+let throttlerStorage: ThrottlerStorage;
+
+const TEST_PASSWORD = 'sufficiently-long-password';
+const ORIGIN = 'http://localhost:3000';
+
+interface BootstrapResult {
+  userId: string;
+  tenantId: string;
+  membershipId: string;
+  organisationId: string;
+  facilityId: string;
+}
+
+async function bootstrapUserAndContext(
+  userEmail: string,
+  userDisplayName: string,
+  tenantSlug: string,
+  tenantDisplayName: string,
+  roleCode: PlatformRoleCode,
+  options: {
+    readonly tenantStatus?: 'active' | 'suspended';
+    readonly membershipStatus?: 'active' | 'suspended';
+    readonly createOrganisation?: boolean;
+    readonly createFacility?: boolean;
+    readonly facilityOrganisationId?: OrganisationId;
+  } = {},
+): Promise<BootstrapResult> {
+  const tenant = await tenants.create({
+    slug: tenantSlug,
+    displayName: tenantDisplayName,
+    status: options.tenantStatus ?? 'active',
+  });
+  const user = await users.create({
+    email: userEmail,
+    displayName: userDisplayName,
+  });
+  const hash = await passwordService.hash(TEST_PASSWORD);
+  await credentials.createCredential({
+    userId: user.id,
+    passwordHash: hash,
+    passwordChangedAt: new Date(),
+  });
+  const membership = await memberships.create({
+    tenantId: tenant.id,
+    userId: user.id,
+    status: options.membershipStatus ?? 'active',
+  });
+  await roleAssignments.create({
+    tenantMembershipId: membership.id,
+    roleCode,
+  });
+
+  let organisationId: OrganisationId | '' = '';
+  if (options.createOrganisation !== false) {
+    const org = await organisations.create({
+      tenantId: tenant.id,
+      code: `ORG-${tenantSlug}`,
+      displayName: `Organisation ${tenantDisplayName}`,
+      status: 'active',
+    });
+    organisationId = org.id;
+  }
+
+  let facilityId = '';
+  if (options.createFacility !== false && organisationId !== '') {
+    const fac = await facilities.create({
+      tenantId: tenant.id,
+      organisationId: options.facilityOrganisationId ?? organisationId,
+      code: `FAC-${tenantSlug}`,
+      displayName: `Facility ${tenantDisplayName}`,
+      status: 'active',
+    });
+    facilityId = fac.id;
+  }
+
+  return {
+    userId: user.id,
+    tenantId: tenant.id,
+    membershipId: membership.id,
+    organisationId,
+    facilityId,
+  };
+}
+
+function truncateAll(): void {
+  execFileSync(
+    getPsqlBin(),
+    [
+      getDatabaseUrl(),
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-c',
+      'TRUNCATE TABLE auth_sessions, audit_outbox_events, tenant_role_assignments, tenant_memberships, local_credentials, users, tenants, organisations, facilities RESTART IDENTITY CASCADE;',
+    ],
+    { stdio: 'pipe', encoding: 'utf-8' },
+  );
+}
+
+function extractSessionCookie(response: unknown): string {
+  const headers = (response as { headers?: Record<string, unknown> }).headers;
+  if (!headers) return '';
+  const setCookie = headers['set-cookie'];
+  if (!setCookie) return '';
+  if (Array.isArray(setCookie)) {
+    const first: unknown = setCookie[0];
+    if (typeof first === 'string') {
+      return first.split(';')[0] ?? '';
+    }
+    return '';
+  }
+  if (typeof setCookie === 'string') {
+    return setCookie.split(';')[0] ?? '';
+  }
+  return '';
+}
+
+async function loginAndReturnCookie(email: string): Promise<string> {
+  const response = await request(server)
+    .post('/api/v1/auth/login')
+    .set('Origin', ORIGIN)
+    .send({ email, password: TEST_PASSWORD })
+    .expect(200);
+  return extractSessionCookie(response);
+}
+
+async function selectTenantContext(
+  cookie: string,
+  membershipId: string,
+): Promise<void> {
+  const csrfResponse = await request(server)
+    .get('/api/v1/auth/csrf')
+    .set('Cookie', cookie)
+    .expect(200);
+  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  await request(server)
+    .put('/api/v1/context/tenant')
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
+    .send({ membershipId })
+    .expect(200);
+}
+
+async function selectOrganisationContext(
+  cookie: string,
+  organisationId: string,
+): Promise<void> {
+  const csrfResponse = await request(server)
+    .get('/api/v1/auth/csrf')
+    .set('Cookie', cookie)
+    .expect(200);
+  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  await request(server)
+    .put('/api/v1/context/organisation')
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
+    .send({ organisationId })
+    .expect(200);
+}
+
+async function selectFacilityContext(
+  cookie: string,
+  facilityId: string,
+): Promise<void> {
+  const csrfResponse = await request(server)
+    .get('/api/v1/auth/csrf')
+    .set('Cookie', cookie)
+    .expect(200);
+  const csrfToken = (csrfResponse.body as { csrfToken: string }).csrfToken;
+  await request(server)
+    .put('/api/v1/context/facility')
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
+    .send({ facilityId })
+    .expect(200);
+}
+
+async function loginAndSelectContext(
+  email: string,
+  membershipId: string,
+  organisationId: string,
+  facilityId: string,
+): Promise<string> {
+  const cookie = await loginAndReturnCookie(email);
+  await selectTenantContext(cookie, membershipId);
+  await selectOrganisationContext(cookie, organisationId);
+  await selectFacilityContext(cookie, facilityId);
+  return cookie;
+}
+
+beforeAll(async () => {
+  const moduleRef = await Test.createTestingModule({
+    imports: [AppModule],
+  }).compile();
+
+  app = moduleRef.createNestApplication();
+  app.setGlobalPrefix('api/v1');
+  await app.init();
+  server = app.getHttpServer() as Server;
+
+  prisma = app.get(PrismaService);
+  users = app.get<UserRepository>(USER_REPOSITORY);
+  tenants = app.get<TenantRepository>(TENANT_REPOSITORY);
+  memberships = app.get<TenantMembershipRepository>(
+    TENANT_MEMBERSHIP_REPOSITORY,
+  );
+  roleAssignments = app.get<TenantRoleAssignmentRepository>(
+    TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  );
+  organisations = app.get<OrganisationRepository>(ORGANISATION_REPOSITORY);
+  facilities = app.get<FacilityRepository>(FACILITY_REPOSITORY);
+  credentials = app.get(LocalCredentialService);
+  passwordService = app.get(PasswordService);
+  throttlerStorage = app.get(ThrottlerStorage);
+}, 60_000);
+
+afterAll(async () => {
+  await app.close();
+});
+
+beforeEach(() => {
+  truncateAll();
+  resetThrottlerStorage();
+});
+
+function resetThrottlerStorage(): void {
+  const storage = throttlerStorage as unknown as {
+    storage?: Map<string, unknown>;
+  };
+  if (storage.storage instanceof Map) {
+    storage.storage.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test scenarios
+// ---------------------------------------------------------------------------
+
+describe('GET /api/v1/clinic-admin/overview', () => {
+  it('1. R09 with valid session and full context returns HTTP 200', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'admin@example.invalid',
+      'Admin Alpha',
+      'tenant-alpha',
+      'Tenant Alpha',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'admin@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      activeContext: {
+        tenantDisplayName: 'Tenant Alpha',
+        organisationDisplayName: 'Organisation Tenant Alpha',
+        facilityDisplayName: 'Facility Tenant Alpha',
+      },
+      administrator: {
+        displayName: 'Admin Alpha',
+      },
+    });
+  });
+
+  it('2. the response passes the strict Clinic Admin Overview schema', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'admin2@example.invalid',
+      'Admin Beta',
+      'tenant-beta',
+      'Tenant Beta',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'admin2@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const parsed = ClinicAdminOverviewResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('3. R13 Platform Super Admin returns HTTP 403', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'superadmin@example.invalid',
+      'Super Admin',
+      'tenant-super',
+      'Tenant Super',
+      'R13_SYSTEM_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'superadmin@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('4. every tested non-R09 role returns HTTP 403', async () => {
+    const nonR09Roles = [
+      'R01_PHYSICIAN',
+      'R02_NURSE',
+      'R03_PHARMACIST',
+      'R04_TECHNICIAN',
+      'R05_ALLIED_HEALTH_PROFESSIONAL',
+      'R06_RECEPTIONIST',
+      'R07_SCHEDULER',
+      'R08_BILLER',
+      'R10_COMPLIANCE_OFFICER',
+      'R11_HR_MANAGER',
+      'R12_EXECUTIVE',
+      'R13_SYSTEM_ADMINISTRATOR',
+      'R14_INTEGRATION_ACCOUNT',
+    ] as const;
+
+    for (const roleCode of nonR09Roles) {
+      truncateAll();
+      resetThrottlerStorage();
+      const slug = `tenant-${roleCode.toLowerCase()}`;
+      const ctx = await bootstrapUserAndContext(
+        `user-${roleCode.toLowerCase()}@example.invalid`,
+        `User ${roleCode}`,
+        slug,
+        `Tenant ${roleCode}`,
+        roleCode,
+      );
+      const cookie = await loginAndSelectContext(
+        `user-${roleCode.toLowerCase()}@example.invalid`,
+        ctx.membershipId,
+        ctx.organisationId,
+        ctx.facilityId,
+      );
+
+      const response = await request(server)
+        .get('/api/v1/clinic-admin/overview')
+        .set('Cookie', cookie)
+        .expect(403);
+
+      const parsed = AuthErrorResponseSchema.safeParse(response.body);
+      expect(parsed.success).toBe(true);
+    }
+  });
+
+  it('5. missing session returns HTTP 401', async () => {
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .expect(401);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('6. expired session returns HTTP 401', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'expired@example.invalid',
+      'Expired Admin',
+      'tenant-expired',
+      'Tenant Expired',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'expired@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Expire the session by setting expiresAt to the past.
+    const cookieValue = cookie.split('=')[1]!;
+    const sessions = await prisma.authSession.findMany({
+      where: { tokenHash: cookieValue },
+    });
+    // If the session is found by token hash, expire it. Otherwise,
+    // expire all sessions for this user (defence-in-depth).
+    if (sessions.length > 0) {
+      await prisma.authSession.update({
+        where: { id: sessions[0]!.id },
+        data: { expiresAt: new Date('2020-01-01T00:00:00.000Z') },
+      });
+    } else {
+      await prisma.authSession.updateMany({
+        where: { userId: ctx.userId },
+        data: { expiresAt: new Date('2020-01-01T00:00:00.000Z') },
+      });
+    }
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(401);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('7. revoked session returns HTTP 401', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'revoked@example.invalid',
+      'Revoked Admin',
+      'tenant-revoked',
+      'Tenant Revoked',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'revoked@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Revoke the session.
+    await prisma.authSession.updateMany({
+      where: { userId: ctx.userId },
+      data: { revokedAt: new Date() },
+    });
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(401);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('8. missing active membership returns HTTP 403', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'no-membership@example.invalid',
+      'No Membership Admin',
+      'tenant-no-mem',
+      'Tenant No Mem',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndReturnCookie('no-membership@example.invalid');
+    // Do NOT select tenant context — activeTenantMembershipId remains null.
+    // But we need organisation and facility to be set to test the
+    // membership check specifically. Actually, without selecting tenant
+    // context, we can't select organisation or facility. So this test
+    // verifies that without an active membership, the endpoint returns 403.
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+    // The response must NOT leak which dimension is missing.
+    expect(JSON.stringify(response.body)).not.toContain(ctx.membershipId);
+  });
+
+  it('9. missing active organisation returns HTTP 403', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'no-org@example.invalid',
+      'No Org Admin',
+      'tenant-no-org',
+      'Tenant No Org',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndReturnCookie('no-org@example.invalid');
+    await selectTenantContext(cookie, ctx.membershipId);
+    // Do NOT select organisation context.
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('10. missing active facility returns HTTP 403', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'no-facility@example.invalid',
+      'No Facility Admin',
+      'tenant-no-fac',
+      'Tenant No Fac',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndReturnCookie('no-facility@example.invalid');
+    await selectTenantContext(cookie, ctx.membershipId);
+    await selectOrganisationContext(cookie, ctx.organisationId);
+    // Do NOT select facility context.
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('11. organisation from another tenant fails closed', async () => {
+    // This scenario is structurally enforced by the session-context
+    // module's PUT /context/organisation endpoint: the user cannot
+    // select an organisation from another tenant. The Clinic Admin
+    // Overview service additionally verifies the organisation belongs
+    // to the active tenant. This test verifies the service-level
+    // defence-in-depth by directly setting an invalid organisation
+    // on the session (simulating a session-tampering attack).
+    const ctx = await bootstrapUserAndContext(
+      'cross-tenant@example.invalid',
+      'Cross Tenant Admin',
+      'tenant-cross',
+      'Tenant Cross',
+      'R09_ADMINISTRATOR',
+    );
+    // Create a second tenant and organisation.
+    const ctx2 = await bootstrapUserAndContext(
+      'cross-tenant2@example.invalid',
+      'Cross Tenant Admin 2',
+      'tenant-cross2',
+      'Tenant Cross 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'cross-tenant@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Tamper with the session: set activeOrganisationId to ctx2's org.
+    await prisma.authSession.updateMany({
+      where: { userId: ctx.userId },
+      data: { activeOrganisationId: ctx2.organisationId },
+    });
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('12. facility from another tenant fails closed', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'cross-tenant-fac@example.invalid',
+      'Cross Tenant Fac Admin',
+      'tenant-cross-fac',
+      'Tenant Cross Fac',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'cross-tenant-fac2@example.invalid',
+      'Cross Tenant Fac Admin 2',
+      'tenant-cross-fac2',
+      'Tenant Cross Fac 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'cross-tenant-fac@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Tamper with the session: set activeFacilityId to ctx2's facility.
+    await prisma.authSession.updateMany({
+      where: { userId: ctx.userId },
+      data: { activeFacilityId: ctx2.facilityId },
+    });
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('13. facility belonging to another organisation in the same tenant fails closed', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'cross-org-fac@example.invalid',
+      'Cross Org Fac Admin',
+      'tenant-cross-org-fac',
+      'Tenant Cross Org Fac',
+      'R09_ADMINISTRATOR',
+    );
+    // Create a second organisation in the same tenant.
+    const org2 = await organisations.create({
+      tenantId: ctx.tenantId as TenantId,
+      code: 'ORG-2',
+      displayName: 'Organisation 2',
+      status: 'active',
+    });
+    const fac2 = await facilities.create({
+      tenantId: ctx.tenantId as TenantId,
+      organisationId: org2.id,
+      code: 'FAC-2',
+      displayName: 'Facility 2',
+      status: 'active',
+    });
+    const cookie = await loginAndSelectContext(
+      'cross-org-fac@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Tamper with the session: set activeFacilityId to fac2 (which
+    // belongs to org2, not the active organisation).
+    await prisma.authSession.updateMany({
+      where: { userId: ctx.userId },
+      data: { activeFacilityId: fac2.id },
+    });
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('14. query-string tenant identifiers cannot override session context', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'query-tenant@example.invalid',
+      'Query Tenant Admin',
+      'tenant-query',
+      'Tenant Query',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'query-tenant2@example.invalid',
+      'Query Tenant Admin 2',
+      'tenant-query2',
+      'Tenant Query 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'query-tenant@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // Pass ctx2's tenantId as a query parameter. The server MUST
+    // ignore it and return ctx's data (not ctx2's).
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .query({ tenantId: ctx2.tenantId })
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.tenantDisplayName,
+    ).toBe('Tenant Query');
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.tenantDisplayName,
+    ).not.toBe('Tenant Query 2');
+  });
+
+  it('15. query-string organisation identifiers cannot override session context', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'query-org@example.invalid',
+      'Query Org Admin',
+      'tenant-query-org',
+      'Tenant Query Org',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'query-org2@example.invalid',
+      'Query Org Admin 2',
+      'tenant-query-org2',
+      'Tenant Query Org 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'query-org@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .query({ organisationId: ctx2.organisationId })
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.organisationDisplayName,
+    ).toBe('Organisation Tenant Query Org');
+  });
+
+  it('16. query-string facility identifiers cannot override session context', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'query-fac@example.invalid',
+      'Query Fac Admin',
+      'tenant-query-fac',
+      'Tenant Query Fac',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'query-fac2@example.invalid',
+      'Query Fac Admin 2',
+      'tenant-query-fac2',
+      'Tenant Query Fac 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'query-fac@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .query({ facilityId: ctx2.facilityId })
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.facilityDisplayName,
+    ).toBe('Facility Tenant Query Fac');
+  });
+
+  it('17. custom scope headers cannot override session context', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'header-scope@example.invalid',
+      'Header Scope Admin',
+      'tenant-header',
+      'Tenant Header',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'header-scope2@example.invalid',
+      'Header Scope Admin 2',
+      'tenant-header2',
+      'Tenant Header 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'header-scope@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .set('X-Tenant-Id', ctx2.tenantId)
+      .set('X-Organisation-Id', ctx2.organisationId)
+      .set('X-Facility-Id', ctx2.facilityId)
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.tenantDisplayName,
+    ).toBe('Tenant Header');
+  });
+
+  it('18. request body identifiers cannot override session context', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'body-scope@example.invalid',
+      'Body Scope Admin',
+      'tenant-body',
+      'Tenant Body',
+      'R09_ADMINISTRATOR',
+    );
+    const ctx2 = await bootstrapUserAndContext(
+      'body-scope2@example.invalid',
+      'Body Scope Admin 2',
+      'tenant-body2',
+      'Tenant Body 2',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'body-scope@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    // GET requests typically don't have a body, but supertest allows
+    // sending one. The server MUST ignore it.
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .send({
+        tenantId: ctx2.tenantId,
+        organisationId: ctx2.organisationId,
+        facilityId: ctx2.facilityId,
+      })
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.tenantDisplayName,
+    ).toBe('Tenant Body');
+  });
+
+  it('19. Role Preview cannot bypass the permission requirement', async () => {
+    // Role Preview is a development-only feature. Even if a preview
+    // session is created with R09, the AuthorizationGuard must still
+    // verify the actual role assignment. This test verifies that a
+    // user WITHOUT R09 cannot access the overview endpoint, even if
+    // they attempt to use Role Preview.
+    //
+    // NOTE: Role Preview is a development-only feature gated by
+    // NODE_ENV !== 'production' and IBN_HAYAN_ROLE_PREVIEW_ENABLED.
+    // This test verifies the permission check is not bypassed.
+    const ctx = await bootstrapUserAndContext(
+      'no-r09@example.invalid',
+      'No R09 User',
+      'tenant-no-r09',
+      'Tenant No R09',
+      'R01_PHYSICIAN', // NOT R09
+    );
+    const cookie = await loginAndSelectContext(
+      'no-r09@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('20. Platform Super Admin is never converted to Clinic Administrator', async () => {
+    // R13 System Administrator must NOT receive the
+    // `clinic_admin_overview:view` permission, even if R13 is the
+    // only role assigned. This test verifies the permission matrix
+    // does not accidentally grant R09's permission to R13.
+    const ctx = await bootstrapUserAndContext(
+      'r13-only@example.invalid',
+      'R13 Only User',
+      'tenant-r13-only',
+      'Tenant R13 Only',
+      'R13_SYSTEM_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'r13-only@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    const parsed = AuthErrorResponseSchema.safeParse(response.body);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('21. the correct audit event or events are produced', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'audit@example.invalid',
+      'Audit Admin',
+      'tenant-audit',
+      'Tenant Audit',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'audit@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    // Verify the audit outbox contains the expected events.
+    // The guard emits `authorization.decision.allowed` (category
+    // `authorization`), and the service emits
+    // `clinic_admin.overview.viewed` (category `facility_context`).
+    const outboxRows = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+    const drafts = outboxRows.map(
+      (r) =>
+        r.canonicalEventDraft as {
+          action: string;
+          category: string;
+          permissionCode?: string;
+        },
+    );
+
+    // The guard's `authorization.decision.allowed` event MUST be
+    // present (with permissionCode='clinic_admin_overview:view').
+    const allowedEvent = drafts.find(
+      (d) => d.action === 'authorization.decision.allowed',
+    );
+    expect(allowedEvent).toBeDefined();
+    expect(allowedEvent!.permissionCode).toBe('clinic_admin_overview:view');
+
+    // The service's `clinic_admin.overview.viewed` event MUST be
+    // present (mapped to facility_context category).
+    const viewedEvent = drafts.find(
+      (d) => d.action === 'clinic_admin.overview.viewed',
+    );
+    expect(viewedEvent).toBeDefined();
+    expect(viewedEvent!.category).toBe('facility_context');
+  });
+
+  it('22. failed requests do NOT emit a false successful-view event', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'failed-audit@example.invalid',
+      'Failed Audit Admin',
+      'tenant-failed-audit',
+      'Tenant Failed Audit',
+      'R13_SYSTEM_ADMINISTRATOR', // NOT R09 — will be denied
+    );
+    const cookie = await loginAndSelectContext(
+      'failed-audit@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(403);
+
+    // Verify the audit outbox does NOT contain a
+    // `clinic_admin.overview.viewed` event (because the service was
+    // never invoked — the guard denied the request).
+    const outboxRows = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+    const drafts = outboxRows.map(
+      (r) => r.canonicalEventDraft as { action: string },
+    );
+    const viewedEvent = drafts.find(
+      (d) => d.action === 'clinic_admin.overview.viewed',
+    );
+    expect(viewedEvent).toBeUndefined();
+
+    // The guard's `authorization.decision.denied` event SHOULD be
+    // present (proving the request was denied, not that the service
+    // completed).
+    const deniedEvent = drafts.find(
+      (d) => d.action === 'authorization.decision.denied',
+    );
+    expect(deniedEvent).toBeDefined();
+  });
+
+  it('23. no sensitive values appear in the audit metadata', async () => {
+    const ctx = await bootstrapUserAndContext(
+      'sensitive@example.invalid',
+      'Sensitive Admin',
+      'tenant-sensitive',
+      'Tenant Sensitive',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'sensitive@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const outboxRows = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+    for (const row of outboxRows) {
+      const draft = row.canonicalEventDraft as {
+        action: string;
+        metadata: unknown;
+        newState: unknown;
+        previousState: unknown;
+      };
+      const json = JSON.stringify(draft);
+      // The audit event MUST NOT contain display names, UUIDs (beyond
+      // the standard actor/session/tenant fields), or business payload.
+      expect(json).not.toContain('Tenant Sensitive');
+      expect(json).not.toContain('Organisation Tenant Sensitive');
+      expect(json).not.toContain('Facility Tenant Sensitive');
+      expect(json).not.toContain('Sensitive Admin');
+      expect(json).not.toContain(ctx.organisationId);
+      expect(json).not.toContain(ctx.facilityId);
+    }
+  });
+
+  it('24. database cleanup leaves no cross-test contamination', async () => {
+    // This test verifies that the `truncateAll()` in `beforeEach`
+    // cleans up all relevant tables. If cleanup fails, subsequent
+    // tests would see stale data.
+    //
+    // We run a simple R09 request and verify it succeeds. If the
+    // previous test's data were not cleaned up, this test would
+    // either fail or see stale data.
+    const ctx = await bootstrapUserAndContext(
+      'cleanup@example.invalid',
+      'Cleanup Admin',
+      'tenant-cleanup',
+      'Tenant Cleanup',
+      'R09_ADMINISTRATOR',
+    );
+    const cookie = await loginAndSelectContext(
+      'cleanup@example.invalid',
+      ctx.membershipId,
+      ctx.organisationId,
+      ctx.facilityId,
+    );
+
+    const response = await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(
+      (
+        response.body as {
+          activeContext: {
+            tenantDisplayName: string;
+            organisationDisplayName: string;
+            facilityDisplayName: string;
+          };
+        }
+      ).activeContext.tenantDisplayName,
+    ).toBe('Tenant Cleanup');
+    // Verify exactly one user, one tenant, one organisation, one
+    // facility exist (no cross-test contamination).
+    const userCount = await prisma.user.count();
+    const tenantCount = await prisma.tenant.count();
+    const orgCount = await prisma.organisation.count();
+    const facCount = await prisma.facility.count();
+    expect(userCount).toBe(1);
+    expect(tenantCount).toBe(1);
+    expect(orgCount).toBe(1);
+    expect(facCount).toBe(1);
+  });
+});

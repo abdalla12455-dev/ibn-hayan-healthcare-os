@@ -367,3 +367,109 @@ describe('AdministratorIdentitySchema', () => {
     ).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7 contract rules: missing data and forward compatibility.
+// ---------------------------------------------------------------------------
+
+describe('ClinicAdminOverviewResponseSchema — Phase 7 contract rules', () => {
+  it('11. does NOT convert missing business data into zero (the response has NO numeric fields that could be zero-filled)', () => {
+    // The contract structurally enforces this rule: the response
+    // contains NO numeric fields. The regions array carries only
+    // `key` (enum) and `availability` (enum). Missing business data
+    // is represented by the availability enum value 'not_supported'
+    // or 'no_data', NEVER by a numeric zero.
+    //
+    // This test verifies the contract has no numeric fields by
+    // parsing a canonical response and checking every field is
+    // either a string, an enum, or an array of objects with
+    // string/enum fields.
+    const result = ClinicAdminOverviewResponseSchema.safeParse({
+      activeContext: {
+        tenantDisplayName: 'Tenant Alpha',
+        organisationDisplayName: 'Organisation Alpha',
+        facilityDisplayName: 'Facility Alpha',
+      },
+      administrator: {
+        displayName: 'Operator Alpha',
+      },
+      regions: [
+        { key: 'financial_snapshot', availability: 'not_supported' },
+      ],
+      generatedAt: '2026-07-26T10:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // Verify no numeric fields exist anywhere in the response.
+      const json = JSON.stringify(result.data);
+      // The json should NOT contain any standalone numeric values
+      // (e.g. `"count":0`, `"total":0`). The only numbers in the
+      // JSON would be inside strings (e.g. dates), which are fine.
+      // We check for the pattern `"key":number` which would indicate
+      // a numeric field.
+      expect(json).not.toMatch(/"[a-zA-Z_]+":\d+(?:\.\d+)?/);
+    }
+  });
+
+  it('12. can activate one region later without breaking existing clients (availability enum includes "supported")', () => {
+    // The contract uses an enum for `availability` that includes
+    // 'supported'. When a future batch implements a business region
+    // (e.g. financial_snapshot), the backend can change the
+    // availability from 'not_supported' to 'supported' and add
+    // business data fields to the region. Existing clients that
+    // only read `key` and `availability` will continue to work.
+    //
+    // This test verifies the 'supported' availability state is
+    // accepted by the schema (forward compatibility).
+    const result = ClinicAdminOverviewResponseSchema.safeParse({
+      activeContext: {
+        tenantDisplayName: 'Tenant Alpha',
+        organisationDisplayName: 'Organisation Alpha',
+        facilityDisplayName: 'Facility Alpha',
+      },
+      administrator: {
+        displayName: 'Operator Alpha',
+      },
+      regions: [
+        { key: 'financial_snapshot', availability: 'supported' },
+      ],
+      generatedAt: '2026-07-26T10:00:00.000Z',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('12b. activating a region does NOT require adding new fields to the region object (strict mode rejects extra fields)', () => {
+    // When a future batch activates a region, the business data
+    // fields should be added to the region object. The contract
+    // uses `.strict()` on the region object, so adding a new field
+    // (e.g. `totalRevenue`) would be REJECTED by the current schema.
+    //
+    // This is intentional: the contract MUST be updated when a
+    // region is activated. This prevents the backend from silently
+    // adding fields that the frontend does not know about. The
+    // contract update is a coordinated change reviewed by the
+    // Security Council.
+    //
+    // This test verifies the strict-mode behaviour: an extra field
+    // on a region is rejected.
+    const result = ClinicAdminOverviewResponseSchema.safeParse({
+      activeContext: {
+        tenantDisplayName: 'Tenant Alpha',
+        organisationDisplayName: 'Organisation Alpha',
+        facilityDisplayName: 'Facility Alpha',
+      },
+      administrator: {
+        displayName: 'Operator Alpha',
+      },
+      regions: [
+        {
+          key: 'financial_snapshot',
+          availability: 'supported',
+          totalRevenue: 12345, // Extra field — must be rejected
+        },
+      ],
+      generatedAt: '2026-07-26T10:00:00.000Z',
+    });
+    expect(result.success).toBe(false);
+  });
+});
