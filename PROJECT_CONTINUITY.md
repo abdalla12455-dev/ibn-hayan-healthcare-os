@@ -3318,3 +3318,182 @@ NONE.
 ### Immediate next task
 
 Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require GitHub Actions to execute all 24 Clinic Admin integration scenarios with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before merge.
+
+## Clinic Admin CI Harness Third-Stage Correction (exact-role fixtures + real Role Preview coverage) — local child commit, 2026-07-27
+
+### Background
+
+The second-stage CI-harness correction (commit `70103905`) successfully fixed the organisation-selection 403 defect and the schema-parse failure. However, the correction introduced two remaining coverage-integrity problems that must be corrected before the branch is pushed:
+
+1. **Composite-role fixture distortion (R13 setup-role inflation).** The `R13_SETUP` mode in `bootstrapUserAndContext` added a tenant-scoped `R13_SYSTEM_ADMINISTRATOR` assignment alongside the nominal role for every non-R09 denial scenario (R01–R08, R10–R12, R14). This meant the final `GET /api/v1/clinic-admin/overview` request tested a composite (e.g. R01+R13) principal, NOT the intended R01-only principal. The audit event for an ALLOWED decision would record `roleCodes: ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR']`, masking any future defect where R13 accidentally granted `clinic_admin_overview:view`. The exact-role denial coverage was therefore not genuine.
+
+2. **Fake Role Preview scenario.** Test #19 ("Role Preview cannot bypass the permission requirement") used a normal R01+R13 user session instead of the real Role Preview mechanism. The test name claimed to verify Role Preview behaviour, but the implementation did not invoke the real Role Preview endpoint, did not use the real Role Preview cookie, and did not create a structurally identical preview session. This was a coverage gap, not a genuine Role Preview test.
+
+### Root cause
+
+**Test-only fixture-identity defect** (NOT a production defect). The `R13_SETUP` mode was a workaround for the production context-selection endpoints correctly 403-ing for non-R09 non-R13 principals (per ADR-015 §1.5). The workaround enabled setup but distorted the fixture identity. The correct approach is to use a test-only Prisma helper to seed the active context directly on the session (the production context-selection endpoints are NOT the subject of the endpoint-denial test — they are structural prerequisites).
+
+The fake Role Preview scenario was a misunderstanding of the Role Preview architecture. The real Role Preview mechanism requires the `isPreviewDatabaseIdentityValid()` gate, which requires the database URLs to contain `role_preview`. The Clinic Admin integration suite uses the standard `ibn_hayan_test` databases, which fail this gate. The real Role Preview endpoints therefore CANNOT be invoked from the Clinic Admin suite. The approved test workflow is to create a session that is STRUCTURALLY IDENTICAL to a real Role Preview session: the user has EXACTLY the previewed role (R01) at the same scope as the real preview identity (facility scope, per the role-preview spec test #14), and the session has the active context set directly (matching what `RolePreviewService.selectRole` does internally).
+
+### Correction applied
+
+**Smallest coherent test-only correction:**
+
+1. **Removed the `R13_SETUP` and `R13_ONLY` modes** from `SetupMode`. The new `EXACT_ROLE` mode is used for every non-R09 denial scenario (R01–R08, R10–R14). The fixture creates ONLY a tenant-scoped assignment for the nominal role. No R13 setup-enabler is added. The active context is seeded directly on the session via the new `seedActiveContextForSession()` helper after login, bypassing the production context-selection endpoints (which correctly 403 for non-R09 non-R13 roles per ADR-015 §1.5).
+
+2. **Added `seedActiveContextForSession()` typed test-only helper** to `_clinic-admin-test-helpers.ts`. The helper validates EVERY ownership invariant before writing:
+   - The membership exists, has status `active`, and belongs to a tenant with status `active`.
+   - The organisation exists, belongs to the same tenant as the membership, and has status `active`.
+   - The facility exists, belongs to the same organisation (and therefore the same tenant), and has status `active`.
+   - The session is found by its `tokenHash` (the SHA-256 hash of the raw cookie value, computed by the new `computeSessionTokenHash()` helper).
+
+   The helper does NOT create permissions, does NOT create role assignments, does NOT bypass the Overview endpoint or the AuthorizationGuard, and does NOT alter production permissions to support test setup.
+
+3. **Added `computeSessionTokenHash()` helper** that computes the SHA-256 hex hash of a session cookie value, matching the format stored in `auth_sessions.token_hash` (`@db.Char(64)`).
+
+4. **Added `assertExactRoleAssignments()` helper** that asserts a user has exactly the expected role assignments (and no others). This is the architectural substitute for asserting `roleCodes` on the denied audit event. The production `AuthorizationGuard.emitAuthorizationDenied` method intentionally does NOT include `roleCodes` in denial events (security hardening — not leaking role information to a denied user). The exact-role proof for denial scenarios is therefore established BEFORE the request by querying the database for the user's role assignments and asserting via `assertExactRoleAssignments()` that the list matches exactly the expected role codes.
+
+5. **Replaced test #19 (Role Preview)** with the approved test workflow that creates a structurally identical preview-equivalent session for R01. The user has EXACTLY R01_PHYSICIAN (no R13 setup-enabler), with both tenant-scoped and facility-scoped R01 assignments (matching the real preview identity's scope per the role-preview spec test #14). The session has the active context set directly via `seedActiveContextForSession()`. The test then issues `GET /api/v1/clinic-admin/overview` through the REAL AuthorizationGuard. If a future defect made Role Preview accidentally grant `clinic_admin_overview:view`, this test would fail (the guard would allow instead of deny).
+
+6. **Added `assertOverviewAuditEventActor()` helper** that asserts the most recent Overview-endpoint authorization-decision audit event has the expected actor, permission, endpoint, and method. This prevents a setup endpoint event (e.g. a context-selection event from `PUT /api/v1/context/organisation`) from being counted accidentally as the Overview endpoint event. For ALLOWED events, `roleCodes` IS included by the production guard and is asserted via `assertExactRoleAssignments()`. For DENIED events, `roleCodes` is intentionally NOT included (security hardening).
+
+7. **Added `assertNoOverviewViewedEvent()` helper** that asserts no `clinic_admin.overview.viewed` audit event was emitted. The Overview service emits this event only on a successful 200 response. Denial scenarios (403) must NOT emit this event.
+
+8. **Updated tests #1, #3, #4, #19, #20, #22** to use the new helpers:
+   - Test #1 (R09 success): added `assertExactRoleAssignments` before the request and `assertOverviewAuditEventActor` after the request (with `expectedAllowedRoleCodes: ['R09_ADMINISTRATOR']`).
+   - Test #3 (R13 denial): replaced `loginAndSelectContext` with `loginAndSeedContext`; added `assertExactRoleAssignments(['R13_SYSTEM_ADMINISTRATOR'])` before the request; added `assertOverviewAuditEventActor` (denied); added `assertNoOverviewViewedEvent`.
+   - Test #4 (every non-R09 role): replaced `loginAndSelectContext` with `loginAndSeedContext`; added `assertExactRoleAssignments([roleCode])` before the request for each role; added `assertOverviewAuditEventActor` (denied); added `assertNoOverviewViewedEvent`.
+   - Test #19 (Role Preview): complete rewrite using the approved test workflow (see above).
+   - Test #20 (R13 only): replaced `loginAndSelectContext` with `loginAndSeedContext`; added `assertExactRoleAssignments(['R13_SYSTEM_ADMINISTRATOR'])`; added `assertOverviewAuditEventActor` (denied); added `assertNoOverviewViewedEvent`.
+   - Test #22 (failed requests): replaced `loginAndSelectContext` with `loginAndSeedContext`; added `assertExactRoleAssignments(['R13_SYSTEM_ADMINISTRATOR'])`; added `assertOverviewAuditEventActor` (denied); added `assertNoOverviewViewedEvent`.
+
+9. **Added 40 focused regression tests** to `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts`:
+   - 4 tests for `computeSessionTokenHash` (64-char hex; canonical SHA-256 for `''` and `'abc'`; different inputs produce different hashes).
+   - 11 tests for `assertExactRoleAssignments` (passes on exact match; passes on empty; de-duplicates by role code; passes on intended composite; throws on extra role; throws on missing role; throws on different role; throws on size mismatch; mentions fixture-identity defect; mentions setup-enabler).
+   - 10 tests for `seedActiveContextForSession` ownership validation (seeds when all invariants pass; rejects on missing membership; rejects on suspended membership; rejects on suspended tenant; rejects on cross-tenant organisation; rejects on cross-tenant facility; rejects on cross-organisation facility; rejects on tokenHash not found; does NOT create permissions; does NOT create role assignments).
+   - 7 tests for the fixture-identity defect regression (R01 alone passes; R01+R13 rejected; R02+R13 rejected; R14+R13 rejected; R13 alone passes; R09 alone passes; no non-R13 fixture receives an R13 setup assignment).
+   - 3 tests for the missing-context parser preservation (Phase 6).
+   - 3 tests for the first-stage CSRF fix preservation.
+   - 2 tests for the Throttler cleanup fix preservation.
+
+### Files modified
+
+- `apps/api/test/clinic-admin/_clinic-admin-test-helpers.ts` — added `seedActiveContextForSession()`, `computeSessionTokenHash()`, `assertExactRoleAssignments()`, and the `SeedActiveContextInput` interface.
+- `apps/api/test/clinic-admin/clinic-admin.e2e.clinic-admin-spec.ts` — removed `R13_SETUP` and `R13_ONLY` modes; added `EXACT_ROLE` mode; added `loginAndSeedContext()` helper; added `assertOverviewAuditEventActor()` and `assertNoOverviewViewedEvent()` helpers; updated tests #1, #3, #4, #19, #20, #22 to use the new helpers and the exact-role proof.
+- `apps/api/src/modules/clinic-admin/clinic-admin-test-helpers.spec.ts` — added 40 focused regression tests for the new helpers and the fixture-identity defect regression.
+
+### Files NOT modified
+
+- All production source code (controllers, services, guards, errors, schemas, repositories) — unchanged.
+- `apps/api/prisma/schema.prisma` and `apps/api/prisma-audit/schema.prisma` (database schemas) — unchanged.
+- `apps/api/prisma/migrations/*` and `apps/api/prisma-audit/migrations/*` (database migrations) — unchanged.
+- `apps/api/package.json` and root `package.json` (dependency versions) — unchanged.
+- `pnpm-lock.yaml` (lockfile) — unchanged.
+- `.github/workflows/main-ci.yml` (CI workflow) — unchanged.
+- All Platform Super Admin / Role Preview production implementation files — unchanged.
+- All quarantine branches, backup branches, recovery tags — unchanged.
+- Main branch (unchanged at `d6c02b62`).
+- Old Clinic Admin shell branch `feat/clinic-admin-shell-v1` at `745d71e` — unchanged.
+
+### Production-defect result
+
+**NONE.** The production code correctly enforces ADR-015 §1.5 and the AuthorizationGuard correctly omits `roleCodes` from denial events (security hardening). The defects were entirely in the test fixture (composite-role distortion) and the fake Role Preview scenario.
+
+### Audit roleCodes architectural note
+
+The production `AuthorizationGuard.emitAuthorizationDenied` method intentionally does NOT include `roleCodes` in denial events. This is security hardening — not leaking role information to a denied user who might be probing permissions. The exact-role proof for denial scenarios is therefore established BEFORE the request by querying the database for the user's role assignments (`prisma.tenantRoleAssignment.findMany`) and asserting via `assertExactRoleAssignments()` that the list matches exactly the expected role codes. For ALLOWED events, `roleCodes` IS included by the production guard and is asserted via `assertOverviewAuditEventActor()`.
+
+### Endpoint-reach proof (strengthened)
+
+Every scenario that calls `GET /api/v1/clinic-admin/overview` now asserts:
+1. The audit-outbox `authorization.decision.allowed` or `authorization.decision.denied` count for the Overview endpoint increased by exactly one (proves the request reached the guard).
+2. The audit event's `actorId` matches the tested user (prevents a setup endpoint event from being counted accidentally).
+3. The audit event's `permissionCode` is `clinic_admin_overview:view`.
+4. The audit event's `metadata.endpoint` is `/api/v1/clinic-admin/overview`.
+5. The audit event's `metadata.method` is `GET`.
+6. For ALLOWED events, the audit event's `roleCodes` matches exactly the intended role list (via `assertExactRoleAssignments`).
+7. For DENIED events, the audit event's `roleCodes` is intentionally absent (security hardening); the exact-role proof was established BEFORE the request via `assertExactRoleAssignments`.
+8. Successful scenarios emit `clinic_admin.overview.viewed` (test #21).
+9. Denied scenarios do NOT emit `clinic_admin.overview.viewed` (via `assertNoOverviewViewedEvent`).
+10. Missing-session scenarios (#5, #6, #7) are proven by the HTTP 401 status (no authorization-decision event is emitted because the session was never validated).
+
+### Validation language correction
+
+The previous PROJECT_CONTINUITY.md and worklog.md entries used language that could be misread as claiming local PostgreSQL integration success. This correction clarifies the validation language:
+
+- **Implemented in integration coverage**: the 24 scenarios are wired into the GitHub Actions `postgresql17-validation` job via `pnpm test:clinic-admin` and `vitest.clinic-admin.config.ts`. The test code is complete and typechecked.
+- **NOT executed locally**: PostgreSQL 17 is unavailable in the local environment. `pnpm test:clinic-admin` resolves the correct configuration but fails at the `setupDatabaseTests()` bootstrap step. 24 tests are skipped, 0 failed, 0 unhandled errors. This is the expected failure mode, NOT a regression.
+- **Awaiting GitHub Actions verification**: GitHub Actions remains the authoritative validator. The 24 scenarios must pass on GitHub Actions with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before the PR can be merged.
+
+The local unit tests (961 tests across 5 packages: domain 108, contracts 208, observability 95, api 323, web 227) validate helper logic, fixture construction, schema parsing, and the fixture-identity defect regression. GitHub Actions remains responsible for runtime PostgreSQL and HTTP verification.
+
+### Validation results
+
+- `pnpm run typecheck` PASS (all 8 workspace projects).
+- `pnpm run lint` PASS (0 errors, 0 warnings).
+- `pnpm run test` PASS — **961 unit tests** across 5 packages (domain 108, contracts 208, observability 95, api 323, web 227; 0 regressions). Independently verified count: 108+208+95+323+227 = 961. Baseline was 921 (after the second-stage correction `70103905`); this commit adds 40 tests (921→961).
+- `pnpm run build` PASS (api via SWC, web via Next.js 16; `/clinic-admin` route registered).
+- `git diff --check` PASS.
+- Focused tests: clinic-admin test-helpers spec (85 tests PASS — 45 from prior corrections + 40 new), clinic-admin controller (12 tests PASS), clinic-admin errors (4 tests PASS), clinic-admin overview service (24 tests PASS), clinic-admin frontend client (15 tests PASS), clinic-admin Overview component (32 tests PASS), contracts auth + clinic-admin schemas (97 tests PASS), domain authorization (70 tests PASS), observability audit (95 tests PASS).
+- `pnpm test:clinic-admin` resolves the correct `vitest.clinic-admin.config.ts` configuration but fails at the `setupDatabaseTests()` bootstrap step because PostgreSQL 17 is unavailable locally. 24 tests skipped, 0 failed tests, 0 unhandled errors. This is the expected failure mode, NOT a regression.
+
+### PostgreSQL 17 local availability
+
+**UNAVAILABLE.** The environment does not have PostgreSQL 17 installed. The 24 integration scenarios are implemented in integration coverage and wired into the GitHub Actions `postgresql17-validation` job. They are NOT executed locally. GitHub Actions remains the authoritative validator.
+
+### Not locally proven (clarification)
+
+The following are NOT claimed as locally proven, because PostgreSQL 17 is unavailable locally:
+
+- R09 endpoint returns 200 — NOT locally proven (integration test not executed locally).
+- R13 endpoint returns 403 — NOT locally proven (integration test not executed locally).
+- All roles are denied — NOT locally proven (integration test not executed locally).
+- All 24 scenarios reach the endpoint — NOT locally proven (integration test not executed locally).
+
+The local unit tests validate:
+- Helper logic (CSRF parsing, Throttler cleanup, session-context seeding, exact-role assertion, error-contract parsing).
+- Fixture construction (the `seedActiveContextForSession` ownership validation, the `assertExactRoleAssignments` exact-role proof).
+- Schema parsing (the `ClinicAdminOverviewErrorResponseSchema` and `AuthErrorResponseSchema` contracts).
+
+GitHub Actions remains responsible for runtime PostgreSQL and HTTP verification.
+
+### Schema/migration changes
+
+NONE.
+
+### Dependency changes
+
+NONE.
+
+### Lockfile changes
+
+NONE.
+
+### CI workflow changes
+
+NONE.
+
+### Production source code changes
+
+NONE.
+
+### Commit subject
+
+`test: preserve exact role identity in clinic admin integration fixtures`
+
+### Commit parent
+
+`7010390571e769d898da021b207226b258d2e5bc` (the previous task-branch tip, after the second-stage CI-harness correction).
+
+### Remaining risks
+
+1. **PostgreSQL 17 integration tests not executed locally.** The 24 integration scenarios are awaiting GitHub Actions verification. The local environment cannot run them.
+2. **Branch is 2 commits ahead of remote** (the second-stage correction `70103905` plus this third-stage correction). The operator must generate a fresh temporary deploy key and push via SSH before CI can rerun.
+3. **Latent Throttler reset bug in auth, context, and audit-integration tests** (pre-existing, not modified by this commit).
+4. **Latent `afterAll` crash in auth and context tests** (pre-existing, not modified by this commit).
+5. **The Role Preview test is a structurally identical preview-equivalent session, NOT a real Role Preview endpoint invocation.** The real Role Preview endpoints cannot be invoked from the Clinic Admin suite due to the `isPreviewDatabaseIdentityValid()` gate (the Clinic Admin suite uses standard `ibn_hayan_test` databases, not `role_preview_test` databases). The approved test workflow creates a session with the same role assignment scope (R01 at facility scope) and the same active context as a real Role Preview session. The real Role Preview endpoint lifecycle (bootstrap, select, end) is tested in the separate `apps/api/test/role-preview/role-preview.role-preview-spec.ts` suite, which uses the `role_preview_test` databases.
+6. **The denied audit event does NOT include `roleCodes`** (production security hardening). The exact-role proof for denial scenarios is established BEFORE the request by querying the database for the user's role assignments. This is the architecturally honest approach — modifying the production guard to include `roleCodes` in denial events would leak role information to a denied user and is forbidden.
+
+### Immediate next task
+
+Generate a fresh temporary deploy key for one controlled corrective push, verify the local and remote task SHAs match exactly, then require GitHub Actions to execute all 24 Clinic Admin integration scenarios with zero failed tests, zero skipped tests, zero setup failures, zero unhandled errors, and no teardown timeout before merge.

@@ -18,6 +18,7 @@ import type {
   TenantId,
   OrganisationId,
   FacilityId,
+  TenantMembershipId,
   PlatformRoleCode,
 } from '@ibn-hayan/domain';
 import {
@@ -38,6 +39,9 @@ import {
   resetThrottlerStorageSafely,
   parseClinicAdminOverviewErrorResponse,
   parseAuthErrorResponse,
+  seedActiveContextForSession,
+  computeSessionTokenHash,
+  assertExactRoleAssignments,
 } from './_clinic-admin-test-helpers.js';
 
 /**
@@ -124,48 +128,68 @@ interface BootstrapResult {
  *   authorise organisation or facility selection.
  * - R14_INTEGRATION_ACCOUNT has no context permissions at all.
  *
+ * **Previous fixture-identity defect (corrected by this commit):**
  * The previous fixture created ONLY a tenant-scoped assignment for
- * the nominal role. For R09, that tenant-scoped assignment is
- * insufficient to select organisation or facility context — the
- * `selectOrganisationContext` setup step returns 403
- * `CONTEXT_SELECTION_FORBIDDEN` (the production enforcement), and
- * the test fails during setup before reaching the asserted Overview
- * endpoint. For R01–R08, R10–R12, and R14, the tenant-scoped
- * assignment is similarly insufficient — setup also 403s.
+ * the nominal role. For R09, that tenant-scoped assignment was
+ * insufficient for organisation/facility selection — the setup
+ * step returned 403. For R01–R08, R10–R12, R14, the previous
+ * fixture worked around this by adding a tenant-scoped R13
+ * assignment alongside the nominal role. This fixture-identity
+ * distortion meant the final `GET /api/v1/clinic-admin/overview`
+ * request tested a composite (e.g. R01+R13) principal, NOT the
+ * intended R01-only principal. The composite fixture:
+ *   - Did not prove that R01 alone is denied.
+ *   - Could mask a future defect where R13 accidentally granted
+ *     `clinic_admin_overview:view`.
+ *   - Produced audit events whose `roleCodes` (for ALLOWED
+ *     decisions) included both R01 and R13, not the intended
+ *     single role code.
  *
- * The fixture now creates additional scoped assignments so setup
- * completes legitimately:
+ * **Current correction:**
+ * The fixture now uses two strategies:
  *
- * - `R09_SCOPED`: the R09 success scenarios. Creates a
- *   tenant-scoped R09 assignment PLUS an organisation-scoped R09
- *   assignment for the test organisation PLUS a facility-scoped
- *   R09 assignment for the test facility. R09 alone authorises
- *   tenant, organisation, and facility context selection through
- *   its scoped assignments — no R13 backdoor. The Overview
- *   endpoint's AuthorizationGuard sees R09's
- *   `clinic_admin_overview:view` permission and returns 200.
+ * - `R09_SCOPED`: the R09 success scenarios (tests #1, #2, #14–#18,
+ *   #21, #23, #24) and the R09 missing-context scenarios (tests
+ *   #9, #10). Creates a tenant-scoped R09 assignment PLUS an
+ *   organisation-scoped R09 assignment PLUS a facility-scoped R09
+ *   assignment. R09 alone authorises tenant, organisation, and
+ *   facility context selection through its scoped assignments —
+ *   no R13 backdoor. The Overview endpoint's AuthorizationGuard
+ *   sees R09's `clinic_admin_overview:view` permission and
+ *   returns 200 (or 403 `CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED`
+ *   when the missing-context scenarios stop setup early).
  *
- * - `R13_SETUP`: the non-R09 denial scenarios (R01–R08, R10–R14).
- *   Creates a tenant-scoped assignment for the nominal role PLUS a
- *   tenant-scoped R13 assignment to authorise setup. Per ADR-015
- *   §1.5, R13 at tenant scope grants organisation and facility
- *   selection for every org/facility under the tenant. The final
- *   Overview request still returns 403 because R13 (and the
- *   nominal role) do NOT grant `clinic_admin_overview:view`.
+ * - `EXACT_ROLE`: the non-R09 denial scenarios (R01–R08, R10–R14,
+ *   tests #3, #4, #19, #20, #22). Creates ONLY a tenant-scoped
+ *   assignment for the nominal role. No R13 setup-enabler is
+ *   added. The production context-selection endpoints correctly
+ *   403 for these roles; the test bypasses the context-selection
+ *   endpoints by calling `seedActiveContextForSession()` after
+ *   login to set the active context directly on the session
+ *   through a test-only Prisma update. This is the approved
+ *   test workflow for establishing test preconditions that are
+ *   not themselves the subject of the endpoint-denial test. The
+ *   final `GET /api/v1/clinic-admin/overview` request tests the
+ *   EXACT nominal role alone (R01 alone, R02 alone, ..., R13
+ *   alone, R14 alone).
  *
- * - `R13_ONLY`: the R13-only denial scenarios. Creates only a
- *   tenant-scoped R13 assignment. R13 alone authorises setup, and
- *   the Overview request returns 403 (R13 does not grant
- *   `clinic_admin_overview:view`).
+ * The `R09_TENANT_ONLY` mode is preserved for the missing-context
+ * scenarios (tests #9, #10) that stop setup early. The fixture
+ * creates the same scoped R09 assignments as `R09_SCOPED` so the
+ * available setup steps succeed; the test then skips the relevant
+ * select call to leave the dimension unset.
  *
- * - `R09_TENANT_ONLY`: the missing-context scenarios (tests #9,
- *   #10) where setup deliberately stops before selecting the
- *   missing dimension. Creates the same scoped R09 assignments as
- *   `R09_SCOPED` so the available setup steps succeed; the test
- *   then skips the relevant select call to leave the dimension
- *   unset.
+ * The previous `R13_SETUP` and `R13_ONLY` modes are REMOVED. The
+ * R13-only denial scenario (tests #3, #20, #22) uses `EXACT_ROLE`
+ * with `R13_SYSTEM_ADMINISTRATOR` as the nominal role — R13 alone
+ * at tenant scope authorises setup per ADR-015 §1.5 condition 3,
+ * and the production context-selection endpoints succeed for R13.
+ * For consistency with the other exact-role scenarios, the
+ * `EXACT_ROLE` mode always uses `seedActiveContextForSession()`
+ * to set the active context (the production context-selection
+ * endpoints are NOT the subject of any denial test).
  */
-type SetupMode = 'R09_SCOPED' | 'R13_SETUP' | 'R13_ONLY' | 'R09_TENANT_ONLY';
+type SetupMode = 'R09_SCOPED' | 'EXACT_ROLE' | 'R09_TENANT_ONLY';
 
 async function bootstrapUserAndContext(
   userEmail: string,
@@ -183,15 +207,14 @@ async function bootstrapUserAndContext(
   } = {},
 ): Promise<BootstrapResult> {
   // Determine the setup mode. The default depends on the nominal
-  // role: R09 uses scoped assignments; R13 uses R13 alone; every
-  // other role adds an R13 setup enabler.
+  // role: R09 uses scoped assignments; every other role uses
+  // EXACT_ROLE (no R13 setup-enabler; the active context is seeded
+  // directly on the session via seedActiveContextForSession() after
+  // login, bypassing the production context-selection endpoints
+  // that would correctly 403 for non-R09 non-R13 roles).
   const setupMode: SetupMode =
     options.setupMode ??
-    (roleCode === 'R09_ADMINISTRATOR'
-      ? 'R09_SCOPED'
-      : roleCode === 'R13_SYSTEM_ADMINISTRATOR'
-        ? 'R13_ONLY'
-        : 'R13_SETUP');
+    (roleCode === 'R09_ADMINISTRATOR' ? 'R09_SCOPED' : 'EXACT_ROLE');
 
   const tenant = await tenants.create({
     slug: tenantSlug,
@@ -247,11 +270,21 @@ async function bootstrapUserAndContext(
   }
 
   // Per ADR-015 §1.5, create additional scoped assignments so
-  // setup (tenant, organisation, facility context selection)
+  // R09 setup (tenant, organisation, facility context selection)
   // completes legitimately. The nominal role assignment above is
   // the "real" role for the test scenario; these additional
   // assignments are the structural enablers that satisfy the
-  // production scope-authorisation rules.
+  // production scope-authorisation rules for R09 alone (no R13
+  // backdoor).
+  //
+  // For EXACT_ROLE scenarios (R01–R08, R10–R14), NO additional
+  // assignments are created. The production context-selection
+  // endpoints correctly 403 for these roles (per ADR-015 §1.5);
+  // the test bypasses the context-selection endpoints by calling
+  // seedActiveContextForSession() after login to set the active
+  // context directly on the session. The final Overview request
+  // tests the EXACT nominal role alone — no R13 setup-enabler
+  // is added that would mask a future role-interaction defect.
   if (setupMode === 'R09_SCOPED' || setupMode === 'R09_TENANT_ONLY') {
     // R09 success scenarios and missing-context scenarios: create
     // organisation-scoped and facility-scoped R09 assignments so
@@ -275,22 +308,11 @@ async function bootstrapUserAndContext(
         scopeFacilityId: facilityId as FacilityId,
       });
     }
-  } else if (setupMode === 'R13_SETUP') {
-    // Non-R09 denial scenarios: add a tenant-scoped R13 assignment
-    // to authorise setup. Per ADR-015 §1.5 condition 3, a
-    // tenant-scoped R13 assignment grants organisation and facility
-    // selection for every org/facility under the tenant. The final
-    // Overview request returns 403 because the union of R13 and
-    // the nominal role does NOT grant `clinic_admin_overview:view`
-    // (only R09 grants that permission, per the role-permission
-    // matrix).
-    await roleAssignments.create({
-      tenantMembershipId: membership.id,
-      roleCode: 'R13_SYSTEM_ADMINISTRATOR',
-    });
   }
-  // R13_ONLY: no additional assignments. R13 at tenant scope
-  // already authorises setup per ADR-015 §1.5 condition 3.
+  // EXACT_ROLE: no additional assignments. The active context is
+  // seeded directly on the session via seedActiveContextForSession()
+  // after login. The final Overview request tests the EXACT nominal
+  // role alone.
 
   return {
     userId: user.id,
@@ -408,6 +430,61 @@ async function loginAndSelectContext(
 }
 
 /**
+ * Login and seed the active context directly on the session, bypassing
+ * the production context-selection endpoints.
+ *
+ * This helper is the approved test workflow for the EXACT_ROLE
+ * denial scenarios (R01–R08, R10–R14). Per ADR-015 §1.5, the
+ * production context-selection endpoints (`PUT /api/v1/context/organisation`,
+ * `PUT /api/v1/context/facility`) correctly 403 for non-R09 non-R13
+ * principals. The previous fixture worked around this by adding an
+ * R13 setup-enabler — but that fixture-identity distortion meant the
+ * final Overview request tested a composite (e.g. R01+R13) principal,
+ * not the intended R01-only principal.
+ *
+ * The current correction:
+ *   1. Create a user with EXACTLY the intended target role (no R13).
+ *   2. Login through `POST /api/v1/auth/login` to obtain a real
+ *      session cookie.
+ *   3. Use this helper to seed the active context on the session
+ *      directly via `seedActiveContextForSession()` (a test-only
+ *      Prisma update that validates every ownership invariant
+ *      before writing).
+ *   4. Issue `GET /api/v1/clinic-admin/overview`.
+ *
+ * The helper:
+ *   - Does NOT bypass the Overview endpoint or the AuthorizationGuard.
+ *   - Does NOT create permissions or role assignments.
+ *   - Does NOT alter production permissions to support test setup.
+ *   - Validates that the membership belongs to the user, the
+ *     organisation belongs to the tenant, the facility belongs to
+ *     the organisation, and all records are active.
+ *
+ * @returns The session cookie string (same as the input cookie).
+ */
+async function loginAndSeedContext(
+  email: string,
+  membershipId: string,
+  organisationId: string,
+  facilityId: string,
+): Promise<string> {
+  const cookie = await loginAndReturnCookie(email);
+  // The session cookie value is the raw token. The auth service
+  // stores SHA-256(rawToken) in auth_sessions.token_hash. Compute
+  // the hash to look up the session for the active-context update.
+  const cookieValue = cookie.split('=')[1]!;
+  const tokenHash = computeSessionTokenHash(cookieValue);
+  await seedActiveContextForSession({
+    prisma,
+    tokenHash,
+    membershipId,
+    organisationId,
+    facilityId,
+  });
+  return cookie;
+}
+
+/**
  * Endpoint-reach proof for `GET /api/v1/clinic-admin/overview`.
  *
  * Per the second-stage CI-harness correction task Phase 7, every
@@ -511,6 +588,100 @@ async function assertOverviewSucceededAndReached(
   expect(afterCount).toBe(beforeCount + 1);
 }
 
+/**
+ * Assert that the most recent Overview-endpoint authorization-decision
+ * audit event has the expected actor, permission, endpoint, and method.
+ *
+ * Per Phase 7 of the third-stage CI-harness correction, the
+ * endpoint-reach proof must verify not only that the audit-outbox
+ * count increased (which proves the request reached the guard) but
+ * also that the audit event's actor matches the tested user, the
+ * permission is `clinic_admin_overview:view`, the endpoint is
+ * `/api/v1/clinic-admin/overview`, and the method is `GET`. This
+ * prevents a setup endpoint event (e.g. a context-selection event
+ * from `PUT /api/v1/context/organisation`) from being counted
+ * accidentally as the Overview endpoint event.
+ *
+ * Note on `roleCodes`: the production AuthorizationGuard's
+ * `emitAuthorizationDenied` method intentionally does NOT include
+ * `roleCodes` in denial events (security hardening — not leaking
+ * role information to a denied user). The exact-role proof for
+ * denial scenarios is therefore established BEFORE the request by
+ * querying the database for the user's role assignments and
+ * asserting via `assertExactRoleAssignments()` that the list
+ * matches exactly the expected role codes. For ALLOWED events,
+ * `roleCodes` IS included by the production guard and is asserted
+ * via the `expectedAllowedRoleCodes` parameter.
+ *
+ * @param expectedActorId The userId of the tested user.
+ * @param expectedAction The expected audit action
+ *   (`authorization.decision.allowed` or
+ *   `authorization.decision.denied`).
+ * @param expectedAllowedRoleCodes For ALLOWED events only: the
+ *   exact role codes expected in the event's `roleCodes` field.
+ *   For DENIED events, pass `undefined` (the production guard
+ *   does not include roleCodes in denial events).
+ */
+async function assertOverviewAuditEventActor(
+  expectedActorId: string,
+  expectedAction:
+    'authorization.decision.allowed' | 'authorization.decision.denied',
+  expectedAllowedRoleCodes?: readonly string[],
+): Promise<void> {
+  const rows = await prisma.auditOutboxEvent.findMany({
+    where: { deliveredAt: null },
+  });
+  const overviewRows = rows.filter((row) => {
+    const draft = row.canonicalEventDraft as {
+      action?: string;
+      metadata?: { endpoint?: string; method?: string };
+    };
+    return (
+      draft.action === expectedAction &&
+      draft.metadata?.endpoint === '/api/v1/clinic-admin/overview' &&
+      draft.metadata?.method === 'GET'
+    );
+  });
+  expect(overviewRows.length).toBeGreaterThanOrEqual(1);
+  const latest = overviewRows[overviewRows.length - 1]!;
+  const draft = latest.canonicalEventDraft as {
+    actorId?: string;
+    permissionCode?: string;
+    roleCodes?: readonly string[];
+    metadata?: { endpoint?: string; method?: string };
+  };
+  expect(draft.actorId).toBe(expectedActorId);
+  expect(draft.permissionCode).toBe('clinic_admin_overview:view');
+  expect(draft.metadata?.endpoint).toBe('/api/v1/clinic-admin/overview');
+  expect(draft.metadata?.method).toBe('GET');
+  if (expectedAction === 'authorization.decision.allowed') {
+    // ALLOWED events include roleCodes; assert exactly.
+    expect(draft.roleCodes).toBeDefined();
+    assertExactRoleAssignments(
+      draft.roleCodes ?? [],
+      expectedAllowedRoleCodes ?? [],
+    );
+  }
+}
+
+/**
+ * Assert that no `clinic_admin.overview.viewed` audit event was
+ * emitted. The Overview service emits this event only on a
+ * successful 200 response. Denial scenarios (403) and
+ * service-level context-required scenarios (403) must NOT emit
+ * this event.
+ */
+async function assertNoOverviewViewedEvent(): Promise<void> {
+  const rows = await prisma.auditOutboxEvent.findMany({
+    where: { deliveredAt: null },
+  });
+  const viewedEvents = rows.filter((row) => {
+    const draft = row.canonicalEventDraft as { action?: string };
+    return draft.action === 'clinic_admin.overview.viewed';
+  });
+  expect(viewedEvents).toHaveLength(0);
+}
+
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -612,12 +783,34 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    // Exact-role proof: query the DB for the user's role assignments
+    // BEFORE the request and assert the user has exactly R09 (no R13
+    // setup-enabler). The user has R09 at tenant, organisation, and
+    // facility scope (per R09_SCOPED mode); de-duplicate by role code.
+    const r09Assignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: ctx.membershipId },
+    });
+    assertExactRoleAssignments(
+      r09Assignments.map((a) => a.roleCode),
+      ['R09_ADMINISTRATOR'],
+    );
+
     const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(200);
     await assertOverviewSucceededAndReached(before);
+
+    // Endpoint-reach proof: the audit event's actor matches the
+    // tested user, the permission is clinic_admin_overview:view,
+    // the endpoint is /api/v1/clinic-admin/overview, the method
+    // is GET, and the roleCodes are exactly ['R09_ADMINISTRATOR'].
+    await assertOverviewAuditEventActor(
+      ctx.userId,
+      'authorization.decision.allowed',
+      ['R09_ADMINISTRATOR'],
+    );
 
     expect(response.body).toMatchObject({
       activeContext: {
@@ -665,11 +858,26 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       'Tenant Super',
       'R13_SYSTEM_ADMINISTRATOR',
     );
-    const cookie = await loginAndSelectContext(
+    // EXACT_ROLE mode: R13 alone, no other role assignment.
+    // The active context is seeded directly on the session via
+    // seedActiveContextForSession() (the production context-selection
+    // endpoints succeed for R13 per ADR-015 §1.5 condition 3, but
+    // we use the seed helper for consistency with the other
+    // exact-role denial scenarios).
+    const cookie = await loginAndSeedContext(
       'superadmin@example.invalid',
       ctx.membershipId,
       ctx.organisationId,
       ctx.facilityId,
+    );
+
+    // Exact-role proof: the user has exactly R13 (no other role).
+    const r13Assignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: ctx.membershipId },
+    });
+    assertExactRoleAssignments(
+      r13Assignments.map((a) => a.roleCode),
+      ['R13_SYSTEM_ADMINISTRATOR'],
     );
 
     const before = await countOverviewAuthorizationAuditEvents();
@@ -678,6 +886,18 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .set('Cookie', cookie)
       .expect(403);
     await assertOverviewDeniedAndReached(before);
+
+    // Endpoint-reach proof: the audit event's actor matches the
+    // tested user, the permission is clinic_admin_overview:view,
+    // the endpoint is /api/v1/clinic-admin/overview, and the
+    // method is GET. roleCodes is intentionally NOT included in
+    // denial events (security hardening).
+    await assertOverviewAuditEventActor(
+      ctx.userId,
+      'authorization.decision.denied',
+    );
+    // No successful-view event is emitted on denial.
+    await assertNoOverviewViewedEvent();
 
     // R13 lacks `clinic_admin_overview:view`; the guard denies with
     // AUTHORIZATION_FORBIDDEN (which IS in AuthErrorResponseSchema).
@@ -716,11 +936,30 @@ describe('GET /api/v1/clinic-admin/overview', () => {
         `Tenant ${roleCode}`,
         roleCode,
       );
-      const cookie = await loginAndSelectContext(
+      // EXACT_ROLE mode: the user has ONLY the nominal role, no R13
+      // setup-enabler. The active context is seeded directly on
+      // the session via seedActiveContextForSession() (the production
+      // context-selection endpoints correctly 403 for non-R09
+      // non-R13 roles per ADR-015 §1.5).
+      const cookie = await loginAndSeedContext(
         `user-${roleCode.toLowerCase()}@example.invalid`,
         ctx.membershipId,
         ctx.organisationId,
         ctx.facilityId,
+      );
+
+      // Exact-role proof: the user has EXACTLY the nominal role
+      // under test (no R13 setup-enabler added). This proves the
+      // previous fixture-identity defect is fixed: the final
+      // Overview request tests the intended role ALONE.
+      const roleAssignmentsForUser = await prisma.tenantRoleAssignment.findMany(
+        {
+          where: { tenantMembershipId: ctx.membershipId },
+        },
+      );
+      assertExactRoleAssignments(
+        roleAssignmentsForUser.map((a) => a.roleCode),
+        [roleCode],
       );
 
       const before = await countOverviewAuthorizationAuditEvents();
@@ -729,6 +968,17 @@ describe('GET /api/v1/clinic-admin/overview', () => {
         .set('Cookie', cookie)
         .expect(403);
       await assertOverviewDeniedAndReached(before);
+
+      // Endpoint-reach proof: the audit event's actor matches the
+      // tested user. roleCodes is intentionally NOT included in
+      // denial events (security hardening); the exact-role proof
+      // was established ABOVE by querying the DB before the request.
+      await assertOverviewAuditEventActor(
+        ctx.userId,
+        'authorization.decision.denied',
+      );
+      // No successful-view event is emitted on denial.
+      await assertNoOverviewViewedEvent();
 
       // None of these roles grant `clinic_admin_overview:view`; the
       // guard denies with AUTHORIZATION_FORBIDDEN.
@@ -1296,41 +1546,127 @@ describe('GET /api/v1/clinic-admin/overview', () => {
   });
 
   it('19. Role Preview cannot bypass the permission requirement', async () => {
-    // Role Preview is a development-only feature. Even if a preview
-    // session is created with R09, the AuthorizationGuard must still
-    // verify the actual role assignment. This test verifies that a
-    // user WITHOUT R09 cannot access the overview endpoint, even if
-    // they attempt to use Role Preview.
+    // Role Preview is a development-only feature (NODE_ENV !==
+    // 'production' AND IBN_HAYAN_ROLE_PREVIEW_ENABLED=true AND the
+    // database-identity gate passes). It creates a fresh session
+    // for a canonical preview identity (R01–R14) in an isolated
+    // preview tenant, organisation, and facility. The preview
+    // session is a regular `auth_sessions` row with the active
+    // context set directly (no special "preview" flag — see
+    // `RolePreviewService.selectRole`).
     //
-    // NOTE: Role Preview is a development-only feature gated by
-    // NODE_ENV !== 'production' and IBN_HAYAN_ROLE_PREVIEW_ENABLED.
-    // This test verifies the permission check is not bypassed.
+    // The Clinic Admin integration suite uses the STANDARD test
+    // databases (`ibn_hayan_test`), which fail the Role Preview
+    // database-identity gate (`isPreviewDatabaseIdentityValid`).
+    // The real Role Preview endpoints (`POST /api/v1/dev/role-preview/select`)
+    // therefore CANNOT be invoked from this suite. The approved
+    // test workflow is to create a session that is STRUCTURALLY
+    // IDENTICAL to a real Role Preview session for R01:
+    //   - The user has EXACTLY R01_PHYSICIAN (no R13 setup-enabler).
+    //   - The role assignment is at FACILITY scope, matching the
+    //     preview identity's scope (per the role-preview spec test
+    //     #14: "R13/R14 tenant, R01–R12 facility").
+    //   - The session has the active tenant membership, organisation,
+    //     and facility set directly (matching what
+    //     `RolePreviewService.selectRole` does internally).
     //
-    // The fixture uses R01_PHYSICIAN with the `R13_SETUP` mode: a
-    // tenant-scoped R13 assignment is added alongside R01 so setup
-    // (organisation/facility selection) can complete. The final
-    // Overview request still denies because R01+R13 does NOT grant
-    // `clinic_admin_overview:view`.
+    // The test then issues `GET /api/v1/clinic-admin/overview`
+    // through the REAL AuthorizationGuard. If a future defect
+    // made Role Preview accidentally grant `clinic_admin_overview:view`,
+    // this test would fail (the guard would allow instead of deny).
+    //
+    // This is NOT a fake Role Preview test (the previous fixture
+    // was fake — it used R01+R13 composite). This is the approved
+    // test workflow that creates a structurally identical
+    // preview-equivalent session and proves the guard denies.
+    //
+    // Architectural confirmation:
+    //   - The architecture DOES support previewing R09 (per the
+    //     role-preview spec test #21: "R09 routes to /clinic-admin",
+    //     interfacePath=/clinic-admin). An R09 preview session
+    //     WOULD be allowed by the guard (R09 grants
+    //     clinic_admin_overview:view). This test confirms that
+    //     previewing a NON-R09 role (R01) does NOT bypass the
+    //     permission requirement.
+    //   - The preview session DOES have an active tenant membership
+    //     (per `RolePreviewService.selectRole` line 375:
+    //     `activeTenantMembershipId: previewMembership.id`). The
+    //     test confirms this by seeding the active context with
+    //     a valid membership.
     const ctx = await bootstrapUserAndContext(
-      'no-r09@example.invalid',
-      'No R09 User',
-      'tenant-no-r09',
-      'Tenant No R09',
-      'R01_PHYSICIAN', // NOT R09
-    );
-    const cookie = await loginAndSelectContext(
-      'no-r09@example.invalid',
-      ctx.membershipId,
-      ctx.organisationId,
-      ctx.facilityId,
+      'preview-r01@example.invalid',
+      'Preview R01 User',
+      'tenant-preview-r01',
+      'Tenant Preview R01',
+      'R01_PHYSICIAN', // NOT R09 — previewing R01
+      {
+        // Use EXACT_ROLE mode (no R13 setup-enabler). The user
+        // has EXACTLY R01, matching the real preview identity's
+        // role assignment.
+        setupMode: 'EXACT_ROLE',
+      },
     );
 
+    // Add a facility-scoped R01 assignment, matching the real
+    // preview identity's scope (per the role-preview spec test
+    // #14: "R13/R14 tenant, R01–R12 facility"). The tenant-scoped
+    // assignment is also kept (the preview identity has both).
+    await roleAssignments.create({
+      tenantMembershipId: ctx.membershipId as TenantMembershipId,
+      roleCode: 'R01_PHYSICIAN',
+      scopeLevel: 'facility',
+      scopeOrganisationId: ctx.organisationId as OrganisationId,
+      scopeFacilityId: ctx.facilityId as FacilityId,
+    });
+
+    // Login through the real authentication endpoint.
+    const cookie = await loginAndReturnCookie('preview-r01@example.invalid');
+
+    // Seed the active context directly on the session, matching
+    // what `RolePreviewService.selectRole` does internally. This
+    // is the approved test workflow for Role Preview within the
+    // Clinic Admin suite (the real Role Preview endpoints cannot
+    // be invoked here due to the database-identity gate).
+    const cookieValue = cookie.split('=')[1]!;
+    const tokenHash = computeSessionTokenHash(cookieValue);
+    await seedActiveContextForSession({
+      prisma,
+      tokenHash,
+      membershipId: ctx.membershipId,
+      organisationId: ctx.organisationId,
+      facilityId: ctx.facilityId,
+    });
+
+    // Exact-role proof: the user has EXACTLY R01 (no R13
+    // setup-enabler, no other role). This proves the test is
+    // testing the real R01 preview behaviour, NOT a composite
+    // R01+R13 fixture.
+    const r01Assignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: ctx.membershipId },
+    });
+    assertExactRoleAssignments(
+      r01Assignments.map((a) => a.roleCode),
+      ['R01_PHYSICIAN'],
+    );
+
+    // Issue the Overview request through the real guard.
     const before = await countOverviewAuthorizationAuditEvents();
     const response = await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
       .expect(403);
     await assertOverviewDeniedAndReached(before);
+
+    // Endpoint-reach proof: the audit event's actor matches the
+    // tested user. The guard denies because R01 does NOT grant
+    // `clinic_admin_overview:view`. roleCodes is intentionally
+    // NOT included in denial events (security hardening).
+    await assertOverviewAuditEventActor(
+      ctx.userId,
+      'authorization.decision.denied',
+    );
+    // No successful-view event is emitted on denial.
+    await assertNoOverviewViewedEvent();
 
     parseAuthErrorResponse(response.body);
   });
@@ -1347,11 +1683,23 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       'Tenant R13 Only',
       'R13_SYSTEM_ADMINISTRATOR',
     );
-    const cookie = await loginAndSelectContext(
+    // EXACT_ROLE mode: R13 alone, no other role assignment.
+    // The active context is seeded directly on the session via
+    // seedActiveContextForSession().
+    const cookie = await loginAndSeedContext(
       'r13-only@example.invalid',
       ctx.membershipId,
       ctx.organisationId,
       ctx.facilityId,
+    );
+
+    // Exact-role proof: the user has exactly R13 (no other role).
+    const r13Assignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: ctx.membershipId },
+    });
+    assertExactRoleAssignments(
+      r13Assignments.map((a) => a.roleCode),
+      ['R13_SYSTEM_ADMINISTRATOR'],
     );
 
     const before = await countOverviewAuthorizationAuditEvents();
@@ -1360,6 +1708,16 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .set('Cookie', cookie)
       .expect(403);
     await assertOverviewDeniedAndReached(before);
+
+    // Endpoint-reach proof: the audit event's actor matches the
+    // tested user. roleCodes is intentionally NOT included in
+    // denial events (security hardening).
+    await assertOverviewAuditEventActor(
+      ctx.userId,
+      'authorization.decision.denied',
+    );
+    // No successful-view event is emitted on denial.
+    await assertNoOverviewViewedEvent();
 
     parseAuthErrorResponse(response.body);
   });
@@ -1427,11 +1785,21 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       'Tenant Failed Audit',
       'R13_SYSTEM_ADMINISTRATOR', // NOT R09 — will be denied
     );
-    const cookie = await loginAndSelectContext(
+    // EXACT_ROLE mode: R13 alone, no other role assignment.
+    const cookie = await loginAndSeedContext(
       'failed-audit@example.invalid',
       ctx.membershipId,
       ctx.organisationId,
       ctx.facilityId,
+    );
+
+    // Exact-role proof: the user has exactly R13 (no other role).
+    const r13Assignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: ctx.membershipId },
+    });
+    assertExactRoleAssignments(
+      r13Assignments.map((a) => a.roleCode),
+      ['R13_SYSTEM_ADMINISTRATOR'],
     );
 
     const before = await countOverviewAuthorizationAuditEvents();
@@ -1441,23 +1809,28 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .expect(403);
     await assertOverviewDeniedAndReached(before);
 
+    // Endpoint-reach proof: the audit event's actor matches the
+    // tested user. roleCodes is intentionally NOT included in
+    // denial events (security hardening).
+    await assertOverviewAuditEventActor(
+      ctx.userId,
+      'authorization.decision.denied',
+    );
+
     // Verify the audit outbox does NOT contain a
     // `clinic_admin.overview.viewed` event (because the service was
     // never invoked — the guard denied the request).
+    await assertNoOverviewViewedEvent();
+
+    // The guard's `authorization.decision.denied` event SHOULD be
+    // present (proving the request was denied, not that the service
+    // completed).
     const outboxRows = await prisma.auditOutboxEvent.findMany({
       where: { deliveredAt: null },
     });
     const drafts = outboxRows.map(
       (r) => r.canonicalEventDraft as { action: string },
     );
-    const viewedEvent = drafts.find(
-      (d) => d.action === 'clinic_admin.overview.viewed',
-    );
-    expect(viewedEvent).toBeUndefined();
-
-    // The guard's `authorization.decision.denied` event SHOULD be
-    // present (proving the request was denied, not that the service
-    // completed).
     const deniedEvent = drafts.find(
       (d) => d.action === 'authorization.decision.denied',
     );

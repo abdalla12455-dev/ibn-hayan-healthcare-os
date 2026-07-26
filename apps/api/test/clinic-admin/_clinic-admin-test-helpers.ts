@@ -61,6 +61,7 @@
  */
 
 import type { Server } from 'node:http';
+import { createHash } from 'node:crypto';
 import type { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 import {
@@ -395,5 +396,365 @@ export function resetThrottlerStorageSafely(
   // pending callback can fire against it.
   if (internal.storage instanceof Map) {
     internal.storage.clear();
+  }
+}
+
+/**
+ * Input shape for {@link seedActiveContextForSession}.
+ *
+ * The helper updates the real test session through Prisma. The
+ * inputs are the IDs that the caller has already created via the
+ * repository abstractions (tenants, users, memberships,
+ * organisations, facilities). The helper validates that the
+ * supplied IDs form a coherent active context before writing.
+ */
+export interface SeedActiveContextInput {
+  /** The PrismaService from the running NestJS application. */
+  readonly prisma: {
+    readonly authSession: {
+      updateMany(args: {
+        readonly where: { readonly tokenHash: string };
+        readonly data: {
+          readonly activeTenantMembershipId: string;
+          readonly activeOrganisationId: string;
+          readonly activeFacilityId: string;
+        };
+      }): Promise<{ readonly count: number }>;
+    };
+    readonly tenantMembership: {
+      findUnique(args: { readonly where: { readonly id: string } }): Promise<{
+        readonly id: string;
+        readonly userId: string;
+        readonly tenantId: string;
+        readonly status: string;
+      } | null>;
+    };
+    readonly tenant: {
+      findUnique(args: {
+        readonly where: { readonly id: string };
+      }): Promise<{ readonly id: string; readonly status: string } | null>;
+    };
+    readonly organisation: {
+      findUnique(args: { readonly where: { readonly id: string } }): Promise<{
+        readonly id: string;
+        readonly tenantId: string;
+        readonly status: string;
+      } | null>;
+    };
+    readonly facility: {
+      findUnique(args: { readonly where: { readonly id: string } }): Promise<{
+        readonly id: string;
+        readonly tenantId: string;
+        readonly organisationId: string;
+        readonly status: string;
+      } | null>;
+    };
+  };
+  /**
+   * The session's tokenHash (the value stored in the
+   * `auth_sessions.token_hash` column, derived from the raw cookie
+   * value via the same SHA-256 hash the auth service uses).
+   */
+  readonly tokenHash: string;
+  /**
+   * The membership ID to set as activeTenantMembershipId. MUST
+   * belong to the session's user and to the supplied tenant.
+   */
+  readonly membershipId: string;
+  /**
+   * The organisation ID to set as activeOrganisationId. MUST belong
+   * to the supplied tenant.
+   */
+  readonly organisationId: string;
+  /**
+   * The facility ID to set as activeFacilityId. MUST belong to the
+   * supplied organisation (and therefore to the supplied tenant).
+   */
+  readonly facilityId: string;
+}
+
+/**
+ * Seed the active context (tenant membership, organisation,
+ * facility) directly on the authenticated session, bypassing the
+ * context-selection endpoints.
+ *
+ * This helper exists to support exact-role denial coverage in the
+ * Clinic Admin integration suite. Per ADR-015 §1.5, the production
+ * context-selection endpoints (`PUT /api/v1/context/organisation`,
+ * `PUT /api/v1/context/facility`) enforce scope-authorisation
+ * rules that authorise organisation and facility selection ONLY
+ * when the principal holds:
+ *   - an organisation-scoped assignment for the target organisation, OR
+ *   - a facility-scoped assignment for a facility under the target
+ *     organisation, OR
+ *   - a tenant-scoped R13_SYSTEM_ADMINISTRATOR assignment.
+ *
+ * For a principal whose ONLY role is, say, R01_PHYSICIAN at tenant
+ * scope, the production context-selection endpoints correctly
+ * return 403 (`CONTEXT_SELECTION_FORBIDDEN`). The previous fixture
+ * worked around this by adding a tenant-scoped R13 assignment
+ * alongside the nominal role — but that fixture-identity distortion
+ * meant the final `GET /api/v1/clinic-admin/overview` request
+ * tested a composite R01+R13 principal, not the intended R01-only
+ * principal. The audit event for an ALLOWED decision would record
+ * `roleCodes: ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR']`,
+ * masking any future defect where R13 accidentally granted
+ * `clinic_admin_overview:view`.
+ *
+ * The correct test setup for an exact-role denial scenario is:
+ *   1. Create a user with EXACTLY the intended target role (no R13).
+ *   2. Login through `POST /api/v1/auth/login` to obtain a real
+ *      session cookie.
+ *   3. Use this helper to seed the active context on the session
+ *      directly (the production context-selection endpoints are
+ *      NOT the subject of the endpoint-denial test; they are
+ *      structural prerequisites that the test is allowed to
+ *      establish through a test-only Prisma update).
+ *   4. Issue `GET /api/v1/clinic-admin/overview`.
+ *
+ * The helper validates EVERY ownership invariant before writing:
+ *   - The membership exists and belongs to a tenant whose status
+ *     is 'active'.
+ *   - The organisation exists, belongs to the same tenant as the
+ *     membership, and has status 'active'.
+ *   - The facility exists, belongs to the same organisation (and
+ *     therefore the same tenant), and has status 'active'.
+ *
+ * A validation failure throws a precise `Error` identifying the
+ * failing invariant; the session is NOT mutated.
+ *
+ * The helper:
+ *   - Does NOT create permissions.
+ *   - Does NOT create role assignments.
+ *   - Does NOT bypass the Overview endpoint or the
+ *     AuthorizationGuard (the final `GET /api/v1/clinic-admin/overview`
+ *     request still goes through the real guard).
+ *   - Does NOT alter production permissions to support test setup.
+ *
+ * The helper updates the session via `prisma.authSession.updateMany`
+ * keyed by `tokenHash`. The tokenHash is the SHA-256 hash of the
+ * raw session cookie value (the same hash the auth service uses
+ * to look up sessions). The caller computes the hash from the
+ * cookie value via the same algorithm; in the integration test
+ * the cookie value IS the token hash because the auth service
+ * returns the raw token in the cookie and stores the SHA-256 hash
+ * in the database.
+ *
+ * @param input The seeding input (see {@link SeedActiveContextInput}).
+ * @throws {Error} if any ownership invariant fails, or if the
+ *   session update affected zero rows (the session was not found
+ *   by its tokenHash).
+ */
+export async function seedActiveContextForSession(
+  input: SeedActiveContextInput,
+): Promise<void> {
+  // Validate membership ownership: the membership exists, has
+  // status 'active', and belongs to a tenant with status 'active'.
+  const membership = await input.prisma.tenantMembership.findUnique({
+    where: { id: input.membershipId },
+  });
+  if (membership === null) {
+    throw new Error(
+      `seedActiveContextForSession: membership ${input.membershipId} ` +
+        'not found. The test setup must create the membership before ' +
+        'seeding the active context.',
+    );
+  }
+  if (membership.status !== 'active') {
+    throw new Error(
+      `seedActiveContextForSession: membership ${input.membershipId} ` +
+        `has status '${membership.status}', expected 'active'. The ` +
+        'test setup must create an active membership.',
+    );
+  }
+  const tenant = await input.prisma.tenant.findUnique({
+    where: { id: membership.tenantId },
+  });
+  if (tenant === null) {
+    throw new Error(
+      `seedActiveContextForSession: tenant ${membership.tenantId} ` +
+        `(referenced by membership ${input.membershipId}) not found.`,
+    );
+  }
+  if (tenant.status !== 'active') {
+    throw new Error(
+      `seedActiveContextForSession: tenant ${tenant.id} has status ` +
+        `'${tenant.status}', expected 'active'. The test setup must ` +
+        'create an active tenant.',
+    );
+  }
+
+  // Validate organisation ownership: the organisation exists,
+  // belongs to the same tenant as the membership, and has status
+  // 'active'.
+  const organisation = await input.prisma.organisation.findUnique({
+    where: { id: input.organisationId },
+  });
+  if (organisation === null) {
+    throw new Error(
+      `seedActiveContextForSession: organisation ${input.organisationId} ` +
+        'not found.',
+    );
+  }
+  if (organisation.tenantId !== membership.tenantId) {
+    throw new Error(
+      'seedActiveContextForSession: organisation ' +
+        `${input.organisationId} belongs to tenant ` +
+        `${organisation.tenantId}, but the membership belongs to ` +
+        `tenant ${membership.tenantId}. Cross-tenant organisation ` +
+        'seeding is rejected (ADR-015 tenant isolation).',
+    );
+  }
+  if (organisation.status !== 'active') {
+    throw new Error(
+      `seedActiveContextForSession: organisation ${input.organisationId} ` +
+        `has status '${organisation.status}', expected 'active'.`,
+    );
+  }
+
+  // Validate facility ownership: the facility exists, belongs to
+  // the same organisation (and therefore the same tenant), and has
+  // status 'active'.
+  const facility = await input.prisma.facility.findUnique({
+    where: { id: input.facilityId },
+  });
+  if (facility === null) {
+    throw new Error(
+      `seedActiveContextForSession: facility ${input.facilityId} not found.`,
+    );
+  }
+  if (facility.tenantId !== membership.tenantId) {
+    throw new Error(
+      'seedActiveContextForSession: facility ' +
+        `${input.facilityId} belongs to tenant ${facility.tenantId}, ` +
+        `but the membership belongs to tenant ${membership.tenantId}. ` +
+        'Cross-tenant facility seeding is rejected (ADR-015 tenant ' +
+        'isolation).',
+    );
+  }
+  if (facility.organisationId !== input.organisationId) {
+    throw new Error(
+      'seedActiveContextForSession: facility ' +
+        `${input.facilityId} belongs to organisation ` +
+        `${facility.organisationId}, but the supplied organisation ` +
+        `is ${input.organisationId}. Cross-organisation facility ` +
+        'seeding is rejected (ADR-015 organisation isolation).',
+    );
+  }
+  if (facility.status !== 'active') {
+    throw new Error(
+      `seedActiveContextForSession: facility ${input.facilityId} has ` +
+        `status '${facility.status}', expected 'active'.`,
+    );
+  }
+
+  // All invariants verified. Update the session's active context.
+  // The update is keyed by tokenHash (the SHA-256 hash stored in
+  // the database). The count must be 1; otherwise the session was
+  // not found (e.g. the cookie value did not match the stored
+  // tokenHash).
+  const result = await input.prisma.authSession.updateMany({
+    where: { tokenHash: input.tokenHash },
+    data: {
+      activeTenantMembershipId: input.membershipId,
+      activeOrganisationId: input.organisationId,
+      activeFacilityId: input.facilityId,
+    },
+  });
+  if (result.count === 0) {
+    throw new Error(
+      'seedActiveContextForSession: no auth_session row matched ' +
+        `tokenHash ${input.tokenHash}. The session was not found; ` +
+        'the caller must pass the SHA-256 hash of the raw session ' +
+        'cookie value (the same hash the auth service stores in ' +
+        'auth_sessions.token_hash).',
+    );
+  }
+}
+
+/**
+ * Compute the SHA-256 hex hash of a session cookie value.
+ *
+ * The auth service stores `SHA-256(rawToken)` in
+ * `auth_sessions.token_hash` and returns the raw token in the
+ * HttpOnly cookie. The integration test extracts the cookie value
+ * via `extractSessionCookie` and passes it to this helper to
+ * obtain the tokenHash needed by {@link seedActiveContextForSession}.
+ *
+ * The hash uses Node's built-in `crypto` module (no external
+ * dependency). The output is a 64-character lowercase hex string
+ * matching the format stored in the database (`@db.Char(64)`).
+ *
+ * @param rawToken The raw session token from the cookie value
+ *   (the part after `ibn_hayan_session=`).
+ * @returns The 64-character lowercase hex SHA-256 hash.
+ */
+export function computeSessionTokenHash(rawToken: string): string {
+  return createHash('sha256').update(rawToken).digest('hex');
+}
+
+/**
+ * Assert that a user has exactly the expected role assignments (and
+ * no others).
+ *
+ * This helper is the architectural substitute for asserting
+ * `roleCodes` on the denied audit event. The production
+ * AuthorizationGuard's `emitAuthorizationDenied` method
+ * intentionally does NOT include `roleCodes` in denial events
+ * (security hardening — not leaking role information to a denied
+ * user). To prove that a denial scenario tested the intended role
+ * alone, the test queries the database for the user's role
+ * assignments BEFORE the request and asserts the list matches
+ * exactly the expected role codes.
+ *
+ * The helper takes the actual role assignments (as returned by
+ * `prisma.tenantRoleAssignment.findMany`) and the expected role
+ * codes. The actual list may include multiple scope levels for the
+ * same role code (e.g. R09 at tenant, organisation, and facility
+ * scope); the helper de-duplicates by role code before comparing.
+ *
+ * @param actualRoleCodes The role codes from the user's role
+ *   assignments (may contain duplicates if the same role is
+ *   assigned at multiple scope levels).
+ * @param expectedRoleCodes The exact set of role codes expected
+ *   (no duplicates, no extras, no missing).
+ * @throws {Error} if the sets do not match exactly.
+ */
+export function assertExactRoleAssignments(
+  actualRoleCodes: readonly string[],
+  expectedRoleCodes: readonly string[],
+): void {
+  const actualSet = new Set(actualRoleCodes);
+  const expectedSet = new Set(expectedRoleCodes);
+  if (actualSet.size !== expectedSet.size) {
+    throw new Error(
+      'assertExactRoleAssignments: role-code set size mismatch. ' +
+        `Expected ${expectedSet.size} unique role code(s) ` +
+        `[${[...expectedSet].join(', ')}], got ${actualSet.size} ` +
+        `unique role code(s) [${[...actualSet].join(', ')}]. ` +
+        'This proves the fixture-identity defect is fixed: the ' +
+        'user has exactly the intended role(s) and no setup-enabler ' +
+        '(R13) was added.',
+    );
+  }
+  for (const code of expectedSet) {
+    if (!actualSet.has(code)) {
+      throw new Error(
+        'assertExactRoleAssignments: expected role code ' +
+          `${code} not found in actual assignments ` +
+          `[${[...actualSet].join(', ')}].`,
+      );
+    }
+  }
+  for (const code of actualSet) {
+    if (!expectedSet.has(code)) {
+      throw new Error(
+        'assertExactRoleAssignments: actual role code ' +
+          `${code} is NOT in the expected set ` +
+          `[${[...expectedSet].join(', ')}]. This indicates a ` +
+          'setup-enabler (R13) was added to the fixture, masking ' +
+          'the intended role-under-test.',
+      );
+    }
   }
 }

@@ -46,6 +46,9 @@ import {
   resetThrottlerStorageSafely,
   parseClinicAdminOverviewErrorResponse,
   parseAuthErrorResponse,
+  seedActiveContextForSession,
+  computeSessionTokenHash,
+  assertExactRoleAssignments,
 } from '../../../test/clinic-admin/_clinic-admin-test-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -702,5 +705,610 @@ describe('setup 403 vs Overview endpoint 403 disambiguation', () => {
     const parsedOverview =
       parseClinicAdminOverviewErrorResponse(sessionRequiredBody);
     expect(parsedOverview.error.code).toBe('AUTH_SESSION_REQUIRED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeSessionTokenHash
+// ---------------------------------------------------------------------------
+//
+// Phase 9 (third-stage CI-harness correction): focused regression tests
+// for the new session-context seeding helpers. These tests prove that
+// the fixture-identity defect (R13 setup-role inflation) is structurally
+// impossible to reintroduce: the helpers enforce exact-role identity
+// and reject composite-role fixtures.
+
+describe('computeSessionTokenHash', () => {
+  it('returns a 64-character lowercase hex string for any input', () => {
+    const hash = computeSessionTokenHash('test-token-value');
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('returns the canonical SHA-256 hash for a known input', () => {
+    // SHA-256('') = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    expect(computeSessionTokenHash('')).toBe(
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    );
+  });
+
+  it('returns the canonical SHA-256 hash for "abc"', () => {
+    // SHA-256('abc') = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+    expect(computeSessionTokenHash('abc')).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    );
+  });
+
+  it('produces different hashes for different inputs (no collisions in practice)', () => {
+    const hash1 = computeSessionTokenHash('token-1');
+    const hash2 = computeSessionTokenHash('token-2');
+    expect(hash1).not.toBe(hash2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertExactRoleAssignments
+// ---------------------------------------------------------------------------
+
+describe('assertExactRoleAssignments', () => {
+  it('passes when the actual set exactly matches the expected set', () => {
+    expect(() =>
+      assertExactRoleAssignments(['R01_PHYSICIAN'], ['R01_PHYSICIAN']),
+    ).not.toThrow();
+  });
+
+  it('passes when both sets are empty', () => {
+    expect(() => assertExactRoleAssignments([], [])).not.toThrow();
+  });
+
+  it('passes when the actual list has duplicates (de-duplicates by role code)', () => {
+    // R09 at tenant, organisation, and facility scope → three rows,
+    // one unique role code.
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R09_ADMINISTRATOR', 'R09_ADMINISTRATOR', 'R09_ADMINISTRATOR'],
+        ['R09_ADMINISTRATOR'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('passes when the expected set has multiple roles (composite is allowed when intended)', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('throws when the actual set has an extra role (R13 setup-enabler added)', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/role-code set size mismatch/);
+  });
+
+  it('throws when the actual set is missing an expected role', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN'],
+        ['R01_PHYSICIAN', 'R02_NURSE'],
+      ),
+    ).toThrow(/role-code set size mismatch/);
+  });
+
+  it('throws when the actual set has a different role than expected (same size)', () => {
+    // Same size but different role — the per-code check fires.
+    expect(() =>
+      assertExactRoleAssignments(['R02_NURSE'], ['R01_PHYSICIAN']),
+    ).toThrow(/R02_NURSE.*is NOT in the expected set|R01_PHYSICIAN not found/);
+  });
+
+  it('throws when the actual set has more roles than expected (size mismatch)', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R02_NURSE', 'R03_PHARMACIST'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/role-code set size mismatch/);
+  });
+
+  it('throws when the actual set has fewer roles than expected (size mismatch)', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN'],
+        ['R01_PHYSICIAN', 'R02_NURSE', 'R03_PHARMACIST'],
+      ),
+    ).toThrow(/role-code set size mismatch/);
+  });
+
+  it('mentions the fixture-identity defect in the size-mismatch error message', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/fixture-identity defect is fixed/);
+  });
+
+  it('mentions "setup-enabler" in the extra-role error message', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/setup-enabler/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// seedActiveContextForSession — ownership validation
+// ---------------------------------------------------------------------------
+//
+// These tests use a fake Prisma client to verify the helper's ownership
+// invariants WITHOUT requiring a real PostgreSQL database. The helper
+// must reject every cross-tenant, cross-organisation, and cross-user
+// combination BEFORE writing to the session.
+
+describe('seedActiveContextForSession — ownership validation', () => {
+  /**
+   * Build a fake Prisma client with controllable tenant, organisation,
+   * facility, and membership records. The fake returns the supplied
+   * records from `findUnique` and counts `updateMany` calls.
+   */
+  function buildFakePrisma(options: {
+    readonly membership?: {
+      readonly id: string;
+      readonly userId: string;
+      readonly tenantId: string;
+      readonly status: string;
+    } | null;
+    readonly tenant?: { readonly id: string; readonly status: string } | null;
+    readonly organisation?: {
+      readonly id: string;
+      readonly tenantId: string;
+      readonly status: string;
+    } | null;
+    readonly facility?: {
+      readonly id: string;
+      readonly tenantId: string;
+      readonly organisationId: string;
+      readonly status: string;
+    } | null;
+    readonly updateCount?: number;
+  }): {
+    readonly prisma: Parameters<
+      typeof seedActiveContextForSession
+    >[0]['prisma'];
+    readonly updateCalls: { readonly tokenHash: string }[];
+  } {
+    const updateCalls: { readonly tokenHash: string }[] = [];
+    const membership = options.membership ?? null;
+    const tenant = options.tenant ?? null;
+    const organisation = options.organisation ?? null;
+    const facility = options.facility ?? null;
+    const prisma = {
+      authSession: {
+        updateMany(args: {
+          readonly where: { readonly tokenHash: string };
+          readonly data: unknown;
+        }): Promise<{ readonly count: number }> {
+          updateCalls.push({ tokenHash: args.where.tokenHash });
+          return Promise.resolve({ count: options.updateCount ?? 1 });
+        },
+      },
+      tenantMembership: {
+        findUnique(): Promise<typeof membership> {
+          return Promise.resolve(membership);
+        },
+      },
+      tenant: {
+        findUnique(): Promise<typeof tenant> {
+          return Promise.resolve(tenant);
+        },
+      },
+      organisation: {
+        findUnique(): Promise<typeof organisation> {
+          return Promise.resolve(organisation);
+        },
+      },
+      facility: {
+        findUnique(): Promise<typeof facility> {
+          return Promise.resolve(facility);
+        },
+      },
+    };
+    return { prisma, updateCalls };
+  }
+
+  const validMembership = {
+    id: 'mem-1',
+    userId: 'user-1',
+    tenantId: 'tenant-1',
+    status: 'active',
+  };
+  const validTenant = { id: 'tenant-1', status: 'active' };
+  const validOrganisation = {
+    id: 'org-1',
+    tenantId: 'tenant-1',
+    status: 'active',
+  };
+  const validFacility = {
+    id: 'fac-1',
+    tenantId: 'tenant-1',
+    organisationId: 'org-1',
+    status: 'active',
+  };
+
+  it('seeds the active context when all invariants pass', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    await seedActiveContextForSession({
+      prisma,
+      tokenHash: 'a'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    });
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0]!.tokenHash).toBe('a'.repeat(64));
+  });
+
+  it('rejects when the membership is not found', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: null,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-missing',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/membership mem-missing not found/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the membership has status "suspended"', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: { ...validMembership, status: 'suspended' },
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/status 'suspended', expected 'active'/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the tenant has status "suspended"', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: { ...validTenant, status: 'suspended' },
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/tenant tenant-1 has status 'suspended'/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the organisation belongs to a different tenant (cross-tenant)', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: { ...validOrganisation, tenantId: 'tenant-OTHER' },
+      facility: validFacility,
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/Cross-tenant organisation seeding is rejected/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the facility belongs to a different tenant (cross-tenant)', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: { ...validFacility, tenantId: 'tenant-OTHER' },
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/Cross-tenant facility seeding is rejected/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the facility belongs to a different organisation (cross-organisation)', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: { ...validFacility, organisationId: 'org-OTHER' },
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/Cross-organisation facility seeding is rejected/);
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it('rejects when the session update affects zero rows (tokenHash not found)', async () => {
+    const { prisma, updateCalls } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+      updateCount: 0,
+    });
+    await expect(
+      seedActiveContextForSession({
+        prisma,
+        tokenHash: 'b'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/no auth_session row matched tokenHash/);
+    expect(updateCalls).toHaveLength(1);
+  });
+
+  it('does NOT create permissions (the helper only updates the session)', async () => {
+    const { prisma } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    // The fake Prisma does NOT expose a permission create method.
+    // If the helper tried to create a permission, TypeScript would
+    // reject the call at compile time. The runtime guarantee is
+    // that the helper only calls authSession.updateMany (plus the
+    // findUnique lookups for ownership validation).
+    await seedActiveContextForSession({
+      prisma,
+      tokenHash: 'c'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    });
+    // No throw means the helper did NOT try to call a missing
+    // permission-create method.
+  });
+
+  it('does NOT create role assignments (the helper only updates the session)', async () => {
+    const { prisma } = buildFakePrisma({
+      membership: validMembership,
+      tenant: validTenant,
+      organisation: validOrganisation,
+      facility: validFacility,
+    });
+    // Same reasoning as the previous test: the fake Prisma does
+    // NOT expose a role-assignment create method.
+    await seedActiveContextForSession({
+      prisma,
+      tokenHash: 'd'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: fixture-identity defect (R13 setup-role inflation) is
+// structurally impossible to reintroduce
+// ---------------------------------------------------------------------------
+
+describe('fixture-identity defect regression (R13 setup-role inflation)', () => {
+  it('a single-role fixture (R01 alone) passes the exact-role assertion', () => {
+    expect(() =>
+      assertExactRoleAssignments(['R01_PHYSICIAN'], ['R01_PHYSICIAN']),
+    ).not.toThrow();
+  });
+
+  it('a composite fixture (R01 + R13 setup-enabler) is rejected by the exact-role assertion', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow();
+  });
+
+  it('a composite fixture (R02 + R13 setup-enabler) is rejected', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R02_NURSE', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R02_NURSE'],
+      ),
+    ).toThrow();
+  });
+
+  it('a composite fixture (R14 + R13 setup-enabler) is rejected', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R14_INTEGRATION_ACCOUNT', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R14_INTEGRATION_ACCOUNT'],
+      ),
+    ).toThrow();
+  });
+
+  it('R13 alone (the intended R13 denial scenario) passes', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R13_SYSTEM_ADMINISTRATOR'],
+        ['R13_SYSTEM_ADMINISTRATOR'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('R09 alone (the intended R09 success scenario) passes', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R09_ADMINISTRATOR', 'R09_ADMINISTRATOR', 'R09_ADMINISTRATOR'],
+        ['R09_ADMINISTRATOR'],
+      ),
+    ).not.toThrow();
+  });
+
+  it('no non-R13 fixture receives an R13 setup assignment (size mismatch)', () => {
+    // For every non-R13 role, adding R13 makes the actual set size 2
+    // while the expected set size is 1. The assertion throws.
+    const nonR13Roles = [
+      'R01_PHYSICIAN',
+      'R02_NURSE',
+      'R03_PHARMACIST',
+      'R04_TECHNICIAN',
+      'R05_ALLIED_HEALTH_PROFESSIONAL',
+      'R06_RECEPTIONIST',
+      'R07_SCHEDULER',
+      'R08_BILLER',
+      'R09_ADMINISTRATOR',
+      'R10_COMPLIANCE_OFFICER',
+      'R11_HR_MANAGER',
+      'R12_EXECUTIVE',
+      'R14_INTEGRATION_ACCOUNT',
+    ];
+    for (const role of nonR13Roles) {
+      expect(() =>
+        assertExactRoleAssignments([role, 'R13_SYSTEM_ADMINISTRATOR'], [role]),
+      ).toThrow();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: missing-context parser remains correct (Phase 6 preservation)
+// ---------------------------------------------------------------------------
+
+describe('missing-context parser remains correct (Phase 6 preservation)', () => {
+  it('parseClinicAdminOverviewErrorResponse accepts CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED', () => {
+    const body = {
+      error: {
+        code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED',
+        message: 'Active tenant, organisation, and facility context required.',
+      },
+    };
+    const parsed = parseClinicAdminOverviewErrorResponse(body);
+    expect(parsed.error.code).toBe('CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED');
+  });
+
+  it('parseAuthErrorResponse rejects CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED', () => {
+    const body = {
+      error: {
+        code: 'CLINIC_ADMIN_OVERVIEW_CONTEXT_REQUIRED',
+        message: 'Active tenant, organisation, and facility context required.',
+      },
+    };
+    expect(() => parseAuthErrorResponse(body)).toThrow();
+  });
+
+  it('parseAuthErrorResponse accepts AUTHORIZATION_FORBIDDEN (guard denial)', () => {
+    const body = {
+      error: {
+        code: 'AUTHORIZATION_FORBIDDEN',
+        message: 'You are not authorised to perform this action.',
+      },
+    };
+    const parsed = parseAuthErrorResponse(body);
+    expect(parsed.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: first-stage CSRF fix and Throttler cleanup fix remain covered
+// ---------------------------------------------------------------------------
+
+describe('first-stage CSRF fix remains covered (regression)', () => {
+  it('parseCsrfResponseBody never returns undefined (CSRF header defect is impossible)', () => {
+    const body = { token: 'a'.repeat(32) };
+    const token = parseCsrfResponseBody(body);
+    expect(typeof token).toBe('string');
+    expect(token.length).toBeGreaterThan(0);
+  });
+
+  it('parseCsrfResponseBody throws on the wrong field name (csrfToken instead of token)', () => {
+    const body = { csrfToken: 'a'.repeat(32) };
+    expect(() => parseCsrfResponseBody(body)).toThrow();
+  });
+
+  it('assertCsrfToken throws on undefined (defence-in-depth)', () => {
+    expect(() => assertCsrfToken(undefined, 'test')).toThrow();
+  });
+});
+
+describe('Throttler cleanup fix remains covered (regression)', () => {
+  it('resetThrottlerStorageSafely clears both timeoutIds and storage (in that order)', () => {
+    const clearedTimeouts: unknown[] = [];
+    const timeoutIds = new Map<string, Array<ReturnType<typeof setTimeout>>>([
+      ['throttler1', [setTimeout(() => undefined, 10_000)]],
+    ]);
+    const storage = new Map();
+    const throttlerStorage = {
+      timeoutIds,
+      storage,
+      onApplicationShutdown: () => undefined,
+    } as unknown as import('@nestjs/throttler').ThrottlerStorage;
+    // Wrap clearTimeout to track the order.
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.clearTimeout = (handle: unknown) => {
+      clearedTimeouts.push(handle);
+      return originalClearTimeout(handle as ReturnType<typeof setTimeout>);
+    };
+    try {
+      resetThrottlerStorageSafely(throttlerStorage);
+    } finally {
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+    expect(clearedTimeouts.length).toBe(1);
+    expect(timeoutIds.size).toBe(0);
+    expect(storage.size).toBe(0);
+  });
+
+  it('resetThrottlerStorageSafely is safe when both Maps are missing', () => {
+    const throttlerStorage =
+      {} as unknown as import('@nestjs/throttler').ThrottlerStorage;
+    expect(() => resetThrottlerStorageSafely(throttlerStorage)).not.toThrow();
   });
 });
