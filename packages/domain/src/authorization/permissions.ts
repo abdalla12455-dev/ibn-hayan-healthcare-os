@@ -76,13 +76,23 @@ export type PermissionCode =
   | 'context:select_organisation'
   | 'context:clear_organisation'
   | 'context:select_facility'
-  | 'context:clear_facility';
+  | 'context:clear_facility'
+  | 'clinic_admin_overview:view';
 
 /**
  * The complete list of canonical permission codes, in catalogue
  * order. Used by tests to verify the catalogue's completeness and
  * by the role-permission matrix to verify that every permission has
  * an explicit entry for every role.
+ *
+ * The `clinic_admin_overview:view` permission is the read-only
+ * authorisation gate for the Clinic Administrator Overview surface
+ * at `/api/v1/clinic-admin/overview` (per
+ * `download/docs/05_UI_UX/DESIGN_BIBLE.md` §12 and §13). It is
+ * granted only to `R09_ADMINISTRATOR` (Clinic Administrator) — NOT
+ * to `R13_SYSTEM_ADMINISTRATOR` (Platform Super Admin). R13 holds a
+ * different surface (§15/§16) and must NOT be silently treated as
+ * a Clinic Administrator (per task specification Phase 7 item 6).
  */
 export const PERMISSION_CODES: readonly PermissionCode[] = [
   'context:view',
@@ -92,6 +102,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'context:clear_organisation',
   'context:select_facility',
   'context:clear_facility',
+  'clinic_admin_overview:view',
 ] as const;
 
 /**

@@ -35,12 +35,71 @@
  */
 
 import type { PermissionCode } from './permissions.js';
-import { PERMISSION_CODES, isPermissionCode } from './permissions.js';
+import { isPermissionCode } from './permissions.js';
 import type { PlatformRoleCode } from './role-catalogue.js';
 import {
   PLATFORM_ROLE_CODES,
   isPlatformRoleCode,
 } from './role-catalogue.js';
+
+// ---------------------------------------------------------------------------
+// Explicit permission lists (least-privilege, no future-expansion risk)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seven context permissions granted to every human role (R01
+ * through R13). This list is EXPLICIT: it does NOT use
+ * `PERMISSION_CODES.filter(...)`. Adding a future permission to
+ * `PERMISSION_CODES` does NOT automatically grant it to any role —
+ * the new permission must be explicitly added to this list (or to
+ * `CLINIC_ADMIN_PERMISSIONS`) to be granted.
+ *
+ * Per ADR-015 (Scoped Organisation and Facility Context), the
+ * context permissions are split into per-level codes. R14 Integration
+ * Account is denied all seven context permissions: R14 is
+ * non-interactive and receives no browser context-selection
+ * capability.
+ *
+ * Per the audit-semantics restoration task Phase 5, this explicit
+ * list is the smallest coherent least-privilege correction that
+ * eliminates the future privilege-expansion risk created by the
+ * previous `PERMISSION_CODES.filter(...)` pattern. The previous
+ * pattern would have automatically granted any new permission to
+ * R01-R13 (because the filter only excluded
+ * `clinic_admin_overview:view`). The explicit list ensures a new
+ * permission is granted ONLY when explicitly added to this list.
+ */
+const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
+  'context:view',
+  'context:select',
+  'context:clear',
+  'context:select_organisation',
+  'context:clear_organisation',
+  'context:select_facility',
+  'context:clear_facility',
+] as const;
+
+/**
+ * The eight permissions granted to R09 Clinic Administrator: the
+ * seven context permissions plus `clinic_admin_overview:view`. This
+ * list is EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
+ * Adding a future permission to `PERMISSION_CODES` does NOT
+ * automatically grant it to R09 — the new permission must be
+ * explicitly added to this list to be granted.
+ *
+ * Per the audit-semantics restoration task Phase 5, this explicit
+ * list is the smallest coherent least-privilege correction that
+ * eliminates the future privilege-expansion risk created by the
+ * previous `R09_ADMINISTRATOR: PERMISSION_CODES` pattern. The
+ * previous pattern would have automatically granted any new
+ * permission to R09, making R09 a "hidden global super-administrator."
+ * The explicit list ensures R09 receives ONLY the permissions
+ * explicitly listed here.
+ */
+const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'clinic_admin_overview:view',
+] as const;
 
 // ---------------------------------------------------------------------------
 // Matrix definition
@@ -76,23 +135,60 @@ import {
  * facility-scoped assignment cannot select an organisation or
  * facility context; the guard rejects the selection before the
  * permission check is reached.
+ *
+ * The `clinic_admin_overview:view` permission is granted ONLY to
+ * `R09_ADMINISTRATOR` (Clinic Administrator). It is the read-only
+ * authorisation gate for the Clinic Administrator Overview surface
+ * at `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12 and
+ * §13). It is NOT granted to `R13_SYSTEM_ADMINISTRATOR` (Platform
+ * Super Admin) — R13 holds a different surface (§15/§16) and must
+ * NOT be silently treated as a Clinic Administrator. Per the
+ * Clinic Admin Overview live-data task specification Phase 7 item 6,
+ * this structural separation is the enforcement point for "A Platform
+ * Super Admin is not silently treated as a Clinic Administrator."
+ *
+ * Per the audit-semantics restoration task Phase 5, the matrix uses
+ * EXPLICIT permission lists (`HUMAN_CONTEXT_PERMISSIONS` and
+ * `CLINIC_ADMIN_PERMISSIONS`) rather than `PERMISSION_CODES` or
+ * `PERMISSION_CODES.filter(...)`. This is the smallest coherent
+ * least-privilege correction that eliminates the future
+ * privilege-expansion risk: adding a new permission to
+ * `PERMISSION_CODES` does NOT automatically grant it to any role.
+ * Each role receives ONLY the permissions explicitly listed in its
+ * matrix entry.
  */
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
-  R01_PHYSICIAN: PERMISSION_CODES,
-  R02_NURSE: PERMISSION_CODES,
-  R03_PHARMACIST: PERMISSION_CODES,
-  R04_TECHNICIAN: PERMISSION_CODES,
-  R05_ALLIED_HEALTH_PROFESSIONAL: PERMISSION_CODES,
-  R06_RECEPTIONIST: PERMISSION_CODES,
-  R07_SCHEDULER: PERMISSION_CODES,
-  R08_BILLER: PERMISSION_CODES,
-  R09_ADMINISTRATOR: PERMISSION_CODES,
-  R10_COMPLIANCE_OFFICER: PERMISSION_CODES,
-  R11_HR_MANAGER: PERMISSION_CODES,
-  R12_EXECUTIVE: PERMISSION_CODES,
-  R13_SYSTEM_ADMINISTRATOR: PERMISSION_CODES,
+  R01_PHYSICIAN: HUMAN_CONTEXT_PERMISSIONS,
+  R02_NURSE: HUMAN_CONTEXT_PERMISSIONS,
+  R03_PHARMACIST: HUMAN_CONTEXT_PERMISSIONS,
+  R04_TECHNICIAN: HUMAN_CONTEXT_PERMISSIONS,
+  R05_ALLIED_HEALTH_PROFESSIONAL: HUMAN_CONTEXT_PERMISSIONS,
+  R06_RECEPTIONIST: HUMAN_CONTEXT_PERMISSIONS,
+  R07_SCHEDULER: HUMAN_CONTEXT_PERMISSIONS,
+  R08_BILLER: HUMAN_CONTEXT_PERMISSIONS,
+  // R09 Clinic Administrator is the SOLE holder of the
+  // `clinic_admin_overview:view` permission. The Clinic Admin
+  // Overview surface at `/clinic-admin` is the canonical
+  // application route for this role (per DESIGN_BIBLE.md §17.1).
+  // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8 permissions),
+  // NOT `PERMISSION_CODES` (which would grant ALL future
+  // permissions automatically).
+  R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,
+  R10_COMPLIANCE_OFFICER: HUMAN_CONTEXT_PERMISSIONS,
+  R11_HR_MANAGER: HUMAN_CONTEXT_PERMISSIONS,
+  R12_EXECUTIVE: HUMAN_CONTEXT_PERMISSIONS,
+  // R13 System Administrator (Platform Super Admin) is explicitly
+  // NOT granted `clinic_admin_overview:view`. R13 has a different
+  // product surface (Platform Super Admin Overview, DESIGN_BIBLE.md
+  // §15/§16). Allowing R13 to view the Clinic Admin Overview would
+  // conflate two distinct surfaces and violate Phase 7 item 6 of
+  // the live-data task specification. R13 receives
+  // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions), NOT
+  // `PERMISSION_CODES.filter(...)` (which would grant all future
+  // permissions except `clinic_admin_overview:view`).
+  R13_SYSTEM_ADMINISTRATOR: HUMAN_CONTEXT_PERMISSIONS,
   // R14 Integration Account is denied the interactive workspace
   // context permissions. The integration account is non-human and
   // must not use browser workspace-selection endpoints. A principal

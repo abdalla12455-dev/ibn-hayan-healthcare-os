@@ -141,7 +141,16 @@ describe('authorization RoleSummarySchema', () => {
 
 describe('authorization PermissionCodeSchema', () => {
   it('validates every canonical permission code', () => {
-    const codes = ['context:view', 'context:select', 'context:clear'];
+    const codes = [
+      'context:view',
+      'context:select',
+      'context:clear',
+      'context:select_organisation',
+      'context:clear_organisation',
+      'context:select_facility',
+      'context:clear_facility',
+      'clinic_admin_overview:view',
+    ];
     for (const code of codes) {
       expect(PermissionCodeSchema.safeParse(code).success).toBe(true);
     }
@@ -149,8 +158,16 @@ describe('authorization PermissionCodeSchema', () => {
 
   it('rejects unknown permission codes', () => {
     expect(PermissionCodeSchema.safeParse('patient:read').success).toBe(false);
-    expect(PermissionCodeSchema.safeParse('encounter:write').success).toBe(false);
+    expect(PermissionCodeSchema.safeParse('encounter:write').success).toBe(
+      false,
+    );
     expect(PermissionCodeSchema.safeParse('').success).toBe(false);
+  });
+
+  it('accepts the clinic_admin_overview:view permission code (added by the live-data batch)', () => {
+    expect(
+      PermissionCodeSchema.safeParse('clinic_admin_overview:view').success,
+    ).toBe(true);
   });
 });
 

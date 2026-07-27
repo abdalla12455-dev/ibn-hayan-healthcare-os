@@ -223,6 +223,115 @@ export type RolePreviewActionCode =
   (typeof ROLE_PREVIEW_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Clinic Admin (Clinic Administrator Overview — successful-view event)
+// ---------------------------------------------------------------------------
+//
+// The `clinic_admin.overview.viewed` action code is emitted by the
+// Clinic Admin Overview service
+// (`apps/api/src/modules/clinic-admin/clinic-admin-overview.service.ts`)
+// AFTER the Overview operation completes successfully and returns its
+// response. This is the explicit successful-view audit event for the
+// Clinic Administrator Overview surface at
+// `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12 Arabic RTL
+// and §13 English LTR).
+//
+// Architectural rationale:
+//
+// The session-context module (`GET /api/v1/context`) emits BOTH:
+//   1. `authorization.decision.allowed` (from the AuthorizationGuard)
+//   2. `tenant_context.viewed` (from the service, after success)
+//
+// This two-event pattern is the established repository convention for
+// read-only endpoints. The two events carry DIFFERENT signals:
+//   - `authorization.decision.allowed` proves the request was authorized.
+//   - `tenant_context.viewed` proves the service completed successfully
+//     and returned a response.
+//
+// The Clinic Admin Overview follows the same pattern:
+//   1. `authorization.decision.allowed` (from the guard, category
+//      `authorization`) — proves the principal holds the
+//      `clinic_admin_overview:view` permission.
+//   2. `clinic_admin.overview.viewed` (from the service, category
+//      `facility_context`) — proves the Overview service completed
+//      successfully and returned its response.
+//
+// Category mapping:
+//
+// The `clinic_admin.overview.viewed` action is mapped to the existing
+// `facility_context` category (NOT to a new `clinic_admin` category).
+// This mapping is implemented in `inferCategoryFromAction` below. The
+// `facility_context` category is the narrowest semantically correct
+// existing category because:
+//   - The Overview is facility-scoped: the service requires an active
+//     facility (`session.activeFacilityId !== null`).
+//   - The response includes `facilityDisplayName` as a key field.
+//   - The service fails closed if the facility is missing, inactive,
+//     or belongs to another organisation.
+//   - The `tenant_context` category already sets a precedent for
+//     read-only `*.viewed` events under context categories
+//     (`tenant_context.viewed`).
+//
+// Database compatibility:
+//
+// The `facility_context` category was already part of the
+// TypeScript audit-category catalogue before migration
+// `20260726000000_audit_category_extend_for_role_preview` (it was
+// added to `packages/observability/src/audit/categories.ts` by the
+// ADR-015 scoped-context extension, which predated the migration).
+// Migration `20260726000000_audit_category_extend_for_role_preview`
+// EXTENDED the `audit_events_category_check` CHECK constraint in the
+// dedicated audit database to include `facility_context` (along with
+// `organisation_context` and `role_preview`), bringing the database
+// constraint in line with the previously-approved TypeScript
+// catalogue. The migration did NOT invent `facility_context`; it
+// extended the approved database set with categories that were
+// already approved in TypeScript.
+//
+// The transactional outbox (`audit_outbox_events`) stores the event as
+// JSONB with no category CHECK, so the outbox INSERT always succeeds.
+// The dispatcher's projection into `audit_events` succeeds because
+// `facility_context` is in the CHECK constraint. No new migration is
+// required.
+//
+// History:
+//
+// The original live-data batch (commit 67802eb) introduced this action
+// code under a `clinic_admin` category, which was NOT in the database
+// CHECK constraint. The first correction (commit ee95c8c) removed the
+// action code entirely and relied only on the guard's
+// `authorization.decision.allowed` event. That correction weakened
+// the audit trail: it lost the "service completed successfully"
+// signal. This restoration re-adds the action code mapped to the
+// existing `facility_context` category, preserving both audit signals
+// (authorization decision + successful view) without requiring a
+// database migration.
+//
+// Emission semantics:
+//
+// The event is emitted via `auditHelper.emitDirect(...)` (best-effort,
+// non-transactional), matching the existing pattern for read-only view
+// events (`tenant_context.viewed`). The event is emitted ONLY after
+// the Overview operation succeeds; it is NOT emitted when context
+// resolution fails (null return or thrown error). The event does NOT
+// recursively audit itself: the emission goes through the outbox, the
+// dispatcher delivers it to the audit store, and the audit-store
+// append does NOT trigger another audit event.
+
+/**
+ * Clinic Admin Overview action codes.
+ *
+ * Emitted by the Clinic Admin Overview service after the Overview
+ * operation completes successfully. The action is mapped to the
+ * `facility_context` category (see `inferCategoryFromAction`).
+ */
+export const CLINIC_ADMIN_ACTION_CODES = [
+  'clinic_admin.overview.viewed',
+] as const;
+
+export type ClinicAdminActionCode =
+  (typeof CLINIC_ADMIN_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -242,6 +351,7 @@ export const AUDIT_ACTION_CODES = [
   ...RBAC_ACTION_CODES,
   ...AUDIT_SYSTEM_ACTION_CODES,
   ...ROLE_PREVIEW_ACTION_CODES,
+  ...CLINIC_ADMIN_ACTION_CODES,
 ] as const;
 
 /**
@@ -300,6 +410,17 @@ export function inferCategoryFromAction(
   }
   if (action.startsWith('role_preview.')) {
     return 'role_preview';
+  }
+  // Clinic Admin actions are mapped to the `facility_context` category.
+  // The Clinic Admin Overview is a facility-scoped read-only view: the
+  // service requires an active facility, the response includes
+  // `facilityDisplayName`, and the service fails closed if the facility
+  // is missing, inactive, or belongs to another organisation. The
+  // `tenant_context` category already sets a precedent for read-only
+  // `*.viewed` events under context categories. See the
+  // `CLINIC_ADMIN_ACTION_CODES` block above for the full rationale.
+  if (action.startsWith('clinic_admin.')) {
+    return 'facility_context';
   }
   return null;
 }

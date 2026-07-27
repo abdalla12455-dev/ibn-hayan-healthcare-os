@@ -40,6 +40,33 @@
  * Role Preview audit emission fails inside its surrounding Prisma
  * transaction, which (per the `emitOrFail` atomicity contract)
  * rolls back the session creation and surfaces as an HTTP 500.
+ *
+ * NOTE on the absence of a `clinic_admin` category: the Clinic
+ * Admin Overview surface at `/api/v1/clinic-admin/overview` emits
+ * a `clinic_admin.overview.viewed` action code (registered in
+ * `action-codes.ts` under `CLINIC_ADMIN_ACTION_CODES`), but this
+ * action is mapped to the existing `facility_context` category by
+ * `inferCategoryFromAction` — NOT to a new `clinic_admin` category.
+ * The `facility_context` category IS accepted by the
+ * `audit_events_category_check` CHECK constraint in the dedicated
+ * audit database, so no migration is required. The mapping is the
+ * narrowest semantically correct choice: the Overview is facility-
+ * scoped (requires active facility, includes facilityDisplayName,
+ * fails closed if facility is missing). This preserves both audit
+ * signals for the endpoint — the guard's
+ * `authorization.decision.allowed` event (proves authorization) and
+ * the service's `clinic_admin.overview.viewed` event (proves the
+ * Overview operation completed successfully) — matching the
+ * established two-event pattern for read-only endpoints (cf. the
+ * session-context module's `tenant_context.viewed` event).
+ *
+ * History: the original live-data batch (commit 67802eb) introduced
+ * a `clinic_admin` category, which was NOT in the database CHECK
+ * constraint. The first correction (commit ee95c8c) removed the
+ * action code entirely, weakening the audit trail by losing the
+ * "service completed successfully" signal. This restoration re-adds
+ * the action code mapped to the existing `facility_context` category,
+ * preserving both audit signals without requiring a database migration.
  */
 export type AuditEventCategory =
   | 'security'

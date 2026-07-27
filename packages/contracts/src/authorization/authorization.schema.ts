@@ -144,6 +144,14 @@ export type RoleSummary = z.infer<typeof RoleSummarySchema>;
  * permission. The `context:view` permission remains a single code
  * because viewing the available context options is a single read
  * operation.
+ *
+ * The `clinic_admin_overview:view` permission is the read-only
+ * authorisation gate for the Clinic Administrator Overview surface
+ * at `/api/v1/clinic-admin/overview` (per DESIGN_BIBLE.md §12/§13).
+ * It is granted only to `R09_ADMINISTRATOR` (Clinic Administrator)
+ * and is the structural enforcement point for "A Platform Super
+ * Admin is not silently treated as a Clinic Administrator"
+ * (live-data task specification Phase 7 item 6).
  */
 export const PermissionCodeSchema = z.enum([
   'context:view',
@@ -153,6 +161,7 @@ export const PermissionCodeSchema = z.enum([
   'context:clear_organisation',
   'context:select_facility',
   'context:clear_facility',
+  'clinic_admin_overview:view',
 ]);
 
 export type PermissionCode = z.infer<typeof PermissionCodeSchema>;

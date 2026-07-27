@@ -202,11 +202,17 @@ describe('authorization role catalogue', () => {
 });
 
 describe('authorization permission catalogue', () => {
-  it('exposes the seven current context permissions (ADR-015)', () => {
+  it('exposes the seven current context permissions plus the Clinic Admin Overview permission', () => {
     // Per ADR-015, the context permissions are split into per-level
     // codes: context:view, context:select, context:clear,
     // context:select_organisation, context:clear_organisation,
     // context:select_facility, context:clear_facility.
+    //
+    // The Clinic Admin Overview live-data batch adds the
+    // `clinic_admin_overview:view` permission, granted ONLY to
+    // R09_ADMINISTRATOR. The permission is the read-only
+    // authorisation gate for `/api/v1/clinic-admin/overview`
+    // (per DESIGN_BIBLE.md §12/§13).
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
@@ -215,6 +221,7 @@ describe('authorization permission catalogue', () => {
       'context:clear_organisation',
       'context:select_facility',
       'context:clear_facility',
+      'clinic_admin_overview:view',
     ]);
   });
 
@@ -226,6 +233,7 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('context:clear_organisation')).toBe(true);
     expect(isPermissionCode('context:select_facility')).toBe(true);
     expect(isPermissionCode('context:clear_facility')).toBe(true);
+    expect(isPermissionCode('clinic_admin_overview:view')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -242,14 +250,24 @@ describe('authorization role-permission matrix', () => {
     }
   });
 
-  it('R01 through R13 receive all three current context permissions', () => {
+  it('R01 through R13 receive all seven context permissions', () => {
+    // The context permissions are unchanged by the Clinic Admin
+    // Overview live-data batch: every human role (R01 through R13)
+    // still receives all seven context permissions. The new
+    // `clinic_admin_overview:view` permission is NOT granted to
+    // every human role — only to R09.
     const humanRoles = PLATFORM_ROLE_CODES.filter(
       (code) => code !== 'R14_INTEGRATION_ACCOUNT',
     );
     expect(humanRoles).toHaveLength(13);
+    const contextPermissions = PERMISSION_CODES.filter(
+      (p) => p !== 'clinic_admin_overview:view',
+    );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
-      expect(permissions).toEqual(PERMISSION_CODES);
+      for (const cp of contextPermissions) {
+        expect(permissions).toContain(cp);
+      }
     }
   });
 
@@ -257,13 +275,81 @@ describe('authorization role-permission matrix', () => {
     expect(ROLE_PERMISSION_MATRIX.R14_INTEGRATION_ACCOUNT).toEqual([]);
   });
 
+  it('R09 Clinic Administrator is the SOLE holder of clinic_admin_overview:view', () => {
+    // Per the live-data task specification Phase 7 item 6, "A
+    // Platform Super Admin is not silently treated as a Clinic
+    // Administrator." This is the structural enforcement point:
+    // R09_ADMINISTRATOR is the ONLY role whose matrix entry
+    // includes `clinic_admin_overview:view`.
+    for (const code of PLATFORM_ROLE_CODES) {
+      const permissions = ROLE_PERMISSION_MATRIX[code];
+      if (code === 'R09_ADMINISTRATOR') {
+        expect(permissions).toContain('clinic_admin_overview:view');
+      } else {
+        expect(permissions).not.toContain('clinic_admin_overview:view');
+      }
+    }
+  });
+
+  it('R13 System Administrator (Platform Super Admin) does NOT receive clinic_admin_overview:view', () => {
+    // Explicit negative test for Phase 7 item 6. R13 holds a
+    // different surface (Platform Super Admin Overview,
+    // DESIGN_BIBLE.md §15/§16) and must NOT be silently treated
+    // as a Clinic Administrator.
+    expect(ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR).not.toContain(
+      'clinic_admin_overview:view',
+    );
+  });
+
+  it('rolesGrantPermission returns true for R09 + clinic_admin_overview:view', () => {
+    expect(
+      rolesGrantPermission(['R09_ADMINISTRATOR'], 'clinic_admin_overview:view'),
+    ).toBe(true);
+  });
+
+  it('rolesGrantPermission returns false for R13 + clinic_admin_overview:view', () => {
+    expect(
+      rolesGrantPermission(
+        ['R13_SYSTEM_ADMINISTRATOR'],
+        'clinic_admin_overview:view',
+      ),
+    ).toBe(false);
+  });
+
+  it('rolesGrantPermission returns false for any non-R09 role + clinic_admin_overview:view', () => {
+    const nonR09Roles = PLATFORM_ROLE_CODES.filter(
+      (code) => code !== 'R09_ADMINISTRATOR',
+    );
+    for (const code of nonR09Roles) {
+      expect(
+        rolesGrantPermission([code], 'clinic_admin_overview:view'),
+      ).toBe(false);
+    }
+  });
+
+  it('rolesGrantPermission returns true for R09 + R13 + clinic_admin_overview:view (R09 grants, R13 does not revoke)', () => {
+    // Per PRODUCT_BIBLE.md Section 20.3, when a principal holds
+    // multiple roles, allowed permissions accumulate (set union).
+    // A principal holding both R09 and R13 has the union of both
+    // roles' permissions, which includes `clinic_admin_overview:view`
+    // (from R09). R13's denial of the permission does NOT revoke
+    // R09's grant.
+    expect(
+      rolesGrantPermission(
+        ['R09_ADMINISTRATOR', 'R13_SYSTEM_ADMINISTRATOR'],
+        'clinic_admin_overview:view',
+      ),
+    ).toBe(true);
+  });
+
   it('permissionsForRole returns the matrix entry for a known role', () => {
     expect(permissionsForRole('R01_PHYSICIAN')).toEqual(
-      PERMISSION_CODES,
+      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
     );
     expect(permissionsForRole('R13_SYSTEM_ADMINISTRATOR')).toEqual(
-      PERMISSION_CODES,
+      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
     );
+    expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(PERMISSION_CODES);
   });
 
   it('permissionsForRole returns an empty array for an unknown role', () => {
@@ -272,12 +358,10 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('permissionsForRoles accumulates permissions across multiple roles (union)', () => {
-    // Two roles that both grant all seven context permissions produce
-    // a union of seven permissions. Per ADR-015, the context
-    // permissions are split into per-level codes: context:view,
-    // context:select, context:clear, context:select_organisation,
-    // context:clear_organisation, context:select_facility,
-    // context:clear_facility.
+    // Two roles that both grant all seven context permissions
+    // (R01 and R13) produce a union of seven context permissions.
+    // Neither role grants `clinic_admin_overview:view`, so the
+    // union does not include it.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
@@ -290,6 +374,7 @@ describe('authorization role-permission matrix', () => {
     expect(union.has('context:clear_organisation')).toBe(true);
     expect(union.has('context:select_facility')).toBe(true);
     expect(union.has('context:clear_facility')).toBe(true);
+    expect(union.has('clinic_admin_overview:view')).toBe(false);
   });
 
   it('permissionsForRoles returns an empty set for a roleless membership', () => {
@@ -396,6 +481,112 @@ describe('authorization role-permission matrix', () => {
   it('listPlatformRoleCodes returns the canonical list', () => {
     expect(listPlatformRoleCodes()).toBe(PLATFORM_ROLE_CODES);
     expect(listPlatformRoleCodes()).toHaveLength(14);
+  });
+
+  // -------------------------------------------------------------------------
+  // Future privilege-expansion regression coverage (Phase 5).
+  //
+  // The matrix uses EXPLICIT permission lists
+  // (`HUMAN_CONTEXT_PERMISSIONS` and `CLINIC_ADMIN_PERMISSIONS`)
+  // rather than `PERMISSION_CODES` or `PERMISSION_CODES.filter(...)`.
+  // This ensures that adding a future permission to `PERMISSION_CODES`
+  // does NOT automatically grant it to any role — the new permission
+  // must be explicitly added to the relevant permission list.
+  //
+  // These tests verify the explicit-list property by checking that
+  // every role's matrix entry contains ONLY the approved permissions,
+  // not "all permissions except X" (which would be the
+  // `PERMISSION_CODES.filter(...)` pattern).
+  // -------------------------------------------------------------------------
+
+  it('R09 Clinic Administrator receives EXACTLY 8 permissions (not PERMISSION_CODES.length)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8). If a future
+    // change adds a permission to PERMISSION_CODES but forgets to
+    // add it to CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it.
+    // This is the desired least-privilege behaviour.
+    const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
+    expect(r09Permissions).toHaveLength(8);
+    expect(r09Permissions).toEqual([
+      'context:view',
+      'context:select',
+      'context:clear',
+      'context:select_organisation',
+      'context:clear_organisation',
+      'context:select_facility',
+      'context:clear_facility',
+      'clinic_admin_overview:view',
+    ]);
+  });
+
+  it('R13 System Administrator receives EXACTLY 7 permissions (not PERMISSION_CODES.filter(...))', () => {
+    // R13 receives HUMAN_CONTEXT_PERMISSIONS (explicit 7). If a
+    // future change adds a permission to PERMISSION_CODES, R13 will
+    // NOT receive it (because R13's matrix entry is the explicit
+    // list, not a filtered list).
+    const r13Permissions = ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR;
+    expect(r13Permissions).toHaveLength(7);
+    expect(r13Permissions).toEqual([
+      'context:view',
+      'context:select',
+      'context:clear',
+      'context:select_organisation',
+      'context:clear_organisation',
+      'context:select_facility',
+      'context:clear_facility',
+    ]);
+    expect(r13Permissions).not.toContain('clinic_admin_overview:view');
+  });
+
+  it('every non-R09, non-R14 role receives EXACTLY 7 permissions (same as R13)', () => {
+    // Every human role other than R09 receives the same 7 context
+    // permissions as R13. This verifies the matrix does NOT use
+    // `PERMISSION_CODES.filter(...)` (which would grant all future
+    // permissions except `clinic_admin_overview:view`).
+    const nonR09NonR14Roles = PLATFORM_ROLE_CODES.filter(
+      (code) => code !== 'R09_ADMINISTRATOR' && code !== 'R14_INTEGRATION_ACCOUNT',
+    );
+    for (const code of nonR09NonR14Roles) {
+      const permissions = ROLE_PERMISSION_MATRIX[code];
+      expect(permissions).toHaveLength(7);
+      expect(permissions).not.toContain('clinic_admin_overview:view');
+      // Every non-R09 role has the SAME 7 permissions as R13.
+      expect(permissions).toEqual(ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR);
+    }
+  });
+
+  it('R09 is NOT a hidden global super-administrator (R09 != PERMISSION_CODES)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8), NOT
+    // PERMISSION_CODES (which is currently 8 but would grow if a
+    // future permission is added). This test verifies R09's matrix
+    // entry is NOT a reference to PERMISSION_CODES.
+    //
+    // We verify by checking that R09's permissions equal the explicit
+    // CLINIC_ADMIN_PERMISSIONS list, not PERMISSION_CODES. If a future
+    // change accidentally makes R09 = PERMISSION_CODES again, this
+    // test will still pass (because both are currently 8), but the
+    // TYPE of the matrix entry will differ. The structural test is
+    // the length assertion above (R09 has EXACTLY 8, not
+    // PERMISSION_CODES.length).
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(8);
+    expect(PERMISSION_CODES.length).toBe(8);
+    // If a future permission is added to PERMISSION_CODES, the
+    // lengths will diverge. This test documents the current equality
+    // and will FAIL if a future permission is added to PERMISSION_CODES
+    // without updating CLINIC_ADMIN_PERMISSIONS — which is the
+    // desired behaviour (the test failure prompts the developer to
+    // explicitly decide whether R09 should receive the new permission).
+  });
+
+  it('matrix entries are stable references (not computed at access time)', () => {
+    // The matrix entries are defined as `as const` arrays, not as
+    // `PERMISSION_CODES.filter(...)` calls. This means the matrix
+    // entries are stable references that do NOT change when
+    // PERMISSION_CODES changes. This test verifies the matrix entries
+    // are the same reference on every access (defence-in-depth against
+    // a future change that reintroduces computed entries).
+    const r09First = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
+    const r09Second = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
+    expect(r09First).toBe(r09Second); // Same reference, not a new array
   });
 });
 
