@@ -1252,11 +1252,20 @@ describe('Genuine Role Preview → Clinic Admin access', () => {
   /**
    * Assert that the most recent Overview-endpoint authorization-decision
    * audit event has the expected actor, permission, endpoint, and
-   * method. Per the approved audit contract, DENIED events intentionally
-   * omit `roleCodes` (security hardening — not leaking role
-   * information to a denied user). The previewed role is therefore
-   * proved independently by querying the preview identity's role
-   * assignment BEFORE the request.
+   * method. Per the approved audit contract, DENIED events carry an
+   * EMPTY `roleCodes` array (security hardening — not leaking role
+   * information to a denied user). The `AuditEventDraft.roleCodes`
+   * field is declared as `readonly string[]` (non-optional) and the
+   * audit-outbox `role_codes` column is a non-nullable PostgreSQL
+   * `String[]`; the audit-event builder normalises a missing
+   * `roleCodes` input to `[]` (see `audit-event-builder.ts:251` and
+   * `audit-event-builder.spec.ts:42`). The AuthorizationGuard's
+   * `emitAuthorizationDenied` deliberately does NOT pass
+   * `roleCodes`, so the builder produces `[]` — a denied actor
+   * sees zero role claims, which is information-theoretically
+   * equivalent to omission for the security purpose. The previewed
+   * role is therefore proved independently by querying the preview
+   * identity's role assignment BEFORE the request.
    */
   async function assertOverviewDeniedAuditEvent(
     expectedActorId: string,
@@ -1287,12 +1296,28 @@ describe('Genuine Role Preview → Clinic Admin access', () => {
     expect(draft.permissionCode).toBe('clinic_admin_overview:view');
     expect(draft.metadata?.endpoint).toBe('/api/v1/clinic-admin/overview');
     expect(draft.metadata?.method).toBe('GET');
-    // Per the approved audit contract, DENIED events intentionally
-    // omit `roleCodes`. This is security hardening — not leaking
-    // role information to a denied user who might be probing
-    // permissions. The previewed role is proved independently by
-    // querying the preview identity's role assignment.
-    expect(draft.roleCodes).toBeUndefined();
+    // Per the approved audit contract, DENIED events carry an EMPTY
+    // `roleCodes` array. The field is non-optional in the draft type
+    // and non-nullable in the database; the builder normalises a
+    // missing input to `[]`. This is security hardening — a denied
+    // user sees zero role claims and cannot infer which roles might
+    // have granted the permission. The previewed role is proved
+    // independently by querying the preview identity's role
+    // assignment.
+    //
+    // Canonical assertion: empty array, not undefined. The
+    // audit-event-builder.spec.ts:42 unit test already codifies the
+    // empty-array contract for the default `roleCodes`; this
+    // assertion extends that contract to the denied-authorization
+    // runtime path.
+    expect(draft.roleCodes).toEqual([]);
+    // Defence-in-depth: explicitly prove that the denied event
+    // cannot imply Clinic Admin permission. Neither R01 (the
+    // previewed role) nor R09 (the Clinic Administrator role) may
+    // appear in the denied event's roleCodes.
+    expect(draft.roleCodes).not.toContain('R01_PHYSICIAN');
+    expect(draft.roleCodes).not.toContain('R09_ADMINISTRATOR');
+    expect(draft.roleCodes).not.toContain('R13_SYSTEM_ADMINISTRATOR');
   }
 
   /**
@@ -1412,8 +1437,10 @@ describe('Genuine Role Preview → Clinic Admin access', () => {
     // Step 5: Endpoint-reach proof — exactly one
     // `authorization.decision.denied` audit event was emitted for the
     // Overview endpoint. The event's actorId, permissionCode,
-    // endpoint, and method match. `roleCodes` is intentionally
-    // absent (security hardening).
+    // endpoint, and method match. `roleCodes` is intentionally an
+    // EMPTY ARRAY (security hardening) — see the
+    // `assertOverviewDeniedAuditEvent` helper for the canonical
+    // contract.
     // ----------------------------------------------------------------
     const after = await countOverviewAuthorizationAuditEvents();
     expect(after).toBe(before + 1);
@@ -1523,5 +1550,157 @@ describe('Genuine Role Preview → Clinic Admin access', () => {
     // ALLOWED events include roleCodes; R09 must be present.
     expect(draft.roleCodes).toBeDefined();
     expect(draft.roleCodes).toContain('R09_ADMINISTRATOR');
+  });
+
+  it('40. Denied Clinic Admin authorization audit event carries an empty roleCodes array (canonical contract)', async () => {
+    // ----------------------------------------------------------------
+    // Regression coverage for the canonical `roleCodes` contract on
+    // DENIED authorization events.
+    //
+    // Authoritative contract (see `assertOverviewDeniedAuditEvent`
+    // for the full evidence chain):
+    //
+    //   * `AuditEventDraft.roleCodes` is declared `readonly string[]`
+    //     (non-optional) in `packages/observability/src/audit/audit-event-draft.ts:82`.
+    //   * The audit-outbox `role_codes` column is a non-nullable
+    //     PostgreSQL `String[]` (`apps/api/prisma-audit/schema.prisma:121`).
+    //   * The audit-event builder normalises a missing `roleCodes`
+    //     input to `[]` (`packages/observability/src/audit/audit-event-builder.ts:251`).
+    //   * The builder unit test asserts `expect(r.draft.roleCodes).toEqual([])`
+    //     (`packages/observability/src/audit/audit-event-builder.spec.ts:42`).
+    //   * The AuthorizationGuard's `emitAuthorizationDenied` does NOT
+    //     pass `roleCodes`, so the builder produces `[]`. This is
+    //     security hardening — a denied actor sees zero role claims
+    //     and cannot infer which roles might have granted the
+    //     permission.
+    //
+    // This test enters Role Preview through the REAL production
+    // endpoint as R01_PHYSICIAN (which does NOT grant
+    // `clinic_admin_overview:view`), issues a real Overview request,
+    // and asserts that the resulting DENIED audit event:
+    //   1. Succeeds (denial itself succeeds — the R01 preview
+    //      session is denied correctly).
+    //   2. `roleCodes` is canonically `[]` (not `undefined`).
+    //   3. `roleCodes` contains no role code at all.
+    //   4. `roleCodes` cannot contain R01_PHYSICIAN (the previewed
+    //      role).
+    //   5. `roleCodes` cannot contain R09_ADMINISTRATOR (the Clinic
+    //      Administrator role).
+    //   6. `roleCodes` cannot contain R13_SYSTEM_ADMINISTRATOR (the
+    //      Platform Super Admin role).
+    //   7. The denied event cannot imply Clinic Admin permission
+    //      (no roleCodes entry grants `clinic_admin_overview:view`).
+    //   8. The real preview identity remains R01 (proved
+    //      independently by querying the role assignment).
+    //   9. The R09 positive control (test 39) remains allowed — the
+    //      empty-array denial is R01-specific, NOT a regression of
+    //      R09 access.
+    // ----------------------------------------------------------------
+
+    // Step 1: Enter Role Preview as R01_PHYSICIAN through the REAL
+    // production endpoint.
+    const { response } = await bootstrapAndSelect('R01_PHYSICIAN');
+    expect(response.status).toBe(200);
+    const selectCookieStr = getSetCookieString(response);
+    expect(selectCookieStr).toContain('ibn_hayan_session=');
+    const previewSessionCookieValue = extractCookie(
+      selectCookieStr,
+      'ibn_hayan_session',
+    );
+    expect(previewSessionCookieValue.length).toBeGreaterThan(0);
+
+    // Step 2: Resolve the preview identity's user ID, membership,
+    // and role assignments. Prove the preview identity is exactly
+    // R01_PHYSICIAN (no R09, no R13, no other role). This is the
+    // independent proof of the previewed role — the denied audit
+    // event's `roleCodes` must NOT leak this fact.
+    const activeSession = await prisma.authSession.findFirst({
+      where: { revokedAt: null },
+    });
+    expect(activeSession).not.toBeNull();
+    const previewUserId = activeSession!.userId;
+    const previewUser = await prisma.user.findUnique({
+      where: { id: previewUserId },
+    });
+    expect(previewUser).not.toBeNull();
+    expect(previewUser!.email).toBe('r01_physician@role-preview.dev');
+    const previewMembership = await prisma.tenantMembership.findUnique({
+      where: { id: activeSession!.activeTenantMembershipId! },
+    });
+    expect(previewMembership).not.toBeNull();
+    const previewAssignments = await prisma.tenantRoleAssignment.findMany({
+      where: { tenantMembershipId: previewMembership!.id },
+    });
+    const previewRoleCodes = new Set(previewAssignments.map((a) => a.roleCode));
+    expect(previewRoleCodes.has('R01_PHYSICIAN')).toBe(true);
+    expect(previewRoleCodes.has('R09_ADMINISTRATOR')).toBe(false);
+    expect(previewRoleCodes.has('R13_SYSTEM_ADMINISTRATOR')).toBe(false);
+
+    // Step 3: Issue the Overview request through the REAL guard.
+    // R01 does NOT grant `clinic_admin_overview:view`, so the guard
+    // MUST deny.
+    const before = await countOverviewAuthorizationAuditEvents();
+    const overviewResponse = await request(server)
+      .get(clinicAdminRoutes.overview)
+      .set('Cookie', `ibn_hayan_session=${previewSessionCookieValue}`)
+      .expect(403);
+
+    // Step 4: The denial itself succeeded (R01 cannot bypass the
+    // Clinic Admin permission requirement).
+    expect(overviewResponse.status).toBe(403);
+    const parsed = AuthErrorResponseSchema.safeParse(overviewResponse.body);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.error.code).toBe('AUTHORIZATION_FORBIDDEN');
+    }
+
+    // Step 5: Exactly one new DENIED audit event was emitted.
+    const after = await countOverviewAuthorizationAuditEvents();
+    expect(after).toBe(before + 1);
+
+    // Step 6: The DENIED audit event carries the canonical empty
+    // `roleCodes` array. The helper asserts:
+    //   * `roleCodes` is exactly `[]`
+    //   * `roleCodes` does not contain R01_PHYSICIAN
+    //   * `roleCodes` does not contain R09_ADMINISTRATOR
+    //   * `roleCodes` does not contain R13_SYSTEM_ADMINISTRATOR
+    // These four assertions collectively prove that the denied
+    // event cannot imply Clinic Admin permission.
+    await assertOverviewDeniedAuditEvent(previewUserId);
+
+    // Step 7: No successful-view event was emitted. The Overview
+    // service emits `clinic_admin.overview.viewed` only on a 200
+    // response; a 403 denial must NOT emit it.
+    await assertNoOverviewViewedEvent();
+
+    // Step 8: Confirm the canonical contract holds at the raw-row
+    // level (not just through the helper). Read the most recent
+    // denied Overview event directly and assert the field is an
+    // empty array, NOT undefined. This guards against future
+    // regressions where the helper might be weakened to accept
+    // either representation.
+    const rows = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+    const deniedOverviewRows = rows.filter((row) => {
+      const draft = row.canonicalEventDraft as {
+        action?: string;
+        metadata?: { endpoint?: string; method?: string };
+      };
+      return (
+        draft.action === 'authorization.decision.denied' &&
+        draft.metadata?.endpoint === '/api/v1/clinic-admin/overview' &&
+        draft.metadata?.method === 'GET'
+      );
+    });
+    expect(deniedOverviewRows.length).toBeGreaterThanOrEqual(1);
+    const latestDenied = deniedOverviewRows[deniedOverviewRows.length - 1]!;
+    const deniedDraft = latestDenied.canonicalEventDraft as {
+      roleCodes?: unknown;
+    };
+    // Canonical assertion: empty array, not undefined, not null.
+    expect(Array.isArray(deniedDraft.roleCodes)).toBe(true);
+    expect(deniedDraft.roleCodes).toHaveLength(0);
+    expect(deniedDraft.roleCodes).toEqual([]);
   });
 });
