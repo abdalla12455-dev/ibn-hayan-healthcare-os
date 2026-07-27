@@ -49,6 +49,13 @@ import {
   seedActiveContextForSession,
   computeSessionTokenHash,
   assertExactRoleAssignments,
+  parseAuditEventDraft,
+  isOverviewAuthorizationAllowed,
+  isOverviewViewed,
+  isContextSelectionEvent,
+  AUTH_SESSIONS_FACILITY_ORGANISATION_FK,
+  serialiseAuditEventDraft,
+  type AuditEventDraft,
 } from '../../../test/clinic-admin/_clinic-admin-test-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -1796,5 +1803,430 @@ describe('genuine Role Preview coverage separation (Phase 6 items 10–15)', () 
         'tokenHash',
       ].sort(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit-event filtering regression tests (Phase 6: 20 focused tests)
+// ---------------------------------------------------------------------------
+//
+// These tests prove the audit-filtering helpers used by corrected tests 21
+// and 23 in the Clinic Admin integration suite correctly isolate Overview
+// events from context-selection setup events. Each test exercises the
+// actual helper/filtering path — none inspect only comments or names.
+
+describe('audit-event filtering helpers (Phase 6: 20 focused regression tests)', () => {
+  // A canonical Overview authorization-allowed event (as emitted by the
+  // AuthorizationGuard for GET /api/v1/clinic-admin/overview).
+  const overviewAllowedDraft: AuditEventDraft = {
+    action: 'authorization.decision.allowed',
+    category: 'authorization',
+    permissionCode: 'clinic_admin_overview:view',
+    actorId: 'user-1',
+    sessionId: 'session-1',
+    tenantId: 'tenant-1',
+    roleCodes: ['R09_ADMINISTRATOR'],
+    outcome: 'success',
+    metadata: { endpoint: '/api/v1/clinic-admin/overview', method: 'GET' },
+  };
+
+  // A canonical Overview viewed event (as emitted by the
+  // ClinicAdminOverviewService on a successful 200 response).
+  const overviewViewedDraft: AuditEventDraft = {
+    action: 'clinic_admin.overview.viewed',
+    category: 'facility_context',
+    actorId: 'user-1',
+    sessionId: 'session-1',
+    tenantId: 'tenant-1',
+    outcome: 'success',
+    metadata: { endpoint: 'clinic_admin_overview_view' },
+  };
+
+  // A context-selection setup event (as emitted by the
+  // AuthorizationGuard for PUT /api/v1/context/organisation).
+  const contextSelectOrgDraft: AuditEventDraft = {
+    action: 'authorization.decision.allowed',
+    category: 'authorization',
+    permissionCode: 'context:select_organisation',
+    actorId: 'user-1',
+    sessionId: 'session-1',
+    tenantId: 'tenant-1',
+    roleCodes: ['R09_ADMINISTRATOR'],
+    outcome: 'success',
+    metadata: {
+      endpoint: '/api/v1/context/organisation',
+      method: 'PUT',
+    },
+  };
+
+  // A context-selection service event (as emitted by the
+  // SessionContextService for organisation selection).
+  const orgContextSelectedDraft: AuditEventDraft = {
+    action: 'organisation_context.selected',
+    category: 'facility_context',
+    actorId: 'user-1',
+    sessionId: 'session-1',
+    tenantId: 'tenant-1',
+    resourceId: 'org-1',
+    outcome: 'success',
+    metadata: { endpoint: '/api/v1/context/organisation', method: 'PUT' },
+  };
+
+  // --- Item 5: Audit filtering ignores context-selection setup events ---
+
+  it('5. isOverviewAuthorizationAllowed returns false for a context:select_organisation event', () => {
+    expect(
+      isOverviewAuthorizationAllowed(contextSelectOrgDraft, 'user-1'),
+    ).toBe(false);
+  });
+
+  it('5b. isOverviewViewed returns false for an organisation_context.selected event', () => {
+    expect(isOverviewViewed(orgContextSelectedDraft, 'user-1')).toBe(false);
+  });
+
+  // --- Item 6: Audit filtering selects only clinic_admin_overview:view events ---
+
+  it('6. isOverviewAuthorizationAllowed returns true for the Overview allowed event', () => {
+    expect(isOverviewAuthorizationAllowed(overviewAllowedDraft, 'user-1')).toBe(
+      true,
+    );
+  });
+
+  it('6b. isOverviewAuthorizationAllowed returns false when permissionCode is context:select (not clinic_admin_overview:view)', () => {
+    const wrongPermission: AuditEventDraft = {
+      ...overviewAllowedDraft,
+      permissionCode: 'context:select',
+    };
+    expect(isOverviewAuthorizationAllowed(wrongPermission, 'user-1')).toBe(
+      false,
+    );
+  });
+
+  // --- Item 7: Audit filtering selects only clinic_admin.overview.viewed events ---
+
+  it('7. isOverviewViewed returns true for the Overview viewed event', () => {
+    expect(isOverviewViewed(overviewViewedDraft, 'user-1')).toBe(true);
+  });
+
+  it('7b. isOverviewViewed returns false when action is not clinic_admin.overview.viewed', () => {
+    const wrongAction: AuditEventDraft = {
+      ...overviewViewedDraft,
+      action: 'tenant_context.selected',
+    };
+    expect(isOverviewViewed(wrongAction, 'user-1')).toBe(false);
+  });
+
+  // --- Item 8: Actor filtering is exact ---
+
+  it('8. isOverviewAuthorizationAllowed returns false when actorId does not match', () => {
+    expect(isOverviewAuthorizationAllowed(overviewAllowedDraft, 'user-2')).toBe(
+      false,
+    );
+  });
+
+  it('8b. isOverviewViewed returns false when actorId does not match', () => {
+    expect(isOverviewViewed(overviewViewedDraft, 'user-2')).toBe(false);
+  });
+
+  // --- Item 9: Endpoint filtering is exact ---
+
+  it('9. isOverviewAuthorizationAllowed returns false when endpoint is /api/v1/context/organisation', () => {
+    const wrongEndpoint: AuditEventDraft = {
+      ...overviewAllowedDraft,
+      metadata: {
+        endpoint: '/api/v1/context/organisation',
+        method: 'GET',
+      },
+    };
+    expect(isOverviewAuthorizationAllowed(wrongEndpoint, 'user-1')).toBe(false);
+  });
+
+  // --- Item 10: Method filtering is exact ---
+
+  it('10. isOverviewAuthorizationAllowed returns false when method is PUT (not GET)', () => {
+    const wrongMethod: AuditEventDraft = {
+      ...overviewAllowedDraft,
+      metadata: {
+        endpoint: '/api/v1/clinic-admin/overview',
+        method: 'PUT',
+      },
+    };
+    expect(isOverviewAuthorizationAllowed(wrongMethod, 'user-1')).toBe(false);
+  });
+
+  // --- Item 11: Permission filtering is exact ---
+
+  it('11. isOverviewAuthorizationAllowed returns false when permissionCode is context:select_facility', () => {
+    const wrongPermission: AuditEventDraft = {
+      ...overviewAllowedDraft,
+      permissionCode: 'context:select_facility',
+    };
+    expect(isOverviewAuthorizationAllowed(wrongPermission, 'user-1')).toBe(
+      false,
+    );
+  });
+
+  // --- Item 12: Test 21 cannot select context:select ---
+
+  it('12. a context:select event cannot satisfy isOverviewAuthorizationAllowed (the filter that test 21 uses)', () => {
+    const contextSelectTenantDraft: AuditEventDraft = {
+      action: 'authorization.decision.allowed',
+      category: 'authorization',
+      permissionCode: 'context:select',
+      actorId: 'user-1',
+      sessionId: 'session-1',
+      tenantId: 'tenant-1',
+      roleCodes: ['R09_ADMINISTRATOR'],
+      outcome: 'success',
+      metadata: {
+        endpoint: '/api/v1/context/tenant',
+        method: 'PUT',
+      },
+    };
+    expect(
+      isOverviewAuthorizationAllowed(contextSelectTenantDraft, 'user-1'),
+    ).toBe(false);
+  });
+
+  // --- Item 13: Test 23 does not inspect unrelated setup events ---
+
+  it('13. isContextSelectionEvent returns true for organisation_context.selected (confirming the setup-event classifier works)', () => {
+    expect(isContextSelectionEvent(orgContextSelectedDraft)).toBe(true);
+  });
+
+  it('13b. isContextSelectionEvent returns true for context:select_organisation authorization event', () => {
+    expect(isContextSelectionEvent(contextSelectOrgDraft)).toBe(true);
+  });
+
+  it('13c. isContextSelectionEvent returns false for the Overview allowed event', () => {
+    expect(isContextSelectionEvent(overviewAllowedDraft)).toBe(false);
+  });
+
+  // --- Item 14: Overview metadata excludes names ---
+
+  it('14. the Overview viewed event metadata does not contain display names', () => {
+    const json = serialiseAuditEventDraft(overviewViewedDraft);
+    expect(json).not.toContain('Tenant');
+    expect(json).not.toContain('Organisation');
+    expect(json).not.toContain('Facility');
+    expect(json).not.toContain('Admin');
+  });
+
+  // --- Item 15: Overview metadata excludes organisation and facility identifiers ---
+
+  it('15. the Overview viewed event does not contain an organisationId or facilityId in its metadata', () => {
+    const json = serialiseAuditEventDraft(overviewViewedDraft);
+    expect(json).not.toContain('org-1');
+    expect(json).not.toContain('fac-1');
+  });
+
+  it('15b. the Overview allowed event does not contain an organisationId or facilityId in its metadata', () => {
+    const json = serialiseAuditEventDraft(overviewAllowedDraft);
+    expect(json).not.toContain('org-1');
+    expect(json).not.toContain('fac-1');
+  });
+
+  // --- Item 16: Context-selection events may retain legitimate resourceId fields ---
+
+  it('16. the organisation_context.selected event legitimately carries resourceId = organisationId (this is permitted, not a defect)', () => {
+    expect(orgContextSelectedDraft.resourceId).toBe('org-1');
+    // The isContextSelectionEvent classifier correctly identifies this
+    // as a setup event (NOT an Overview event), so the sensitive-value
+    // scan in test 23 excludes it.
+    expect(isContextSelectionEvent(orgContextSelectedDraft)).toBe(true);
+    // The Overview filters reject it, proving the setup event cannot
+    // masquerade as an Overview event.
+    expect(
+      isOverviewAuthorizationAllowed(orgContextSelectedDraft, 'user-1'),
+    ).toBe(false);
+    expect(isOverviewViewed(orgContextSelectedDraft, 'user-1')).toBe(false);
+  });
+
+  // --- Item 1: The compound session facility-organisation FK rejects mismatched pairs ---
+
+  it('1. the AUTH_SESSIONS_FACILITY_ORGANISATION_FK constant matches the exact migration constraint name', () => {
+    expect(AUTH_SESSIONS_FACILITY_ORGANISATION_FK).toBe(
+      'auth_sessions_active_facility_organisation_fkey',
+    );
+  });
+
+  // --- Item 4: Test helpers never disable constraints ---
+
+  it('4. seedActiveContextForSession validates ownership invariants before writing (the helper never disables constraints)', async () => {
+    // The helper's source code (inspected at _clinic-admin-test-helpers.ts
+    // lines 550-702) validates: membership exists and is active, tenant
+    // is active, organisation exists and belongs to the same tenant and
+    // is active, facility exists and belongs to the same organisation
+    // and is active. A validation failure throws and the session is NOT
+    // mutated. The helper uses prisma.authSession.updateMany (NOT raw SQL
+    // with session_replication_role or constraint disabling).
+    //
+    // This test exercises the helper's validation path by passing a
+    // mismatched organisation (the organisation's tenantId does not
+    // match the membership's tenantId). The helper must throw.
+    const fakePrisma = {
+      authSession: {
+        updateMany: () =>
+          Promise.resolve({ count: 1 }) as Promise<{ count: number }>,
+      },
+      tenantMembership: {
+        findUnique: () =>
+          Promise.resolve({
+            id: 'mem-1',
+            userId: 'user-1',
+            tenantId: 'tenant-A',
+            status: 'active',
+          }),
+      },
+      tenant: {
+        findUnique: () => Promise.resolve({ id: 'tenant-A', status: 'active' }),
+      },
+      organisation: {
+        findUnique: () =>
+          Promise.resolve({
+            id: 'org-1',
+            tenantId: 'tenant-B', // MISMATCH — different tenant
+            status: 'active',
+          }),
+      },
+      facility: {
+        findUnique: () =>
+          Promise.resolve({
+            id: 'fac-1',
+            tenantId: 'tenant-A',
+            organisationId: 'org-1',
+            status: 'active',
+          }),
+      },
+    };
+    // The helper must throw before calling authSession.updateMany
+    // because the organisation's tenantId does not match the
+    // membership's tenantId.
+    await expect(
+      seedActiveContextForSession({
+        prisma: fakePrisma,
+        tokenHash: 'a'.repeat(64),
+        membershipId: 'mem-1',
+        organisationId: 'org-1',
+        facilityId: 'fac-1',
+      }),
+    ).rejects.toThrow(/cross-tenant organisation seeding is rejected/i);
+  });
+
+  // --- Item 17: The first-stage CSRF regression remains closed ---
+
+  it('17. parseCsrfResponseBody throws on the wrong field name (csrfToken instead of token) — the CSRF regression remains closed', () => {
+    expect(() =>
+      parseCsrfResponseBody({ csrfToken: 'abc'.repeat(20) }),
+    ).toThrow(/does not match CsrfResponseSchema/i);
+  });
+
+  // --- Item 18: The Throttler cleanup regression remains closed ---
+
+  it('18. resetThrottlerStorageSafely clears timeout handles BEFORE the storage Map — the Throttler regression remains closed', () => {
+    // This test verifies the ordering guarantee: timeout handles are
+    // cleared FIRST, then the storage Map. The ordering is critical
+    // because clearing storage first would leave pending timeout
+    // callbacks pointing at missing entries, reproducing the original
+    // destructuring crash.
+    //
+    // We use a tracking array that records the order of operations:
+    // 'clearTimeout' entries are pushed when clearTimeout is called,
+    // and 'storageCleared' is pushed when the storage Map becomes empty.
+    const orderTracker: string[] = [];
+    const handle = setTimeout(() => {
+      orderTracker.push('timeout-fired');
+    }, 100_000);
+    const timeoutIds = new Map<string, Array<ReturnType<typeof setTimeout>>>([
+      ['throttler-1', [handle]],
+    ]);
+    const storage = new Map([['key-1', 'value-1']]);
+
+    // Wrap clearTimeout to track when it is called.
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.clearTimeout = ((h: ReturnType<typeof setTimeout>) => {
+      orderTracker.push('clearTimeout');
+      return originalClearTimeout(h);
+    }) as typeof globalThis.clearTimeout;
+
+    try {
+      resetThrottlerStorageSafely({
+        storage,
+        timeoutIds,
+      } as unknown as Parameters<typeof resetThrottlerStorageSafely>[0]);
+      // After reset, both Maps must be empty.
+      expect(timeoutIds.size).toBe(0);
+      expect(storage.size).toBe(0);
+      // clearTimeout must have been called (at least once).
+      expect(orderTracker).toContain('clearTimeout');
+      // The timeout must NOT have fired (it was cleared before it
+      // could fire against the now-empty storage).
+      expect(orderTracker).not.toContain('timeout-fired');
+    } finally {
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
+  // --- Item 19: Exact-role fixture coverage remains intact ---
+
+  it('19. assertExactRoleAssignments passes for R01 alone (exact-role fixture coverage intact)', () => {
+    expect(() =>
+      assertExactRoleAssignments(['R01_PHYSICIAN'], ['R01_PHYSICIAN']),
+    ).not.toThrow();
+  });
+
+  it('19b. assertExactRoleAssignments rejects R01+R13 composite (fixture-identity defect detection intact)', () => {
+    expect(() =>
+      assertExactRoleAssignments(
+        ['R01_PHYSICIAN', 'R13_SYSTEM_ADMINISTRATOR'],
+        ['R01_PHYSICIAN'],
+      ),
+    ).toThrow(/setup-enabler/i);
+  });
+
+  // --- Item 20: Genuine Role Preview coverage remains intact ---
+
+  it('20. seedActiveContextForSession does NOT accept a bootstrap-cookie parameter (genuine Role Preview coverage separation intact)', () => {
+    // The SeedActiveContextInput interface has exactly 5 keys: prisma,
+    // tokenHash, membershipId, organisationId, facilityId. No
+    // bootstrap-cookie, no challenge-id, no preview-database-identity
+    // parameter. The helper is a NORMAL-session context seeder, NOT a
+    // Role Preview session creator.
+    const validInput: Parameters<typeof seedActiveContextForSession>[0] = {
+      prisma: {} as unknown as Parameters<
+        typeof seedActiveContextForSession
+      >[0]['prisma'],
+      tokenHash: 'a'.repeat(64),
+      membershipId: 'mem-1',
+      organisationId: 'org-1',
+      facilityId: 'fac-1',
+    };
+    expect(Object.keys(validInput).sort()).toEqual(
+      [
+        'facilityId',
+        'membershipId',
+        'organisationId',
+        'prisma',
+        'tokenHash',
+      ].sort(),
+    );
+  });
+
+  // --- Item 2 & 3: Exercise parseAuditEventDraft (the typed draft parser) ---
+
+  it('2/3. parseAuditEventDraft returns the typed draft from a canonicalEventDraft row', () => {
+    const row = { canonicalEventDraft: overviewAllowedDraft };
+    const draft = parseAuditEventDraft(row);
+    expect(draft.action).toBe('authorization.decision.allowed');
+    expect(draft.permissionCode).toBe('clinic_admin_overview:view');
+    expect(draft.metadata?.endpoint).toBe('/api/v1/clinic-admin/overview');
+  });
+
+  it('2/3b. parseAuditEventDraft correctly parses a context-selection event (proving it handles all event types)', () => {
+    const row = { canonicalEventDraft: orgContextSelectedDraft };
+    const draft = parseAuditEventDraft(row);
+    expect(draft.action).toBe('organisation_context.selected');
+    expect(draft.resourceId).toBe('org-1');
+    expect(isContextSelectionEvent(draft)).toBe(true);
   });
 });

@@ -42,6 +42,11 @@ import {
   seedActiveContextForSession,
   computeSessionTokenHash,
   assertExactRoleAssignments,
+  parseAuditEventDraft,
+  isOverviewAuthorizationAllowed,
+  isOverviewViewed,
+  isContextSelectionEvent,
+  type AuditEventDraft,
 } from './_clinic-admin-test-helpers.js';
 
 /**
@@ -63,9 +68,15 @@ import {
  * 8. Missing active membership returns HTTP 403.
  * 9. Missing active organisation returns HTTP 403.
  * 10. Missing active facility returns HTTP 403.
- * 11. Organisation from another tenant fails closed.
- * 12. Facility from another tenant fails closed.
- * 13. Facility belonging to another organisation in the same tenant fails closed.
+ * 11. Organisation from another tenant fails closed (endpoint scenario:
+ *     the service's tenant-scoped organisation lookup returns null).
+ * 12. Database rejects assigning a cross-tenant facility to the active
+ *     organisation (database-integrity assertion: the compound FK
+ *     `auth_sessions_active_facility_organisation_fkey` prevents the
+ *     state from existing; no endpoint request occurs).
+ * 13. Database rejects assigning a facility from another organisation
+ *     in the same tenant (database-integrity assertion: the same
+ *     compound FK; no endpoint request occurs).
  * 14. Query-string tenant identifiers cannot override session context.
  * 15. Query-string organisation identifiers cannot override session context.
  * 16. Query-string facility identifiers cannot override session context.
@@ -86,10 +97,26 @@ import {
  *     the real AuthorizationGuard. It does NOT claim to be a Role
  *     Preview test.)
  * 20. Platform Super Admin is never converted to Clinic Administrator.
- * 21. The correct audit event or events are produced.
+ * 21. The correct audit event or events are produced (filtered to only
+ *     Overview-request events via an audit-outbox baseline; setup
+ *     context-selection events are excluded).
  * 22. Failed requests do not emit a false successful-view event.
- * 23. No sensitive values appear in the audit metadata.
+ * 23. No sensitive values appear in the Overview audit metadata
+ *     (inspects only Overview-request events; setup events with their
+ *     legitimate `resourceId` fields are excluded by the baseline).
  * 24. Database cleanup leaves no cross-test contamination.
+ *
+ * Scenario types:
+ * - Endpoint scenarios (1–11, 14–22, 24): issue a real HTTP request to
+ *   `GET /api/v1/clinic-admin/overview` and assert the response and/or
+ *   audit events.
+ * - Database-integrity scenarios (12, 13): assert that the compound
+ *   foreign key `auth_sessions_active_facility_organisation_fkey`
+ *   rejects structurally impossible session states at the database
+ *   level. No endpoint request occurs because the database prevents
+ *   the state from existing. These scenarios honestly classify that
+ *   the compound FK — not the Overview service — is the authoritative
+ *   fail-closed boundary for these invariants.
  *
  * Per the audit-semantics restoration task Phase 4, these tests
  * require PostgreSQL 17. When PostgreSQL 17 is unavailable locally,
@@ -695,6 +722,58 @@ async function assertNoOverviewViewedEvent(): Promise<void> {
   expect(viewedEvents).toHaveLength(0);
 }
 
+/**
+ * Record the current set of audit-outbox row IDs as a baseline. After
+ * the Overview request, {@link fetchNewAuditEvents} returns only events
+ * whose ID is NOT in this baseline — i.e. events emitted by the
+ * Overview request itself, excluding setup events from context-selection
+ * endpoints.
+ *
+ * This is the structural fix for tests 21 and 23: the previous tests
+ * inspected ALL undelivered audit outbox events (including setup events
+ * from `loginAndSelectContext`), which caused test 21 to select a
+ * `context:select` event instead of the Overview event, and test 23 to
+ * inspect an `organisation_context.selected` event whose `resourceId`
+ * legitimately contains the organisation ID.
+ *
+ * Usage:
+ *   const baseline = await recordAuditBaseline();
+ *   await request(server).get('/api/v1/clinic-admin/overview')...
+ *   const newEvents = await fetchNewAuditEvents(baseline);
+ */
+async function recordAuditBaseline(): Promise<Set<string>> {
+  const rows = await prisma.auditOutboxEvent.findMany({
+    where: { deliveredAt: null },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * Fetch all undelivered audit-outbox events whose ID is NOT in the
+ * supplied baseline set. Returns the typed {@link AuditEventDraft}
+ * for each row.
+ *
+ * @param baseline The baseline set from {@link recordAuditBaseline}.
+ * @returns Array of typed audit-event drafts, filtered to only
+ *   events emitted after the baseline was recorded.
+ */
+async function fetchNewAuditEvents(
+  baseline: Set<string>,
+): Promise<
+  readonly { readonly rowId: string; readonly draft: AuditEventDraft }[]
+> {
+  const rows = await prisma.auditOutboxEvent.findMany({
+    where: { deliveredAt: null },
+  });
+  return rows
+    .filter((r) => !baseline.has(r.id))
+    .map((r) => ({
+      rowId: r.id,
+      draft: parseAuditEventDraft(r),
+    }));
+}
+
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
@@ -1181,13 +1260,42 @@ describe('GET /api/v1/clinic-admin/overview', () => {
   });
 
   it('11. organisation from another tenant fails closed', async () => {
-    // This scenario is structurally enforced by the session-context
-    // module's PUT /context/organisation endpoint: the user cannot
-    // select an organisation from another tenant. The Clinic Admin
-    // Overview service additionally verifies the organisation belongs
-    // to the active tenant. This test verifies the service-level
-    // defence-in-depth by directly setting an invalid organisation
-    // on the session (simulating a session-tampering attack).
+    // This scenario tests the Clinic Admin Overview service's
+    // tenant-scoped organisation lookup. The service resolves the
+    // active organisation via `organisations.findById(tenantId,
+    // organisationId)` (line 182 of clinic-admin-overview.service.ts).
+    // When the active organisation belongs to a DIFFERENT tenant,
+    // the tenant-scoped lookup returns null, and the service throws
+    // `clinicAdminOverviewContextRequired()`.
+    //
+    // Database-constraint analysis: the compound foreign key
+    // `auth_sessions_active_facility_organisation_fkey` enforces
+    // that `(active_facility_id, active_organisation_id)` matches
+    // `facilities(id, organisation_id)`. Setting ONLY
+    // `activeOrganisationId` to ctx2's org while keeping
+    // `activeFacilityId` as ctx's facility would violate this
+    // compound FK (ctx's facility does not belong to ctx2's org).
+    // Setting `activeFacilityId = null` would pass the compound FK
+    // (PostgreSQL treats it as unenforced when a column is NULL),
+    // but the service's step-2 null-check (line 151-156) would
+    // throw before reaching the tenant-scoped organisation lookup
+    // at step 5 — testing the "missing facility" branch, NOT the
+    // "cross-tenant organisation" branch.
+    //
+    // The ONLY representable state that reaches the intended
+    // service branch is to set BOTH `activeOrganisationId` and
+    // `activeFacilityId` to ctx2's values. The pair
+    // `(ctx2.facilityId, ctx2.organisationId)` exists in
+    // `facilities(id, organisation_id)`, so the compound FK passes.
+    // The service then:
+    //   1. Step 2: all three context dimensions non-null → OK.
+    //   2. Step 3: active membership (ctx.membershipId) is found in
+    //      the user's memberships → OK. tenantId = ctx.tenantId.
+    //   3. Step 5: `organisations.findById(ctx.tenantId,
+    //      ctx2.organisationId)` returns null (ctx2's org belongs to
+    //      ctx2's tenant, NOT ctx's tenant).
+    //   4. organisation === null → throw contextRequired.
+    // The intended branch IS reached.
     const ctx = await bootstrapUserAndContext(
       'cross-tenant@example.invalid',
       'Cross Tenant Admin',
@@ -1210,10 +1318,17 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
-    // Tamper with the session: set activeOrganisationId to ctx2's org.
+    // Tamper with the session: set BOTH activeOrganisationId AND
+    // activeFacilityId to ctx2's values. This is the only
+    // representable cross-tenant organisation state that passes the
+    // compound FK AND reaches the service's tenant-scoped
+    // organisation lookup (step 5).
     await prisma.authSession.updateMany({
       where: { userId: ctx.userId },
-      data: { activeOrganisationId: ctx2.organisationId },
+      data: {
+        activeOrganisationId: ctx2.organisationId,
+        activeFacilityId: ctx2.facilityId,
+      },
     });
 
     // The Overview guard ALLOWS (R09 has the permission); the
@@ -1231,7 +1346,29 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     parseClinicAdminOverviewErrorResponse(response.body);
   });
 
-  it('12. facility from another tenant fails closed', async () => {
+  it('12. database rejects assigning a cross-tenant facility to the active organisation', async () => {
+    // Database-integrity assertion (NOT an endpoint fail-closed test).
+    //
+    // The compound foreign key `auth_sessions_active_facility_organisation_fkey`
+    // enforces that `(active_facility_id, active_organisation_id)` matches
+    // `facilities(id, organisation_id)`. Setting `activeFacilityId` to
+    // ctx2's facility (from another tenant) while keeping
+    // `activeOrganisationId` as ctx's organisation violates this
+    // constraint because ctx2's facility does not belong to ctx's
+    // organisation.
+    //
+    // This state is STRUCTURALLY IMPOSSIBLE — PostgreSQL rejects the
+    // UPDATE before the application can observe it. There is no
+    // legitimate distinct endpoint state to test for "cross-tenant
+    // facility with the current active organisation" because the
+    // compound FK prevents that state from ever existing. Changing
+    // both `activeOrganisationId` and `activeFacilityId` to ctx2's
+    // values would duplicate the cross-tenant-organisation scenario
+    // already covered by test 11.
+    //
+    // This test asserts the database constraint itself is the
+    // authoritative fail-closed boundary. The test does NOT call
+    // the Overview endpoint because no endpoint request occurs.
     const ctx = await bootstrapUserAndContext(
       'cross-tenant-fac@example.invalid',
       'Cross Tenant Fac Admin',
@@ -1253,26 +1390,66 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
-    // Tamper with the session: set activeFacilityId to ctx2's facility.
-    await prisma.authSession.updateMany({
-      where: { userId: ctx.userId },
-      data: { activeFacilityId: ctx2.facilityId },
-    });
-
-    // Same as test #11: the guard allows, the service's
-    // tenant-scoped facility lookup returns null (cross-tenant),
-    // the service throws `clinicAdminOverviewContextRequired()`.
-    const before = await countOverviewAuthorizationAuditEvents();
-    const response = await request(server)
+    // Verify the original valid session works before the mutation
+    // attempt.
+    await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
-      .expect(403);
-    await assertOverviewAllowedAndReached(before);
+      .expect(200);
 
-    parseClinicAdminOverviewErrorResponse(response.body);
+    // Attempt to set activeFacilityId to ctx2's facility (cross-tenant)
+    // while keeping activeOrganisationId as ctx's organisation. This
+    // must fail because the pair (ctx2.facilityId, ctx.organisationId)
+    // does not exist in facilities(id, organisation_id).
+    await expect(
+      prisma.$executeRaw`
+        UPDATE auth_sessions
+        SET active_facility_id = ${ctx2.facilityId}::uuid
+        WHERE user_id = ${ctx.userId}::uuid
+      `,
+    ).rejects.toThrow(
+      /foreign key constraint|23503|violates foreign key constraint/,
+    );
+
+    // Verify the session remains unchanged — the active facility is
+    // still ctx's facility (the UPDATE was rejected).
+    const session = await prisma.authSession.findFirst({
+      where: { userId: ctx.userId },
+    });
+    expect(session).not.toBeNull();
+    expect(session!.activeFacilityId).toBe(ctx.facilityId);
+    expect(session!.activeOrganisationId).toBe(ctx.organisationId);
+
+    // Verify the original valid session still works after the rejected
+    // mutation.
+    await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
   });
 
-  it('13. facility belonging to another organisation in the same tenant fails closed', async () => {
+  it('13. database rejects assigning a facility from another organisation in the same tenant', async () => {
+    // Database-integrity assertion (NOT an endpoint fail-closed test).
+    //
+    // The compound foreign key `auth_sessions_active_facility_organisation_fkey`
+    // enforces that `(active_facility_id, active_organisation_id)` matches
+    // `facilities(id, organisation_id)`. Setting `activeFacilityId` to
+    // a facility that belongs to a DIFFERENT organisation in the SAME
+    // tenant violates this constraint because the facility's
+    // `organisation_id` does not match the session's
+    // `active_organisation_id`.
+    //
+    // This state is STRUCTURALLY IMPOSSIBLE — PostgreSQL rejects the
+    // UPDATE before the application can observe it. The compound FK
+    // is the authoritative fail-closed boundary for this invariant.
+    // The Overview service's defence-in-depth check
+    // (`facility.organisationId !== organisation.id` at line 213) is
+    // a secondary backstop that can never be reached for this state
+    // because the database prevents the state from existing.
+    //
+    // This test asserts the database constraint itself. The test does
+    // NOT call the Overview endpoint because no endpoint request
+    // occurs.
     const ctx = await bootstrapUserAndContext(
       'cross-org-fac@example.invalid',
       'Cross Org Fac Admin',
@@ -1301,25 +1478,42 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
-    // Tamper with the session: set activeFacilityId to fac2 (which
-    // belongs to org2, not the active organisation).
-    await prisma.authSession.updateMany({
-      where: { userId: ctx.userId },
-      data: { activeFacilityId: fac2.id },
-    });
-
-    // The service resolves the facility (it belongs to the same
-    // tenant, so the tenant-scoped lookup succeeds) but then
-    // verifies `facility.organisationId !== organisation.id`. The
-    // service throws `clinicAdminOverviewContextRequired()`.
-    const before = await countOverviewAuthorizationAuditEvents();
-    const response = await request(server)
+    // Verify the original valid session works before the mutation
+    // attempt.
+    await request(server)
       .get('/api/v1/clinic-admin/overview')
       .set('Cookie', cookie)
-      .expect(403);
-    await assertOverviewAllowedAndReached(before);
+      .expect(200);
 
-    parseClinicAdminOverviewErrorResponse(response.body);
+    // Attempt to set activeFacilityId to fac2 (which belongs to org2,
+    // not the active organisation). This must fail because the pair
+    // (fac2.id, ctx.organisationId) does not exist in
+    // facilities(id, organisation_id).
+    await expect(
+      prisma.$executeRaw`
+        UPDATE auth_sessions
+        SET active_facility_id = ${fac2.id}::uuid
+        WHERE user_id = ${ctx.userId}::uuid
+      `,
+    ).rejects.toThrow(
+      /foreign key constraint|23503|violates foreign key constraint/,
+    );
+
+    // Verify the session remains unchanged — the active facility is
+    // still ctx's facility (the UPDATE was rejected).
+    const session = await prisma.authSession.findFirst({
+      where: { userId: ctx.userId },
+    });
+    expect(session).not.toBeNull();
+    expect(session!.activeFacilityId).toBe(ctx.facilityId);
+    expect(session!.activeOrganisationId).toBe(ctx.organisationId);
+
+    // Verify the original valid session still works after the rejected
+    // mutation.
+    await request(server)
+      .get('/api/v1/clinic-admin/overview')
+      .set('Cookie', cookie)
+      .expect(200);
   });
 
   it('14. query-string tenant identifiers cannot override session context', async () => {
@@ -1756,6 +1950,18 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    // Record the audit-outbox baseline AFTER setup. The setup
+    // (loginAndSelectContext) emits context-selection audit events
+    // (`authorization.decision.allowed` with permissionCode
+    // `context:select`, `organisation_context.selected`, etc.).
+    // The previous version of this test inspected ALL undelivered
+    // events and used `drafts.find(d => d.action ===
+    // 'authorization.decision.allowed')` without filtering by
+    // permissionCode — the first match was a setup event with
+    // `permissionCode = 'context:select'`, not the Overview event.
+    // The baseline + new-events filter structurally excludes all
+    // setup events.
+    const baseline = await recordAuditBaseline();
     const before = await countOverviewAuthorizationAuditEvents();
     await request(server)
       .get('/api/v1/clinic-admin/overview')
@@ -1763,37 +1969,41 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .expect(200);
     await assertOverviewSucceededAndReached(before);
 
-    // Verify the audit outbox contains the expected events.
-    // The guard emits `authorization.decision.allowed` (category
-    // `authorization`), and the service emits
-    // `clinic_admin.overview.viewed` (category `facility_context`).
-    const outboxRows = await prisma.auditOutboxEvent.findMany({
-      where: { deliveredAt: null },
-    });
-    const drafts = outboxRows.map(
-      (r) =>
-        r.canonicalEventDraft as {
-          action: string;
-          category: string;
-          permissionCode?: string;
-        },
+    // Fetch only NEW audit events (emitted by the Overview request).
+    const newEvents = await fetchNewAuditEvents(baseline);
+
+    // Select the Overview authorization-allowed event using the
+    // typed filter. The filter matches on ALL of: action,
+    // permissionCode, endpoint, method, AND actorId. A setup
+    // `context:select` event cannot satisfy this filter because
+    // its permissionCode is `context:select` (not
+    // `clinic_admin_overview:view`) and its endpoint is
+    // `/api/v1/context/...` (not `/api/v1/clinic-admin/overview`).
+    const allowedEvents = newEvents.filter((e) =>
+      isOverviewAuthorizationAllowed(e.draft, ctx.userId),
+    );
+    expect(allowedEvents).toHaveLength(1);
+    expect(allowedEvents[0]!.draft.permissionCode).toBe(
+      'clinic_admin_overview:view',
     );
 
-    // The guard's `authorization.decision.allowed` event MUST be
-    // present (with permissionCode='clinic_admin_overview:view').
-    const allowedEvent = drafts.find(
-      (d) => d.action === 'authorization.decision.allowed',
+    // Select the Overview viewed event using the typed filter.
+    // The filter matches on action, category, AND actorId.
+    const viewedEvents = newEvents.filter((e) =>
+      isOverviewViewed(e.draft, ctx.userId),
     );
-    expect(allowedEvent).toBeDefined();
-    expect(allowedEvent!.permissionCode).toBe('clinic_admin_overview:view');
+    expect(viewedEvents).toHaveLength(1);
+    expect(viewedEvents[0]!.draft.category).toBe('facility_context');
 
-    // The service's `clinic_admin.overview.viewed` event MUST be
-    // present (mapped to facility_context category).
-    const viewedEvent = drafts.find(
-      (d) => d.action === 'clinic_admin.overview.viewed',
+    // Defence-in-depth: prove that no context-selection event can
+    // satisfy either Overview filter. Among the new events, none
+    // should be a context-selection event (the baseline excluded
+    // setup events; the Overview request does not emit
+    // context-selection events).
+    const contextSelectInNew = newEvents.filter((e) =>
+      isContextSelectionEvent(e.draft),
     );
-    expect(viewedEvent).toBeDefined();
-    expect(viewedEvent!.category).toBe('facility_context');
+    expect(contextSelectInNew).toHaveLength(0);
   });
 
   it('22. failed requests do NOT emit a false successful-view event', async () => {
@@ -1856,7 +2066,7 @@ describe('GET /api/v1/clinic-admin/overview', () => {
     expect(deniedEvent).toBeDefined();
   });
 
-  it('23. no sensitive values appear in the audit metadata', async () => {
+  it('23. no sensitive values appear in the Overview audit metadata', async () => {
     const ctx = await bootstrapUserAndContext(
       'sensitive@example.invalid',
       'Sensitive Admin',
@@ -1871,6 +2081,30 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       ctx.facilityId,
     );
 
+    // Record the audit-outbox baseline AFTER setup. The setup
+    // (loginAndSelectContext) emits context-selection audit events
+    // including `organisation_context.selected` whose `resourceId`
+    // legitimately contains the organisation ID, and
+    // `facility_context.selected` whose `resourceId` legitimately
+    // contains the facility ID. The previous version of this test
+    // inspected ALL undelivered events and asserted none contained
+    // `ctx.organisationId` — the assertion failed on the setup
+    // `organisation_context.selected` event whose `resourceId` IS
+    // `ctx.organisationId`.
+    //
+    // The corrected test inspects ONLY the events emitted by the
+    // Overview request (filtered via the baseline + new-events
+    // approach). The Overview events are:
+    //   - `authorization.decision.allowed` with metadata
+    //     `{ endpoint: '/api/v1/clinic-admin/overview', method: 'GET' }`
+    //   - `clinic_admin.overview.viewed` with metadata
+    //     `{ endpoint: 'clinic_admin_overview_view' }`
+    // Neither event carries display names, organisation IDs, facility
+    // IDs, or business payload in its metadata. The standard audit
+    // envelope fields (actorId, sessionId, tenantId, permissionCode,
+    // roleCodes) are permitted — the assertion checks only that the
+    // Overview metadata does not contain the sensitive values.
+    const baseline = await recordAuditBaseline();
     const before = await countOverviewAuthorizationAuditEvents();
     await request(server)
       .get('/api/v1/clinic-admin/overview')
@@ -1878,26 +2112,58 @@ describe('GET /api/v1/clinic-admin/overview', () => {
       .expect(200);
     await assertOverviewSucceededAndReached(before);
 
-    const outboxRows = await prisma.auditOutboxEvent.findMany({
-      where: { deliveredAt: null },
-    });
-    for (const row of outboxRows) {
-      const draft = row.canonicalEventDraft as {
-        action: string;
-        metadata: unknown;
-        newState: unknown;
-        previousState: unknown;
-      };
-      const json = JSON.stringify(draft);
-      // The audit event MUST NOT contain display names, UUIDs (beyond
-      // the standard actor/session/tenant fields), or business payload.
+    // Fetch only NEW audit events (emitted by the Overview request).
+    const newEvents = await fetchNewAuditEvents(baseline);
+
+    // Filter to only Overview-related events: the guard's
+    // authorization-allowed event and the service's viewed event.
+    // Setup events (context-selection) are excluded by the baseline.
+    const overviewEvents = newEvents.filter(
+      (e) =>
+        isOverviewAuthorizationAllowed(e.draft, ctx.userId) ||
+        isOverviewViewed(e.draft, ctx.userId),
+    );
+    // The Overview request must have produced at least the two
+    // expected events.
+    expect(overviewEvents.length).toBeGreaterThanOrEqual(2);
+
+    // Assert that none of the Overview events contain sensitive
+    // values. The approved boundary is:
+    //   - Standard audit envelope (actorId, sessionId, tenantId,
+    //     permissionCode, roleCodes, requestId, correlationId,
+    //     ipAddress, userAgent, scope, action, outcome, source) —
+    //     permitted.
+    //   - Resource identifiers (resourceId) — NOT present in Overview
+    //     events (Overview events do not carry a resourceId).
+    //   - Event-specific metadata — Overview events only carry
+    //     `{ endpoint, method }` or `{ endpoint: 'clinic_admin_overview_view' }`.
+    //     No display names, no organisation ID, no facility ID.
+    //   - Sensitive business payload — NOT present in any audit event.
+    for (const event of overviewEvents) {
+      const json = JSON.stringify(event.draft);
+      // Display names MUST NOT appear in Overview event metadata.
       expect(json).not.toContain('Tenant Sensitive');
       expect(json).not.toContain('Organisation Tenant Sensitive');
       expect(json).not.toContain('Facility Tenant Sensitive');
       expect(json).not.toContain('Sensitive Admin');
+      // Organisation and facility identifiers MUST NOT appear in
+      // Overview event metadata. (The standard envelope's tenantId
+      // IS permitted, but organisationId and facilityId are NOT
+      // standard envelope fields and must not appear in Overview
+      // events.)
       expect(json).not.toContain(ctx.organisationId);
       expect(json).not.toContain(ctx.facilityId);
     }
+
+    // Defence-in-depth: prove that the test does NOT inspect
+    // unrelated setup events. The setup events are in the baseline
+    // and are NOT in `newEvents`. Confirm that the context-selection
+    // events (which DO legitimately carry resourceId) are absent
+    // from the inspected set.
+    const setupEventsInNew = newEvents.filter((e) =>
+      isContextSelectionEvent(e.draft),
+    );
+    expect(setupEventsInNew).toHaveLength(0);
   });
 
   it('24. database cleanup leaves no cross-test contamination', async () => {

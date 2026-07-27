@@ -787,3 +787,200 @@ export function assertExactRoleAssignments(
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Audit-event filtering helpers (Phase 4/5 correction for tests 21 and 23)
+// ---------------------------------------------------------------------------
+//
+// The audit-outbox contains ALL undelivered audit events for the current
+// test, including setup events from the context-selection endpoints
+// (`PUT /api/v1/context/tenant`, `PUT /api/v1/context/organisation`,
+// `PUT /api/v1/context/facility`). These setup events emit:
+//
+//   - `authorization.decision.allowed` with `permissionCode = 'context:select'`
+//     (or `'context:select_organisation'`, `'context:select_facility'`)
+//   - `tenant_context.selected` with `resourceId = membershipId`
+//   - `organisation_context.selected` with `resourceId = organisationId`
+//   - `facility_context.selected` with `resourceId = facilityId`
+//
+// The Overview request emits:
+//
+//   - `authorization.decision.allowed` with `permissionCode = 'clinic_admin_overview:view'`
+//     and `metadata.endpoint = '/api/v1/clinic-admin/overview'`
+//   - `clinic_admin.overview.viewed` with `metadata.endpoint = 'clinic_admin_overview_view'`
+//
+// The previous test 21 used `drafts.find(d => d.action === 'authorization.decision.allowed')`
+// WITHOUT filtering by permissionCode, endpoint, method, or actorId. The
+// first matching event was a setup `authorization.decision.allowed` with
+// `permissionCode = 'context:select'`, not the Overview event. The test
+// then asserted `allowedEvent.permissionCode === 'clinic_admin_overview:view'`
+// which failed.
+//
+// The previous test 23 iterated over ALL undelivered events (including setup
+// events) and asserted none contained `ctx.organisationId`. The setup event
+// `organisation_context.selected` legitimately carries `resourceId = organisationId`,
+// causing the assertion to fail on a non-Overview event.
+//
+// The correction: record a baseline of audit-outbox row IDs AFTER setup,
+// call the Overview endpoint, then inspect ONLY new events (not in the
+// baseline). The typed filters below provide exact matching by action,
+// permissionCode, endpoint, method, category, and actorId.
+
+/**
+ * The typed shape of a `canonicalEventDraft` column value. The draft is
+ * stored as JSONB in `audit_outbox_events.canonical_event_draft`. The
+ * fields listed here are the ones the filters inspect; other fields
+ * (outcome, source, reasonCode, requestId, correlationId, ipAddress,
+ * userAgent, scope, timestamp) are present but not filtered on.
+ */
+export interface AuditEventDraft {
+  readonly action: string;
+  readonly category?: string;
+  readonly permissionCode?: string;
+  readonly actorId?: string;
+  readonly sessionId?: string;
+  readonly tenantId?: string | null;
+  readonly roleCodes?: readonly string[];
+  readonly resourceId?: string;
+  readonly outcome?: string;
+  readonly reasonCode?: string;
+  readonly metadata?: {
+    readonly endpoint?: string;
+    readonly method?: string;
+    readonly [key: string]: unknown;
+  };
+}
+
+/**
+ * Parse a `canonicalEventDraft` JSON value into the typed
+ * {@link AuditEventDraft} shape. The cast is safe because the
+ * production audit helper always writes a well-formed JSON object;
+ * the typed interface simply narrows the fields the filters inspect.
+ *
+ * @param row The audit-outbox row (or any object with a
+ *   `canonicalEventDraft` property).
+ * @returns The typed draft.
+ */
+export function parseAuditEventDraft(row: {
+  readonly canonicalEventDraft: unknown;
+}): AuditEventDraft {
+  return row.canonicalEventDraft as AuditEventDraft;
+}
+
+/**
+ * Determine whether an audit-event draft is the Overview endpoint's
+ * `authorization.decision.allowed` event.
+ *
+ * The match is exact on ALL of:
+ *   - `action === 'authorization.decision.allowed'`
+ *   - `permissionCode === 'clinic_admin_overview:view'`
+ *   - `metadata.endpoint === '/api/v1/clinic-admin/overview'`
+ *   - `metadata.method === 'GET'`
+ *   - `actorId === expectedActorId`
+ *
+ * A setup `authorization.decision.allowed` event (from a context-selection
+ * endpoint) has `permissionCode = 'context:select'` and
+ * `metadata.endpoint = '/api/v1/context/...'`, so this filter returns
+ * `false` for it. This is the structural fix for test 21's defect: the
+ * filter cannot select a `context:select` event.
+ *
+ * @param draft The typed audit-event draft.
+ * @param expectedActorId The userId of the tested user.
+ * @returns `true` if the draft matches ALL five criteria.
+ */
+export function isOverviewAuthorizationAllowed(
+  draft: AuditEventDraft,
+  expectedActorId: string,
+): boolean {
+  return (
+    draft.action === 'authorization.decision.allowed' &&
+    draft.permissionCode === 'clinic_admin_overview:view' &&
+    draft.metadata?.endpoint === '/api/v1/clinic-admin/overview' &&
+    draft.metadata?.method === 'GET' &&
+    draft.actorId === expectedActorId
+  );
+}
+
+/**
+ * Determine whether an audit-event draft is the Overview service's
+ * `clinic_admin.overview.viewed` event.
+ *
+ * The match is exact on ALL of:
+ *   - `action === 'clinic_admin.overview.viewed'`
+ *   - `category === 'facility_context'`
+ *   - `actorId === expectedActorId`
+ *
+ * @param draft The typed audit-event draft.
+ * @param expectedActorId The userId of the tested user.
+ * @returns `true` if the draft matches ALL three criteria.
+ */
+export function isOverviewViewed(
+  draft: AuditEventDraft,
+  expectedActorId: string,
+): boolean {
+  return (
+    draft.action === 'clinic_admin.overview.viewed' &&
+    draft.category === 'facility_context' &&
+    draft.actorId === expectedActorId
+  );
+}
+
+/**
+ * Determine whether an audit-event draft is a context-selection setup
+ * event (emitted by `PUT /api/v1/context/tenant`,
+ * `PUT /api/v1/context/organisation`, or `PUT /api/v1/context/facility`).
+ *
+ * The match is on:
+ *   - `action === 'authorization.decision.allowed'` AND
+ *   - `permissionCode` is one of `'context:select'`,
+ *     `'context:select_organisation'`, `'context:select_facility'`
+ *
+ * OR:
+ *   - `action` is one of `'tenant_context.selected'`,
+ *     `'organisation_context.selected'`, `'facility_context.selected'`
+ *
+ * This filter is used in regression tests to PROVE that the
+ * {@link isOverviewAuthorizationAllowed} and {@link isOverviewViewed}
+ * filters cannot match these setup events.
+ *
+ * @param draft The typed audit-event draft.
+ * @returns `true` if the draft is a context-selection setup event.
+ */
+export function isContextSelectionEvent(draft: AuditEventDraft): boolean {
+  if (
+    draft.action === 'authorization.decision.allowed' &&
+    (draft.permissionCode === 'context:select' ||
+      draft.permissionCode === 'context:select_organisation' ||
+      draft.permissionCode === 'context:select_facility')
+  ) {
+    return true;
+  }
+  return (
+    draft.action === 'tenant_context.selected' ||
+    draft.action === 'organisation_context.selected' ||
+    draft.action === 'facility_context.selected'
+  );
+}
+
+/**
+ * The exact constraint name of the compound foreign key that enforces
+ * the active facility belongs to the active organisation on
+ * `auth_sessions`. This constant is asserted by the database-integrity
+ * tests (corrected tests 12 and 13) to prove WHICH constraint rejected
+ * the invalid state.
+ */
+export const AUTH_SESSIONS_FACILITY_ORGANISATION_FK =
+  'auth_sessions_active_facility_organisation_fkey';
+
+/**
+ * Serialise an audit-event draft to a JSON string for sensitive-value
+ * scanning. The serialisation includes ALL fields (standard envelope,
+ * resource identifiers, event-specific metadata) so the scan covers
+ * the complete event payload.
+ *
+ * @param draft The typed audit-event draft.
+ * @returns The JSON string representation.
+ */
+export function serialiseAuditEventDraft(draft: AuditEventDraft): string {
+  return JSON.stringify(draft);
+}
