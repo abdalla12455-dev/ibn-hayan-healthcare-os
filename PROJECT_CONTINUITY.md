@@ -3916,3 +3916,130 @@ The semantic intent — "denied events do not leak role information to the denie
 **Local/remote divergence before commit:** 0 ahead, 0 behind. After commit: 1 ahead, 0 behind.
 
 **Immediate next task:** Generate a fresh temporary deploy key for one controlled corrective push, verify local and remote task SHAs match exactly, then require GitHub Actions to execute both the Role Preview integration suite (53 tests, 0 failures expected) and the Clinic Admin integration suite (24 tests, 0 failures expected) with zero setup failures, zero unhandled errors, and no teardown timeout before merge. The Pull Request must NOT be merged until both required jobs (`static-and-build`, `postgresql17-validation`) are green on the new commit.
+
+---
+
+## Stage 1A: Appointments Persistence Foundation (2026-07-30)
+
+**Repository:** `https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os.git`
+**Branch:** `feat/clinic-admin-todays-appointments-v1`
+**Task ID:** stage-1a-appointments-persistence-foundation
+**Trigger:** R09 Clinic Administrator "Today's Appointments" feature implementation - Stage 1A database and persistence foundation.
+
+**Scope:** This stage implements only the database and persistence foundation required for a future read-only "Today's Appointments" feature. No API, frontend, authorization, audit integration, booking, cancellation, rescheduling, check-in, billing, Patient module, Workforce module, or appointment actions were implemented.
+
+### 1. Facility Timezone Decision
+
+**Canonical owner:** Facility-level timezone configuration.
+
+**Decision:** Added a nullable `timezone` field to the `Facility` model to store a valid IANA timezone identifier (e.g. 'Asia/Baghdad', 'Europe/London'). The field is nullable: `null` means the timezone has not been configured and must be resolved from a higher-level default (e.g. `tenant.identity.timezone` per `download/docs/03_DOMAIN/CONFIGURATION.md` Section 3.1 or UTC). The application layer must validate that any stored value is a recognised IANA timezone before persisting. This field does NOT backfill existing facilities — they retain `NULL` until explicitly configured.
+
+**Rationale:** While `tenant.identity.timezone` exists at the tenant level (CONFIGURATION.md), a facility-level override is needed for multi-timezone tenants where individual facilities operate in different time zones. Missing timezone (`NULL`) is distinguishable from a configured timezone, and no hard-coded defaults (Asia/Baghdad, UTC) are used.
+
+### 2. Appointment Model and Fields
+
+**Model:** `Appointment`
+**Table:** `appointments`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Stable appointment identifier (primary key) |
+| `tenantId` | UUID | Tenant isolation boundary |
+| `organisationId` | UUID | Organisation scoping |
+| `facilityId` | UUID | Facility scoping |
+| `patientId` | UUID | Logical patient identifier (no FK to Patient module) |
+| `providerId` | UUID | Logical provider identifier (no FK to Workforce module) |
+| `scheduledStart` | Timestamptz | Scheduled start timestamp (UTC) |
+| `scheduledEnd` | Timestamptz | Scheduled end timestamp (UTC) |
+| `status` | AppointmentStatus | Canonical lifecycle status |
+| `typeCode` | VarChar(80) | Visit or appointment type code/reference |
+| `createdAt` | Timestamptz | Record creation timestamp |
+| `updatedAt` | Timestamptz | Record last update timestamp |
+
+**AppointmentStatus enum values** (from `download/docs/07_MODULES/APPOINTMENTS.md` Section 1):
+- `booked`
+- `confirmed`
+- `arrived`
+- `in_progress`
+- `completed`
+- `cancelled`
+- `no_show`
+
+### 3. Relationships and Indexes
+
+**No foreign keys created to Patient or Workforce module tables.** The `patientId` and `providerId` fields are logical identifiers only, referencing the identity owned by those future modules.
+
+**Indexes added (all following repository naming convention `table_column_idx`):**
+- `appointments_tenant_id_idx` — tenant isolation
+- `appointments_tenant_id_organisation_id_idx` — tenant + organisation filtering
+- `appointments_tenant_id_facility_id_idx` — tenant + facility filtering
+- `appointments_tenant_id_scheduled_start_idx` — tenant + date range queries
+- `appointments_tenant_id_facility_id_scheduled_start_idx` — facility-day read query (primary read path)
+
+### 4. Migration
+
+**Migration:** `20260730000000_appointments_persistence_foundation`
+**Location:** `apps/api/prisma/migrations/`
+**Type:** Non-destructive. No backfill. No data modification.
+
+**Changes:**
+1. Added nullable `timezone` column to `facilities` table
+2. Created `AppointmentStatus` enum
+3. Created `appointments` table with 5 indexes
+
+### 5. Validation Results
+
+| Validation | Result |
+|------------|--------|
+| `prisma format` | PASS |
+| `prisma validate` | PASS |
+| `prisma generate` | PASS |
+| `pnpm run typecheck` | PASS |
+| `pnpm run lint` | PASS (0 errors, 0 warnings) |
+| `git diff --check` | PASS |
+
+**PostgreSQL 17 local availability:** NOT AVAILABLE. `psql`, `pg_ctl`, `initdb` not found. PostgreSQL migration and integration tests require GitHub Actions environment with PostgreSQL 17.
+
+### 6. Files Created
+
+- `apps/api/prisma/migrations/20260730000000_appointments_persistence_foundation/migration.sql` — non-destructive migration SQL
+
+### 7. Files Modified
+
+- `apps/api/prisma/schema.prisma` — added `timezone` field to Facility model, added `AppointmentStatus` enum, added `Appointment` model
+- `PROJECT_CONTINUITY.md` — this entry
+
+### 8. Files Deleted
+
+None.
+
+### 9. Pre-existing Problems
+
+- PostgreSQL 17 not available locally for migration execution and integration testing
+- Typecheck errors in `role-preview.service.ts` (implicit `any` types) — pre-existing, not introduced by this change
+
+### 10. Known Limitations
+
+- No API endpoints exist yet for appointment CRUD operations
+- No authorization guards for appointment access
+- No audit events for appointment lifecycle transitions
+- No patient or provider data is stored — only logical IDs
+- Facility timezone is nullable and requires application-layer fallback resolution
+- Migration was created manually without database comparison (due to no local PostgreSQL)
+
+### 11. Recommended Stage 1B
+
+1. Add repository/data access layer for appointments (Prisma repository)
+2. Add DTOs and domain types for appointment read operations
+3. Add API controller with read-only endpoint for "Today's Appointments"
+4. Add authorization guard for R09 Clinic Administrator role
+5. Add audit events for appointment queries (if required by audit architecture)
+
+### 12. Recovery Information
+
+**Backup branch:** None required for this non-destructive migration.
+**Rollback:** `prisma migrate rollback` or manual SQL `DROP TABLE appointments; DROP TYPE AppointmentStatus; ALTER TABLE facilities DROP COLUMN timezone;`
+
+**Latest verified commit before this edit:** `219e5170a87172a2038c90514da423da58ab0d61` on `feat/clinic-admin-todays-appointments-v1` (local and remote identical, 0 ahead, 0 behind).
+
+**Local/remote divergence before commit:** 0 ahead, 0 behind. After commit: 1 ahead, 0 behind.
