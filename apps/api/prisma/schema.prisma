@@ -255,6 +255,18 @@ enum FacilityStatus {
 /// relation is configured with `onDelete: Restrict` so that an
 /// organisation deletion that would orphan facilities is rejected
 /// even if the composite foreign key were ever dropped.
+///
+/// The `timezone` field holds a valid IANA timezone identifier (e.g.
+/// 'Asia/Baghdad', 'Europe/London') that represents the facility's
+/// local time zone. It is nullable: null means the timezone has not
+/// been configured and the facility is in a configuration-required
+/// state. Future "Today's Appointments" queries must return a
+/// configuration-required response when this field is null. No
+/// fallback to tenant timezone, UTC, server timezone, browser
+/// timezone, or any hard-coded default is applied. The application
+/// layer must validate that any stored value is a recognised IANA
+/// timezone before persisting. This field does not backfill existing
+/// rows; existing facilities retain null until explicitly configured.
 model Facility {
   id             String         @id @default(uuid()) @db.Uuid
   tenantId       String         @map("tenant_id") @db.Uuid
@@ -262,12 +274,14 @@ model Facility {
   code           String         @db.VarChar(50)
   displayName    String         @map("display_name") @db.VarChar(200)
   status         FacilityStatus @default(active)
+  timezone       String?        @map("timezone") @db.VarChar(60)
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
   organisation    Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   roleAssignments TenantRoleAssignment[] @relation("TenantRoleAssignmentScopeFacility")
   activeSessions  AuthSession[]          @relation("AuthSessionActiveFacility")
+  appointments    Appointment[]
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
@@ -692,4 +706,76 @@ model AuditOutboxEvent {
   @@index([leaseExpiresAt], map: "audit_outbox_events_lease_expires_at_idx")
   @@index([createdAt], map: "audit_outbox_events_created_at_idx")
   @@map("audit_outbox_events")
+}
+
+// ---------------------------------------------------------------------------
+// Appointment
+// ---------------------------------------------------------------------------
+
+/// Canonical appointment lifecycle statuses as defined in
+/// download/docs/07_MODULES/APPOINTMENTS.md Section 1 (lifecycle
+/// "booked, confirmed, arrived, in-progress, completed, cancelled,
+/// no-show").  These values are persisted as-is in the `status` column
+/// and are the authoritative enumeration for appointment state machine
+/// transitions.
+enum AppointmentStatus {
+  booked
+  confirmed
+  arrived
+  in_progress
+  completed
+  cancelled
+  no_show
+}
+
+/// An Appointment is the operational scheduling record for a patient
+/// encounter at a facility.  It is owned by the Scheduling bounded
+/// context (BC06) and is the persistence foundation for the R09 Clinic
+/// Administrator "Today's Appointments" read-only feature.
+///
+/// This model intentionally stores only logical identifiers (patient ID,
+/// provider ID) and does not create foreign-key references to the
+/// Patient or Workforce module tables.  Those modules own their own
+/// identity and schema; this model references their identifiers by
+/// value.  Patient names, provider names, specialties, payment status,
+/// and wait-time data are NOT stored here.
+///
+/// The `facility` relation provides Prisma query-builder convenience.
+/// The single-column foreign key is supplemented by a triple-column
+/// composite foreign key (added by the reviewed migration) that enforces
+/// at the database level that the appointment's tenant_id, organisation_id,
+/// and facility_id all match the corresponding values of the referenced
+/// facility.
+///
+/// All timestamps are stored in UTC using PostgreSQL timestamptz.
+/// The facility's local time is derived at the application layer by
+/// consulting the facility's `timezone` field; if null, the facility
+/// is in a configuration-required state and "Today's Appointments"
+/// must return an appropriate response.
+///
+/// This model does NOT backfill existing rows.  New appointments are
+/// created by application-layer logic; no seed or historical import is
+/// performed by this schema change.
+model Appointment {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  organisationId String            @map("organisation_id") @db.Uuid
+  facilityId     String            @map("facility_id") @db.Uuid
+  patientId      String            @map("patient_id") @db.Uuid
+  providerId     String            @map("provider_id") @db.Uuid
+  scheduledStart DateTime          @map("scheduled_start") @db.Timestamptz
+  scheduledEnd   DateTime          @map("scheduled_end") @db.Timestamptz
+  status         AppointmentStatus @default(booked)
+  typeCode       String            @map("type_code") @db.VarChar(80)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId], map: "appointments_tenant_id_idx")
+  @@index([tenantId, organisationId], map: "appointments_tenant_id_organisation_id_idx")
+  @@index([tenantId, facilityId], map: "appointments_tenant_id_facility_id_idx")
+  @@index([tenantId, scheduledStart], map: "appointments_tenant_id_scheduled_start_idx")
+  @@index([tenantId, facilityId, scheduledStart], map: "appointments_tenant_id_facility_id_scheduled_start_idx")
+  @@map("appointments")
 }
