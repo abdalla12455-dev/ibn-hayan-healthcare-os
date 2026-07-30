@@ -4054,33 +4054,62 @@ None.
 
 **If the migration was successfully applied:** Create a forward corrective migration rather than rewriting applied history. Do not attempt to delete or modify applied migration history.
 
-**Latest verified commit before this edit:** `219e5170a87172a2038c90514da423da58ab0d61` on `feat/clinic-admin-todays-appointments-v1` (local and remote identical, 0 ahead, 0 behind).
+**Latest verified commit before this edit:** `7f6840708cdef8d155e23d3466e968a31d4b6cfb` on `feat/clinic-admin-todays-appointments-v1` (local and remote identical, 0 ahead, 0 behind).
 
-**Local/remote divergence after Stage 1A commit:** 1 ahead, 0 behind.
+**Post-push commit SHA:** Will be recorded in the external completion report. A Git commit cannot contain its own final SHA without changing that SHA.
 
 ---
 
-## Stage 1A Corrective Alignment (2026-07-30)
+## Stage 1A Hierarchy Integrity Correction (2026-07-30)
 
-**Trigger:** Operator-corrective task to align Stage 1A with approved semantics.
+**Trigger:** Final integrity correction for Stage 1A Appointments persistence.
 
-**Corrective changes:**
+**Pre-task verification:**
+- Working tree clean
+- Required commit `7f6840708cdef8d155e23d3466e968a31d4b6cfb` confirmed
+- Branch in sync with origin (0 ahead, 0 behind)
+- Migration not applied to shared/production database
 
-1. **Facility timezone semantics:** Removed incorrect references to "tenant.identity.timezone or UTC" fallback from schema comments, migration comments, and this document. The approved semantics are: null means configuration-required state; no fallback; "Today's Appointments" must return a configuration-required response when null.
+**Root cause:**
+The previous Stage 1A implementation enforced `appointments(tenant_id, facility_id)` → `facilities(tenant_id, id)`. This protected tenant-to-facility consistency but did NOT verify that `appointments.organisation_id` matched `facilities.organisation_id`.
 
-2. **Tenant/organisation/facility integrity:** Added the repository's canonical Prisma relation to Facility and the corresponding composite foreign key via migration. This follows the pattern established by ADR-015 and enforces at the database level that the appointment's tenant matches its facility's tenant. Patient and provider identifiers remain as logical IDs with no FKs.
+**CORRECTION 1: Complete Hierarchy Integrity**
 
-3. **Index review:** Removed `facilities_timezone_idx` index. No documented query pattern requires searching facilities by timezone.
+Replaced the two-column composite foreign key with a triple-column composite foreign key:
 
-4. **Recovery documentation:** Removed invalid "prisma migrate rollback" and destructive DROP commands. Documented accurate recovery paths based on migration state.
+```
+appointments(tenant_id, organisation_id, facility_id)
+→ facilities(tenant_id, organisation_id, id)
+```
 
-5. **Validation accuracy:** Clarified that PostgreSQL 17 tests were NOT executed locally (not available in environment).
+This enforces all three ownership levels at the database level.
+
+**Removed redundant constraints:**
+- `facilities_tenant_id_id_key` — superseded by `facilities_tenant_id_organisation_id_id_key` (canonical triple-column unique)
+- `appointments_tenant_facility_fkey` — superseded by `appointments_tenant_organisation_facility_fkey` (new triple-column FK)
+
+**Constraint naming:** `appointments_tenant_organisation_facility_fkey`
+
+**Patient/Provider relationship:** Confirmed. No foreign keys to Patient or Workforce module tables. Patient and provider identifiers remain as logical IDs only.
+
+**CORRECTION 2: Continuity Accuracy**
+
+- Removed stale statement claiming "1 ahead, 0 behind" after commit
+- Recorded verified pre-task base commit: `7f6840708cdef8d155e23d3466e968a31d4b6cfb`
+- Stated that final new commit SHA is provided in external completion report
+- PostgreSQL 17 execution remains pending (not available locally)
 
 **Files modified:**
-- `apps/api/prisma/schema.prisma` — corrected timezone comments, added Facility relation and unique constraint
-- `apps/api/prisma/migrations/20260730000000_appointments_persistence_foundation/migration.sql` — corrected comments, removed timezone index, added FKs and unique constraint
+- `apps/api/prisma/schema.prisma` — removed redundant `facilities_tenant_id_id_key` unique constraint, updated Appointment model comments
+- `apps/api/prisma/migrations/20260730000000_appointments_persistence_foundation/migration.sql` — removed `facilities_tenant_id_id_key` creation and old composite FK, added triple-column `appointments_tenant_organisation_facility_fkey`
 - `PROJECT_CONTINUITY.md` — updated this entry
 
-**Validation results:** `prisma format` PASS, `prisma validate` PASS, `prisma generate` PASS, `pnpm run typecheck` PASS, `pnpm run lint` PASS (0 errors, 0 warnings), `git diff --check` PASS.
+**Files created:** None.
+
+**Files deleted:** None.
+
+**Validation (pending):** `prisma format`, `prisma validate`, `prisma generate`, `pnpm run typecheck`, `pnpm run lint`, `git diff --check`.
 
 **PostgreSQL 17 execution:** NOT AVAILABLE. Requires GitHub Actions environment.
+
+**Stage 1B, API, frontend, authorization, audit, Platform Super Admin:** NOT MODIFIED.

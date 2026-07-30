@@ -286,7 +286,6 @@ model Facility {
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
   @@unique([tenantId, organisationId, id], map: "facilities_tenant_id_organisation_id_id_key")
-  @@unique([tenantId, id], map: "facilities_tenant_id_id_key")
   @@index([tenantId], map: "facilities_tenant_id_idx")
   @@index([tenantId, organisationId], map: "facilities_tenant_id_organisation_id_idx")
   @@map("facilities")
@@ -742,9 +741,11 @@ enum AppointmentStatus {
 /// and wait-time data are NOT stored here.
 ///
 /// The `facility` relation provides Prisma query-builder convenience.
-/// The single-column foreign key is supplemented by a composite foreign
-/// key (added by the reviewed migration) that enforces at the database
-/// level that the appointment's tenant matches its facility's tenant.
+/// The single-column foreign key is supplemented by a triple-column
+/// composite foreign key (added by the reviewed migration) that enforces
+/// at the database level that the appointment's tenant_id, organisation_id,
+/// and facility_id all match the corresponding values of the referenced
+/// facility.
 ///
 /// All timestamps are stored in UTC using PostgreSQL timestamptz.
 /// The facility's local time is derived at the application layer by

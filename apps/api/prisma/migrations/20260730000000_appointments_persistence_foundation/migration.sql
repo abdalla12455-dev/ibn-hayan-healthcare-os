@@ -13,22 +13,18 @@
 --    UTC, server timezone, browser timezone, or any hard-coded default is
 --    applied. No backfill is performed; existing facilities retain NULL
 --    until explicitly configured.
--- 2. Add a unique constraint on `facilities(tenant_id, id)` to support
---    the composite foreign key from `appointments`. This unique constraint
---    is also semantically correct: a facility has one identity within
---    its tenant scope.
--- 3. Add `AppointmentStatus` enum with the canonical lifecycle values
+-- 2. Add `AppointmentStatus` enum with the canonical lifecycle values
 --    from download/docs/07_MODULES/APPOINTMENTS.md Section 1:
 --    booked, confirmed, arrived, in_progress, completed, cancelled, no_show.
--- 4. Add `appointments` table with tenant, organisation, facility scoping,
+-- 3. Add `appointments` table with tenant, organisation, facility scoping,
 --    logical patient and provider identifiers, scheduled timestamps, status,
 --    and type code. No foreign keys are created to Patient or Workforce
 --    module tables; those modules own their own identity.
--- 5. Add a single-column foreign key from `appointments.facility_id` to
---    `facilities.id` (for Prisma relation compatibility and defence-in-depth)
---    and a composite foreign key `appointments(tenant_id, facility_id)` ->
---    `facilities(tenant_id, id)` to enforce at the database level that
---    the appointment's tenant matches its facility's tenant.
+-- 4. Add foreign keys from appointments to facilities.
+--    - Single-column foreign key for Prisma relation compatibility.
+--    - Triple-column composite foreign key that enforces full hierarchy
+--      integrity: appointments(tenant_id, organisation_id, facility_id) ->
+--      facilities(tenant_id, organisation_id, id).
 --
 -- All timestamps use PostgreSQL timestamptz for UTC storage.
 -- All indexes follow the repository naming convention (table_column_idx).
@@ -41,12 +37,7 @@
 
 ALTER TABLE "facilities" ADD COLUMN "timezone" VARCHAR(60);
 
--- 2. Add unique constraint on facilities(tenant_id, id) to support the
--- composite foreign key from appointments.
-
-CREATE UNIQUE INDEX "facilities_tenant_id_id_key" ON "facilities" ("tenant_id", "id");
-
--- 3. Create AppointmentStatus enum.
+-- 2. Create AppointmentStatus enum.
 
 CREATE TYPE "AppointmentStatus" AS ENUM (
   'booked',
@@ -58,7 +49,7 @@ CREATE TYPE "AppointmentStatus" AS ENUM (
   'no_show'
 );
 
--- 4. Create appointments table.
+-- 3. Create appointments table.
 
 CREATE TABLE "appointments" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -85,15 +76,20 @@ CREATE INDEX "appointments_tenant_id_facility_id_idx" ON "appointments" ("tenant
 CREATE INDEX "appointments_tenant_id_scheduled_start_idx" ON "appointments" ("tenant_id", "scheduled_start");
 CREATE INDEX "appointments_tenant_id_facility_id_scheduled_start_idx" ON "appointments" ("tenant_id", "facility_id", "scheduled_start");
 
--- 5. Add foreign keys from appointments to facilities.
+-- 4. Add foreign keys from appointments to facilities.
 -- Single-column foreign key for Prisma relation compatibility and defence-in-depth.
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_facility_id_fkey"
   FOREIGN KEY ("facility_id") REFERENCES "facilities" ("id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
 
--- Composite foreign key: enforces that the appointment's tenant matches its facility's tenant.
--- PostgreSQL treats a composite foreign key as unenforced when any referencing column is NULL;
--- all referencing columns are NOT NULL here.
-ALTER TABLE "appointments" ADD CONSTRAINT "appointments_tenant_facility_fkey"
-  FOREIGN KEY ("tenant_id", "facility_id") REFERENCES "facilities" ("tenant_id", "id")
+-- Triple-column composite foreign key: enforces full hierarchy integrity.
+-- This constraint ensures that the appointment's tenant_id, organisation_id,
+-- and facility_id all match the corresponding values of the referenced
+-- facility. The unique constraint facilities_tenant_id_organisation_id_id_key
+-- (established in a prior migration) provides the required target-side uniqueness.
+--
+-- PostgreSQL treats a composite foreign key as unenforced when any referencing
+-- column is NULL; all referencing columns are NOT NULL here.
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_tenant_organisation_facility_fkey"
+  FOREIGN KEY ("tenant_id", "organisation_id", "facility_id") REFERENCES "facilities" ("tenant_id", "organisation_id", "id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
