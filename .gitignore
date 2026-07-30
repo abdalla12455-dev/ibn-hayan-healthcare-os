@@ -1,4 +1,7 @@
 skills/
+# Repository-level OpenHands agent skills
+!/.agents/skills/
+!/.agents/skills/**
 node_modules/
 
 # Tool invocation artifacts (not part of project deliverables)
