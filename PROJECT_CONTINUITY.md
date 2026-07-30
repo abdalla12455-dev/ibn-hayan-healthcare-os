@@ -4113,3 +4113,48 @@ This enforces all three ownership levels at the database level.
 **PostgreSQL 17 execution:** NOT AVAILABLE. Requires GitHub Actions environment.
 
 **Stage 1B, API, frontend, authorization, audit, Platform Super Admin:** NOT MODIFIED.
+
+---
+
+## OpenHands Project Skills Installation (2026-07-30)
+
+**Branch:** `chore/openhands-project-skills-v1`
+**Created from:** `origin/main` at commit `4755a43f29b81f1ab6024b1bacfc31bce7c1a0f4`
+
+**Root cause of issue:** The repository `.gitignore` contained a broad `skills/` pattern that unintentionally ignored `.agents/skills/`.
+
+**Correction:** Added narrow documented exception immediately after the `skills/` rule:
+```gitignore
+# Repository-level OpenHands agent skills
+!/.agents/skills/
+!/.agents/skills/**
+```
+
+**Skills installed:**
+1. `ibn-hayan-implementation-guardian` — Project execution and safety workflow (22 triggers)
+2. `ibn-hayan-database-tenancy` — Database, Prisma, tenancy, and data-integrity rules (17 triggers)
+3. `ibn-hayan-ui-role-rtl` — UI, role separation, Arabic RTL, English LTR rules (19 triggers)
+4. `ibn-hayan-completion-git-proof` — Completion, handoff, Git commit, and recovery workflow (22 triggers)
+
+**Validation:**
+- git check-ignore: All four skill files transitioned from ignored to tracked
+- YAML frontmatter: Valid
+- name/description/triggers: Present
+- Directory names: Match skill names
+- Secrets check: PASS (no actual credentials)
+
+**Files created:**
+- `.agents/skills/ibn-hayan-completion-git-proof/SKILL.md`
+- `.agents/skills/ibn-hayan-database-tenancy/SKILL.md`
+- `.agents/skills/ibn-hayan-implementation-guardian/SKILL.md`
+- `.agents/skills/ibn-hayan-ui-role-rtl/SKILL.md`
+
+**Files modified:**
+- `.gitignore` — added exception for `.agents/skills/`
+- `PROJECT_CONTINUITY.md` — added this entry
+
+**Application code not modified:** API, frontend, database schema, migrations, authorization, audit, dependencies, lockfiles, workflows.
+
+**Immediate next step:** Merge branch into `main` via pull request.
+
+**Recovery:** If branch needs to be discarded, simply delete it. The base commit `4755a43f29b81f1ab6024b1bacfc31bce7c1a0f4` is unchanged on `main`.
