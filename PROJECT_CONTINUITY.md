@@ -3932,9 +3932,9 @@ The semantic intent — "denied events do not leak role information to the denie
 
 **Canonical owner:** Facility-level timezone configuration.
 
-**Decision:** Added a nullable `timezone` field to the `Facility` model to store a valid IANA timezone identifier (e.g. 'Asia/Baghdad', 'Europe/London'). The field is nullable: `null` means the timezone has not been configured and must be resolved from a higher-level default (e.g. `tenant.identity.timezone` per `download/docs/03_DOMAIN/CONFIGURATION.md` Section 3.1 or UTC). The application layer must validate that any stored value is a recognised IANA timezone before persisting. This field does NOT backfill existing facilities — they retain `NULL` until explicitly configured.
+**Decision:** Added a nullable `timezone` field to the `Facility` model to store a valid IANA timezone identifier (e.g. 'Asia/Baghdad', 'Europe/London'). The field is nullable: `null` means the timezone has not been configured and the facility is in a configuration-required state. **No fallback to tenant timezone, UTC, server timezone, browser timezone, or any hard-coded default is applied.** Future "Today's Appointments" queries must return a configuration-required response when this field is null. The application layer must validate that any stored value is a recognised IANA timezone before persisting. This field does NOT backfill existing facilities — they retain `NULL` until explicitly configured.
 
-**Rationale:** While `tenant.identity.timezone` exists at the tenant level (CONFIGURATION.md), a facility-level override is needed for multi-timezone tenants where individual facilities operate in different time zones. Missing timezone (`NULL`) is distinguishable from a configured timezone, and no hard-coded defaults (Asia/Baghdad, UTC) are used.
+**Rationale:** While `tenant.identity.timezone` exists at the tenant level (CONFIGURATION.md), a facility-level override is needed for multi-timezone tenants where individual facilities operate in different time zones. Missing timezone (`NULL`) is distinguishable from a configured timezone, and no hard-coded defaults (Asia/Baghdad, UTC) are used. The application layer must handle the null state explicitly.
 
 ### 2. Appointment Model and Fields
 
@@ -3946,7 +3946,7 @@ The semantic intent — "denied events do not leak role information to the denie
 | `id` | UUID | Stable appointment identifier (primary key) |
 | `tenantId` | UUID | Tenant isolation boundary |
 | `organisationId` | UUID | Organisation scoping |
-| `facilityId` | UUID | Facility scoping |
+| `facilityId` | UUID | Facility scoping (FK to Facility) |
 | `patientId` | UUID | Logical patient identifier (no FK to Patient module) |
 | `providerId` | UUID | Logical provider identifier (no FK to Workforce module) |
 | `scheduledStart` | Timestamptz | Scheduled start timestamp (UTC) |
@@ -3967,6 +3967,12 @@ The semantic intent — "denied events do not leak role information to the denie
 
 ### 3. Relationships and Indexes
 
+**Tenant/Organisation/Facility integrity:** The Appointment model follows the repository's canonical pattern (per ADR-015) for tenancy scoping:
+- Prisma relation: `facility Facility` (single-column FK for query builder convenience)
+- Composite FK: `appointments(tenant_id, facility_id)` → `facilities(tenant_id, id)` (enforces at the database level that the appointment's tenant matches its facility's tenant)
+- Both use `ON DELETE RESTRICT ON UPDATE RESTRICT`
+- A unique constraint on `facilities(tenant_id, id)` was added to support the composite FK
+
 **No foreign keys created to Patient or Workforce module tables.** The `patientId` and `providerId` fields are logical identifiers only, referencing the identity owned by those future modules.
 
 **Indexes added (all following repository naming convention `table_column_idx`):**
@@ -3976,6 +3982,8 @@ The semantic intent — "denied events do not leak role information to the denie
 - `appointments_tenant_id_scheduled_start_idx` — tenant + date range queries
 - `appointments_tenant_id_facility_id_scheduled_start_idx` — facility-day read query (primary read path)
 
+**No `facilities_timezone_idx` index added** — no documented query pattern requires searching facilities by timezone.
+
 ### 4. Migration
 
 **Migration:** `20260730000000_appointments_persistence_foundation`
@@ -3983,9 +3991,12 @@ The semantic intent — "denied events do not leak role information to the denie
 **Type:** Non-destructive. No backfill. No data modification.
 
 **Changes:**
-1. Added nullable `timezone` column to `facilities` table
-2. Created `AppointmentStatus` enum
-3. Created `appointments` table with 5 indexes
+1. Added nullable `timezone` column to `facilities` table (no backfill)
+2. Added unique constraint on `facilities(tenant_id, id)` to support composite FK
+3. Created `AppointmentStatus` enum
+4. Created `appointments` table with 5 indexes
+5. Added single-column FK `appointments.facility_id` → `facilities.id`
+6. Added composite FK `appointments(tenant_id, facility_id)` → `facilities(tenant_id, id)`
 
 ### 5. Validation Results
 
@@ -3998,7 +4009,7 @@ The semantic intent — "denied events do not leak role information to the denie
 | `pnpm run lint` | PASS (0 errors, 0 warnings) |
 | `git diff --check` | PASS |
 
-**PostgreSQL 17 local availability:** NOT AVAILABLE. `psql`, `pg_ctl`, `initdb` not found. PostgreSQL migration and integration tests require GitHub Actions environment with PostgreSQL 17.
+**PostgreSQL 17 local availability:** NOT AVAILABLE. `psql`, `pg_ctl`, `initdb` not found. PostgreSQL migration and integration tests require GitHub Actions environment with PostgreSQL 17. **This validation was NOT executed locally.**
 
 ### 6. Files Created
 
@@ -4006,7 +4017,7 @@ The semantic intent — "denied events do not leak role information to the denie
 
 ### 7. Files Modified
 
-- `apps/api/prisma/schema.prisma` — added `timezone` field to Facility model, added `AppointmentStatus` enum, added `Appointment` model
+- `apps/api/prisma/schema.prisma` — added `timezone` field to Facility model, added `AppointmentStatus` enum, added `Appointment` model with Facility relation, added unique constraint on Facility
 - `PROJECT_CONTINUITY.md` — this entry
 
 ### 8. Files Deleted
@@ -4016,7 +4027,7 @@ None.
 ### 9. Pre-existing Problems
 
 - PostgreSQL 17 not available locally for migration execution and integration testing
-- Typecheck errors in `role-preview.service.ts` (implicit `any` types) — pre-existing, not introduced by this change
+- Pre-existing implicit `any` type errors in `role-preview.service.ts` — not introduced by this change
 
 ### 10. Known Limitations
 
@@ -4024,8 +4035,8 @@ None.
 - No authorization guards for appointment access
 - No audit events for appointment lifecycle transitions
 - No patient or provider data is stored — only logical IDs
-- Facility timezone is nullable and requires application-layer fallback resolution
-- Migration was created manually without database comparison (due to no local PostgreSQL)
+- Facility timezone is nullable and requires explicit application-layer handling when null
+- Migration was created without local PostgreSQL database comparison
 
 ### 11. Recommended Stage 1B
 
@@ -4037,9 +4048,39 @@ None.
 
 ### 12. Recovery Information
 
-**Backup branch:** None required for this non-destructive migration.
-**Rollback:** `prisma migrate rollback` or manual SQL `DROP TABLE appointments; DROP TYPE AppointmentStatus; ALTER TABLE facilities DROP COLUMN timezone;`
+**If the migration has not been applied:** Revert the feature commit or replace the pending migration before merge. Do not attempt to apply the migration.
+
+**If migration application fails:** Use `prisma migrate resolve --rolled-back` to mark the failed migration as rolled back per Prisma's failed-migration workflow. If additional cleanup is required, use reviewed raw SQL to undo partial changes. Do not use `DROP` statements as a primary recovery mechanism.
+
+**If the migration was successfully applied:** Create a forward corrective migration rather than rewriting applied history. Do not attempt to delete or modify applied migration history.
 
 **Latest verified commit before this edit:** `219e5170a87172a2038c90514da423da58ab0d61` on `feat/clinic-admin-todays-appointments-v1` (local and remote identical, 0 ahead, 0 behind).
 
-**Local/remote divergence before commit:** 0 ahead, 0 behind. After commit: 1 ahead, 0 behind.
+**Local/remote divergence after Stage 1A commit:** 1 ahead, 0 behind.
+
+---
+
+## Stage 1A Corrective Alignment (2026-07-30)
+
+**Trigger:** Operator-corrective task to align Stage 1A with approved semantics.
+
+**Corrective changes:**
+
+1. **Facility timezone semantics:** Removed incorrect references to "tenant.identity.timezone or UTC" fallback from schema comments, migration comments, and this document. The approved semantics are: null means configuration-required state; no fallback; "Today's Appointments" must return a configuration-required response when null.
+
+2. **Tenant/organisation/facility integrity:** Added the repository's canonical Prisma relation to Facility and the corresponding composite foreign key via migration. This follows the pattern established by ADR-015 and enforces at the database level that the appointment's tenant matches its facility's tenant. Patient and provider identifiers remain as logical IDs with no FKs.
+
+3. **Index review:** Removed `facilities_timezone_idx` index. No documented query pattern requires searching facilities by timezone.
+
+4. **Recovery documentation:** Removed invalid "prisma migrate rollback" and destructive DROP commands. Documented accurate recovery paths based on migration state.
+
+5. **Validation accuracy:** Clarified that PostgreSQL 17 tests were NOT executed locally (not available in environment).
+
+**Files modified:**
+- `apps/api/prisma/schema.prisma` — corrected timezone comments, added Facility relation and unique constraint
+- `apps/api/prisma/migrations/20260730000000_appointments_persistence_foundation/migration.sql` — corrected comments, removed timezone index, added FKs and unique constraint
+- `PROJECT_CONTINUITY.md` — updated this entry
+
+**Validation results:** `prisma format` PASS, `prisma validate` PASS, `prisma generate` PASS, `pnpm run typecheck` PASS, `pnpm run lint` PASS (0 errors, 0 warnings), `git diff --check` PASS.
+
+**PostgreSQL 17 execution:** NOT AVAILABLE. Requires GitHub Actions environment.

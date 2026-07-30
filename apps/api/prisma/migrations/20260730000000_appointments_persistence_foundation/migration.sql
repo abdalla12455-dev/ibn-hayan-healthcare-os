@@ -8,16 +8,27 @@
 -- Changes:
 -- 1. Add a nullable `timezone` column to `facilities` to store the
 --    facility's IANA timezone identifier (e.g. 'Asia/Baghdad').
---    Null means timezone is unresolved and must fall back to a higher-level
---    default (tenant.identity.timezone or UTC). No backfill is performed;
---    existing facilities retain NULL until explicitly configured.
--- 2. Add `AppointmentStatus` enum with the canonical lifecycle values
+--    Null means the timezone has not been configured and the facility is
+--    in a configuration-required state. No fallback to tenant timezone,
+--    UTC, server timezone, browser timezone, or any hard-coded default is
+--    applied. No backfill is performed; existing facilities retain NULL
+--    until explicitly configured.
+-- 2. Add a unique constraint on `facilities(tenant_id, id)` to support
+--    the composite foreign key from `appointments`. This unique constraint
+--    is also semantically correct: a facility has one identity within
+--    its tenant scope.
+-- 3. Add `AppointmentStatus` enum with the canonical lifecycle values
 --    from download/docs/07_MODULES/APPOINTMENTS.md Section 1:
 --    booked, confirmed, arrived, in_progress, completed, cancelled, no_show.
--- 3. Add `appointments` table with tenant, organisation, facility scoping,
+-- 4. Add `appointments` table with tenant, organisation, facility scoping,
 --    logical patient and provider identifiers, scheduled timestamps, status,
 --    and type code. No foreign keys are created to Patient or Workforce
 --    module tables; those modules own their own identity.
+-- 5. Add a single-column foreign key from `appointments.facility_id` to
+--    `facilities.id` (for Prisma relation compatibility and defence-in-depth)
+--    and a composite foreign key `appointments(tenant_id, facility_id)` ->
+--    `facilities(tenant_id, id)` to enforce at the database level that
+--    the appointment's tenant matches its facility's tenant.
 --
 -- All timestamps use PostgreSQL timestamptz for UTC storage.
 -- All indexes follow the repository naming convention (table_column_idx).
@@ -25,12 +36,17 @@
 
 -- 1. Add facility timezone column.
 -- No backfill: existing facilities retain NULL until explicitly configured.
+-- No timezone index is added: no documented query pattern requires searching
+-- facilities by timezone.
 
 ALTER TABLE "facilities" ADD COLUMN "timezone" VARCHAR(60);
 
-CREATE INDEX "facilities_timezone_idx" ON "facilities" ("timezone");
+-- 2. Add unique constraint on facilities(tenant_id, id) to support the
+-- composite foreign key from appointments.
 
--- 2. Create AppointmentStatus enum.
+CREATE UNIQUE INDEX "facilities_tenant_id_id_key" ON "facilities" ("tenant_id", "id");
+
+-- 3. Create AppointmentStatus enum.
 
 CREATE TYPE "AppointmentStatus" AS ENUM (
   'booked',
@@ -42,7 +58,7 @@ CREATE TYPE "AppointmentStatus" AS ENUM (
   'no_show'
 );
 
--- 3. Create appointments table.
+-- 4. Create appointments table.
 
 CREATE TABLE "appointments" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -61,10 +77,23 @@ CREATE TABLE "appointments" (
 );
 
 -- Indexes for tenant, organisation, facility, and scheduled-start filtering.
--- These support the "Today’s Appointments" facility-day read query.
+-- These support the "Today's Appointments" facility-day read query.
 
 CREATE INDEX "appointments_tenant_id_idx" ON "appointments" ("tenant_id");
 CREATE INDEX "appointments_tenant_id_organisation_id_idx" ON "appointments" ("tenant_id", "organisation_id");
 CREATE INDEX "appointments_tenant_id_facility_id_idx" ON "appointments" ("tenant_id", "facility_id");
 CREATE INDEX "appointments_tenant_id_scheduled_start_idx" ON "appointments" ("tenant_id", "scheduled_start");
 CREATE INDEX "appointments_tenant_id_facility_id_scheduled_start_idx" ON "appointments" ("tenant_id", "facility_id", "scheduled_start");
+
+-- 5. Add foreign keys from appointments to facilities.
+-- Single-column foreign key for Prisma relation compatibility and defence-in-depth.
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_facility_id_fkey"
+  FOREIGN KEY ("facility_id") REFERENCES "facilities" ("id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Composite foreign key: enforces that the appointment's tenant matches its facility's tenant.
+-- PostgreSQL treats a composite foreign key as unenforced when any referencing column is NULL;
+-- all referencing columns are NOT NULL here.
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_tenant_facility_fkey"
+  FOREIGN KEY ("tenant_id", "facility_id") REFERENCES "facilities" ("tenant_id", "id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
