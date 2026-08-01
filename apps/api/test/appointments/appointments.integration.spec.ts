@@ -96,11 +96,17 @@ const ORIGIN = 'http://localhost:3000';
 
 async function truncateAll(): Promise<void> {
   // Clean up in reverse dependency order
+  // NOTE: LocalCredential must be deleted BEFORE User because
+  // LocalCredential.userId is a foreign key referencing User.id
+  // with onDelete: Restrict. The appointments integration tests
+  // do NOT use the TRUNCATE CASCADE SQL pattern from clinic-admin;
+  // they use Prisma deleteMany in dependency order.
   await prisma.auditOutboxEvent.deleteMany();
   await prisma.appointment.deleteMany();
   await prisma.authSession.deleteMany();
   await prisma.tenantRoleAssignment.deleteMany();
   await prisma.tenantMembership.deleteMany();
+  await prisma.localCredential.deleteMany();
   await prisma.user.deleteMany();
   await prisma.facility.deleteMany();
   await prisma.organisation.deleteMany();
@@ -185,15 +191,47 @@ async function createMembership(
   return { membershipId: membership.id };
 }
 
+/**
+ * Creates role assignments following the clinic-admin pattern:
+ * - Tenant-scoped assignment for the nominal role
+ * - Facility-scoped assignment for R09 and other facility-scoped roles
+ *   (required for context selection per ADR-015 §1.5)
+ *
+ * Per the clinic-admin e2e test pattern, R13 (Platform Super Admin)
+ * needs only a tenant-scoped assignment per ADR-015 §1.5 exception.
+ *
+ * @param membershipId - The tenant membership ID
+ * @param roleCode - The role code (e.g. 'R09_ADMINISTRATOR')
+ * @param scopeOrganisationId - The organisation ID for facility-scoped assignment
+ * @param scopeFacilityId - The facility ID for facility-scoped assignment
+ * @param requiresFacilityScope - Whether the role needs facility scope for context selection
+ */
 async function assignRole(
   membershipId: string,
   roleCode: string,
+  scopeOrganisationId?: string,
+  scopeFacilityId?: string,
+  requiresFacilityScope: boolean = true,
 ): Promise<void> {
+  // Always create tenant-scoped assignment (the nominal role)
   await roleAssignments.create({
     tenantMembershipId: membershipId as never,
     roleCode: roleCode as never,
-    scopeLevel: 'facility',
+    // No scopeLevel = tenant-scoped
   });
+
+  // For facility-scoped roles, also create facility-scoped assignment
+  // This is required for context selection (per ADR-015 §1.5)
+  // R13 (Platform Super Admin) does NOT need facility scope per §1.5 exception
+  if (requiresFacilityScope && scopeOrganisationId && scopeFacilityId) {
+    await roleAssignments.create({
+      tenantMembershipId: membershipId as never,
+      roleCode: roleCode as never,
+      scopeLevel: 'facility',
+      scopeOrganisationId: scopeOrganisationId as never,
+      scopeFacilityId: scopeFacilityId as never,
+    });
+  }
 }
 
 async function login(
@@ -339,7 +377,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user and membership
     const { userId } = await createUser('r09@example.test', 'R09 User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('r09@example.test');
@@ -399,7 +442,14 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R13
     const { userId } = await createUser('r13@example.test', 'R13 User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R13_SYSTEM_ADMINISTRATOR');
+    // R13 does NOT need facility scope per ADR-015 §1.5 exception
+    await assignRole(
+      membershipId,
+      'R13_SYSTEM_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+      false,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('r13@example.test');
@@ -442,7 +492,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('nulltz@example.test', 'Null TZ User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('nulltz@example.test');
@@ -480,7 +535,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('audit@example.test', 'Audit User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('audit@example.test');
@@ -545,7 +605,12 @@ describe('Appointments Today Integration', () => {
       'No Audit User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('noaudit@example.test');
@@ -603,7 +668,12 @@ describe('Appointments Today Integration', () => {
       userIdA,
       tenantIdA,
     );
-    await assignRole(membershipIdA, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipIdA,
+      'R09_ADMINISTRATOR',
+      organisationIdA,
+      facilityIdA,
+    );
 
     // Setup: login as user A and select context
     const { sessionId: sessionIdA } = await login('usera@example.test');
@@ -647,7 +717,12 @@ describe('Appointments Today Integration', () => {
       userIdB,
       tenantIdB,
     );
-    await assignRole(membershipIdB, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipIdB,
+      'R09_ADMINISTRATOR',
+      organisationIdB,
+      facilityIdB,
+    );
 
     // Setup: login as user B and select context
     const { sessionId: sessionIdB } = await login('userb@example.test');
@@ -686,7 +761,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('empty@example.test', 'Empty User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context (no appointments created)
     const { sessionId } = await login('empty@example.test');
@@ -737,7 +817,12 @@ describe('Appointments Today Integration', () => {
       'Boundary User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('boundary@example.test');
@@ -823,7 +908,7 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R02
     const { userId } = await createUser('r02@example.test', 'R02 User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R02_PROVIDER');
+    await assignRole(membershipId, 'R02_PROVIDER', organisationId, facilityId);
 
     // Setup: login and select context
     const { sessionId } = await login('r02@example.test');
@@ -844,9 +929,10 @@ describe('Appointments Today Integration', () => {
     // Setup
     const { tenantId } = await createTenant('tenant-no-org', 'Tenant No Org');
 
-    // Setup: user with R09
+    // Setup: user with R09 (tenant-scoped only, no org/facility context)
     const { userId } = await createUser('noorg@example.test', 'No Org User');
     const { membershipId } = await createMembership(userId, tenantId);
+    // No organisation/facility created, so only tenant-scoped role
     await assignRole(membershipId, 'R09_ADMINISTRATOR');
 
     // Setup: login but do NOT select organisation
@@ -923,7 +1009,12 @@ describe('Appointments Today Integration', () => {
       'Invalid TZ User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('invalidtz@example.test');
@@ -961,7 +1052,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('order@example.test', 'Order User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('order@example.test');
@@ -1030,7 +1126,7 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09 in org A
     const { userId } = await createUser('iso@example.test', 'ISO User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(membershipId, 'R09_ADMINISTRATOR', orgIdA, facIdA);
 
     // Setup: login and select org A
     const { sessionId } = await login('iso@example.test');
@@ -1102,7 +1198,8 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('faciso@example.test', 'Fac ISO User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    // User needs facility-scoped role for facility A to switch to it
+    await assignRole(membershipId, 'R09_ADMINISTRATOR', organisationId, facIdA);
 
     // Setup: login as facility A
     const { sessionId } = await login('faciso@example.test');
@@ -1160,7 +1257,12 @@ describe('Appointments Today Integration', () => {
       'Override User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login as tenant A, org A, facility A
     const { sessionId } = await login('override@example.test');
@@ -1240,7 +1342,12 @@ describe('Appointments Today Integration', () => {
       'No Audit Auth User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('noauditauth@example.test');
@@ -1356,7 +1463,12 @@ describe('Appointments Today Integration', () => {
       'Audit Safe User',
     );
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('auditsafe@example.test');
@@ -1432,7 +1544,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('genat@example.test', 'Gen At User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('genat@example.test');
@@ -1473,7 +1590,12 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R09
     const { userId } = await createUser('outbox@example.test', 'Outbox User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login and select context
     const { sessionId } = await login('outbox@example.test');
