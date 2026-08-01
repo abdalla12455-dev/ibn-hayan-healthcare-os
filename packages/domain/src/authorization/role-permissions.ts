@@ -80,12 +80,13 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
- * The eight permissions granted to R09 Clinic Administrator: the
- * seven context permissions plus `clinic_admin_overview:view`. This
- * list is EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
- * Adding a future permission to `PERMISSION_CODES` does NOT
- * automatically grant it to R09 — the new permission must be
- * explicitly added to this list to be granted.
+ * The nine permissions granted to R09 Clinic Administrator: the
+ * seven context permissions plus `clinic_admin_overview:view` and
+ * `appointments:view`. This list is EXPLICIT: it does NOT use
+ * `PERMISSION_CODES` directly. Adding a future permission to
+ * `PERMISSION_CODES` does NOT automatically grant it to R09 —
+ * the new permission must be explicitly added to this list to be
+ * granted.
  *
  * Per the audit-semantics restoration task Phase 5, this explicit
  * list is the smallest coherent least-privilege correction that
@@ -99,6 +100,7 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
 const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   ...HUMAN_CONTEXT_PERMISSIONS,
   'clinic_admin_overview:view',
+  'appointments:view',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -147,6 +149,15 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
  * this structural separation is the enforcement point for "A Platform
  * Super Admin is not silently treated as a Clinic Administrator."
  *
+ * The `appointments:view` permission is granted ONLY to
+ * `R09_ADMINISTRATOR`. It is the read-only authorisation gate for
+ * the "Today's Appointments" endpoint at `GET /api/v1/appointments/today`.
+ * It is NOT granted to `R13_SYSTEM_ADMINISTRATOR`. Per the Stage 1B
+ * implementation specification, this permission enables the read-only
+ * query of appointments for the authenticated facility's current local
+ * calendar day. No caller-supplied scope is accepted; all context
+ * is derived from the authenticated session.
+ *
  * Per the audit-semantics restoration task Phase 5, the matrix uses
  * EXPLICIT permission lists (`HUMAN_CONTEXT_PERMISSIONS` and
  * `CLINIC_ADMIN_PERMISSIONS`) rather than `PERMISSION_CODES` or
@@ -169,10 +180,10 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   R07_SCHEDULER: HUMAN_CONTEXT_PERMISSIONS,
   R08_BILLER: HUMAN_CONTEXT_PERMISSIONS,
   // R09 Clinic Administrator is the SOLE holder of the
-  // `clinic_admin_overview:view` permission. The Clinic Admin
-  // Overview surface at `/clinic-admin` is the canonical
-  // application route for this role (per DESIGN_BIBLE.md §17.1).
-  // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8 permissions),
+  // `clinic_admin_overview:view` and `appointments:view` permissions.
+  // The Clinic Admin Overview surface at `/clinic-admin` is the
+  // canonical application route for this role (per DESIGN_BIBLE.md §17.1).
+  // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 9 permissions),
   // NOT `PERMISSION_CODES` (which would grant ALL future
   // permissions automatically).
   R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,

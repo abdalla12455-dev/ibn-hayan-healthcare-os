@@ -34,8 +34,11 @@
  *   may hold multiple roles simultaneously) and permissions are
  *   assigned through roles only. The authorization layer is
  *   default-deny.
+ * - scheduling: Appointment domain model and AppointmentRepository port.
+ *   The Scheduling bounded context (BC06) owns appointment lifecycle,
+ *   slot templates, and resource scheduling.
  *
- * Additional bounded contexts (patients, audit, billing, scheduling,
+ * Additional bounded contexts (patients, audit, billing,
  * inventory, configuration, etc.) arrive in subsequent batches alongside
  * their respective vertical slices.
  */
@@ -47,3 +50,4 @@ export const DOMAIN_PACKAGE_NAME = '@ibn-hayan/domain' as const;
 export * from './tenancy/index.js';
 export * from './identity/index.js';
 export * from './authorization/index.js';
+export * from './scheduling/index.js';

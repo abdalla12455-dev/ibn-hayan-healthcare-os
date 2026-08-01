@@ -7,6 +7,7 @@ import { SessionContextModule } from './modules/session-context/index.js';
 import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
 import { RolePreviewModule } from './modules/dev/index.js';
 import { ClinicAdminModule } from './modules/clinic-admin/index.js';
+import { AppointmentsModule } from './modules/appointments/index.js';
 
 /**
  * Root application module.
@@ -50,18 +51,15 @@ import { ClinicAdminModule } from './modules/clinic-admin/index.js';
  *   tenant/organisation/facility repositories. The route is guarded
  *   by `AuthorizationGuard` and requires the
  *   `clinic_admin_overview:view` permission, which is granted ONLY
- *   to `R09_ADMINISTRATOR`. The route returns the active context
- *   identity, the administrator display name, and the availability
- *   declaration for each approved region. Business metrics are NOT
- *   returned because the underlying domain models (appointments,
- *   patients, doctors, inventory, billing, waiting room, staff
- *   attendance) do not yet exist; each business region declares
- *   availability `'not_supported'` so the frontend renders the
- *   approved visual regions in their honest "not yet configured"
- *   state. No patient, billing, scheduling, or inventory DOMAIN
- *   models or DATABASE tables are introduced by this module; those
- *   arrive in subsequent batches alongside their respective
- *   vertical slices.
+ *   to `R09_ADMINISTRATOR`.
+ * - {@link AppointmentsModule} for the "Today's Appointments" route
+ *   at GET /api/v1/appointments/today. The appointments module
+ *   reuses the auth module's `AuthService`, the audit module's
+ *   `AuditHelperService`, the database module's
+ *   `AppointmentRepository` and `FacilityRepository`, and the
+ *   clock module's `ClockService`. The route is guarded by
+ *   `AuthorizationGuard` and requires the `appointments:view`
+ *   permission, which is granted ONLY to `R09_ADMINISTRATOR`.
  */
 @Module({
   imports: [
@@ -80,6 +78,7 @@ import { ClinicAdminModule } from './modules/clinic-admin/index.js';
     SessionContextModule,
     RolePreviewModule,
     ClinicAdminModule,
+    AppointmentsModule,
   ],
 })
 export class AppModule implements NestModule {

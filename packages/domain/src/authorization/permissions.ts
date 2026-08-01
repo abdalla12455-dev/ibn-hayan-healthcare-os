@@ -77,7 +77,8 @@ export type PermissionCode =
   | 'context:clear_organisation'
   | 'context:select_facility'
   | 'context:clear_facility'
-  | 'clinic_admin_overview:view';
+  | 'clinic_admin_overview:view'
+  | 'appointments:view';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -93,6 +94,11 @@ export type PermissionCode =
  * to `R13_SYSTEM_ADMINISTRATOR` (Platform Super Admin). R13 holds a
  * different surface (§15/§16) and must NOT be silently treated as
  * a Clinic Administrator (per task specification Phase 7 item 6).
+ *
+ * The `appointments:view` permission is the read-only authorisation
+ * gate for the "Today's Appointments" endpoint at
+ * `GET /api/v1/appointments/today`. It is granted only to
+ * `R09_ADMINISTRATOR`. It is NOT granted to `R13_SYSTEM_ADMINISTRATOR`.
  */
 export const PERMISSION_CODES: readonly PermissionCode[] = [
   'context:view',
@@ -103,6 +109,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'context:select_facility',
   'context:clear_facility',
   'clinic_admin_overview:view',
+  'appointments:view',
 ] as const;
 
 /**

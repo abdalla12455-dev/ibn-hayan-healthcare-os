@@ -29,3 +29,4 @@ export * from './context/index.js';
 export * from './authorization/index.js';
 export * from './role-preview/index.js';
 export * from './clinic-admin/index.js';
+export * from './appointments/index.js';

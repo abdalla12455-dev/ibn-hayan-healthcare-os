@@ -332,6 +332,41 @@ export type ClinicAdminActionCode =
   (typeof CLINIC_ADMIN_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Appointments (Scheduling bounded context — BC06)
+// ---------------------------------------------------------------------------
+
+/**
+ * Appointments action codes.
+ *
+ * Emitted by the Appointments module after successful read operations.
+ * The `appointments.schedule.viewed` event is emitted after the
+ * "Today's Appointments" query completes successfully (including empty
+ * results). The action is mapped to the `facility_context` category
+ * (see `inferCategoryFromAction`).
+ *
+ * Per the Stage 1B implementation specification, the event metadata
+ * carries only `{ endpoint: 'appointments_today_view' }` — no patient
+ * IDs, provider IDs, appointment details, names, medical data, or
+ * other sensitive payload. The standard actor/session/tenant fields
+ * are populated from the authenticated session.
+ *
+ * Emission semantics:
+ *
+ * The event is emitted via `auditHelper.emitDirect(...)` (best-effort,
+ * non-transactional), matching the existing pattern for read-only view
+ * events (`tenant_context.viewed`, `clinic_admin.overview.viewed`).
+ * The event is emitted ONLY after the appointments query succeeds; it
+ * is NOT emitted when configuration is required (null timezone) or when
+ * the service throws. The event does NOT recursively audit itself.
+ */
+export const APPOINTMENTS_ACTION_CODES = [
+  'appointments.schedule.viewed',
+] as const;
+
+export type AppointmentsActionCode =
+  (typeof APPOINTMENTS_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -352,6 +387,7 @@ export const AUDIT_ACTION_CODES = [
   ...AUDIT_SYSTEM_ACTION_CODES,
   ...ROLE_PREVIEW_ACTION_CODES,
   ...CLINIC_ADMIN_ACTION_CODES,
+  ...APPOINTMENTS_ACTION_CODES,
 ] as const;
 
 /**
@@ -420,6 +456,16 @@ export function inferCategoryFromAction(
   // `*.viewed` events under context categories. See the
   // `CLINIC_ADMIN_ACTION_CODES` block above for the full rationale.
   if (action.startsWith('clinic_admin.')) {
+    return 'facility_context';
+  }
+  // Appointments actions are mapped to the `facility_context` category.
+  // The "Today's Appointments" endpoint is a facility-scoped read-only
+  // view: the service requires an active facility and queries
+  // appointments for the facility's current local calendar day. The
+  // `facility_context` category is the narrowest semantically correct
+  // existing category. See the `APPOINTMENTS_ACTION_CODES` block above
+  // for the full rationale.
+  if (action.startsWith('appointments.')) {
     return 'facility_context';
   }
   return null;
