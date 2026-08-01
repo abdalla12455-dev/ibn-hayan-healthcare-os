@@ -111,10 +111,10 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest();
       await controller.getTodayAppointments(req);
-      const [cookieValue] = (
+      const callArgs = (
         service.loadTodayAppointments as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
-      expect(cookieValue).toBe(SESSION_COOKIE_VALUE);
+      ).mock.calls[0]!;
+      expect(callArgs[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('passes audit context to the service', async () => {
@@ -122,11 +122,11 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest();
       await controller.getTodayAppointments(req);
-      const [, auditContext] = (
+      const callArgs = (
         service.loadTodayAppointments as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
-      expect(auditContext).toBeDefined();
-      expect((auditContext as { requestId: string }).requestId).toBeDefined();
+      ).mock.calls[0]!;
+      expect(callArgs[1]).toBeDefined();
+      expect((callArgs[1] as { requestId: string }).requestId).toBeDefined();
     });
 
     it('throws UnauthorizedException when service returns null', async () => {
@@ -148,10 +148,10 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest({ query: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
-      const [cookieValue] = (
+      const callArgs = (
         service.loadTodayAppointments as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
-      expect(cookieValue).toBe(SESSION_COOKIE_VALUE);
+      ).mock.calls[0]!;
+      expect(callArgs[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('does NOT read organisation scope from query parameters', async () => {

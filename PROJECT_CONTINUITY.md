@@ -4501,12 +4501,38 @@ packages/domain/src/tenancy/tenancy.spec.ts(69,11)
 
 **GitHub Actions:** PR #9 updated automatically by pushing to `feat/clinic-admin-todays-appointments-read-v1`. Both `static-and-build` and `postgresql17-validation` jobs will run again.
 
-### 24. Remaining Risks
+### 24. CI Failure Fix #2 (2026-08-01)
+
+**Root Cause:** GitHub Actions Main CI run #26 failed during workspace typecheck because three test cases in `appointments.controller.spec.ts` directly destructured `mock.calls[0]` without TypeScript-safe null checking.
+
+**PR #9 CI Error:**
+```
+TS2488: Type 'any[] | undefined' must have a '[Symbol.iterator]()' method that returns an iterator.
+apps/api/src/modules/appointments/appointments.controller.spec.ts(114,13)
+```
+
+**File Fixed:**
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts` — Replaced unsafe array destructuring patterns with the repository's established non-null assertion pattern:
+  - Changed `const [cookieValue] = ...mock.calls[0]` to `const callArgs = ...mock.calls[0]!`
+  - Changed `const [, auditContext] = ...mock.calls[0]` to `const callArgs = ...mock.calls[0]!`
+  - Access arguments via array index: `callArgs[0]`, `callArgs[1]`
+
+**Validation Results:**
+- Focused controller tests: 10 passed
+- API typecheck: passed
+- ESLint: 0 errors
+- API tests: 419 passed
+- Workspace typecheck: passed
+- Production build: passed
+
+**GitHub Actions:** PR #9 updated automatically by pushing. Both jobs will run again.
+
+### 25. Remaining Risks
 
 - PostgreSQL 17 integration tests require GitHub Actions CI validation (not locally available)
 - 21 integration scenarios implemented but not locally executed
 
-### 25. Recommended Next Step
+### 26. Recommended Next Step
 
 1. Wait for GitHub Actions CI re-run (triggered automatically by fix push to PR #9):
    - `static-and-build` job (typecheck, lint, unit tests)
