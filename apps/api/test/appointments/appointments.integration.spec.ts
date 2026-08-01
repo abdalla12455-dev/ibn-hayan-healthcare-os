@@ -319,6 +319,8 @@ beforeAll(async () => {
     .compile();
 
   app = module.createNestApplication();
+  // Apply the same global prefix as production (main.ts sets 'api/v1')
+  app.setGlobalPrefix('api/v1');
   await app.init();
   server = app.getHttpServer() as Server;
 
@@ -348,6 +350,33 @@ beforeEach(async () => {
 afterAll(async () => {
   await app.close();
   await seedPrisma?.$disconnect();
+});
+
+// ---------------------------------------------------------------------------
+// Route registration smoke tests
+// ---------------------------------------------------------------------------
+
+describe('Application bootstrap smoke', () => {
+  it('POST /api/v1/auth/login is registered (returns 401 not 404)', async () => {
+    // Create a seed user so login can return 401 instead of 404
+    const { tenantId } = await createTenant('tenant-smoke', 'Tenant Smoke');
+    const { userId } = await createUser('smoke@example.test', 'Smoke User');
+    await createMembership(userId, tenantId);
+
+    // Request with wrong password - should return 401, NOT 404
+    // 404 would mean the route is not registered with the /api/v1 prefix
+    const response = await request(server)
+      .post('/api/v1/auth/login')
+      .send({ email: 'smoke@example.test', password: 'wrong-password' });
+    expect(response.status).toBe(401);
+  });
+
+  it('GET /api/v1/appointments/today is registered (returns 401 not 404)', async () => {
+    // Request without session - should return 401, NOT 404
+    // 404 would mean the route is not registered with the /api/v1 prefix
+    const response = await request(server).get('/api/v1/appointments/today');
+    expect(response.status).toBe(401);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -887,9 +916,9 @@ describe('Appointments Today Integration', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Scenario 10: Another role (R02 Provider) denied
+  // Scenario 10: Another role (R02 Nurse) denied
   // -------------------------------------------------------------------------
-  it('10. R02 Provider denied access', async () => {
+  it('10. R02 Nurse denied access', async () => {
     // Setup
     const { tenantId } = await createTenant('tenant-r02', 'Tenant R02');
     const { organisationId } = await createOrganisation(
@@ -908,7 +937,7 @@ describe('Appointments Today Integration', () => {
     // Setup: user with R02
     const { userId } = await createUser('r02@example.test', 'R02 User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R02_PROVIDER', organisationId, facilityId);
+    await assignRole(membershipId, 'R02_NURSE', organisationId, facilityId);
 
     // Setup: login and select context
     const { sessionId } = await login('r02@example.test');
