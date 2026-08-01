@@ -4474,17 +4474,43 @@ Implement Stage 1B of the Ibn Hayan Today Appointments feature:
 | Insertions | 4561 |
 | Deletions | 79 |
 
-### 23. Remaining Risks
+### 23. CI Failure Fix (2026-08-01)
+
+**Root Cause:** GitHub Actions PR #9 CI failed because Stage 1B introduced `Facility.timezone` field (added in Stage 1A migration), but a test fixture in `packages/domain/src/tenancy/tenancy.spec.ts` (line 69) created a typed `Facility` object without the required `timezone` property.
+
+**PR #9 CI Error:**
+```
+TS2741: Property 'timezone' is missing in a Facility test object but is required in type Facility
+packages/domain/src/tenancy/tenancy.spec.ts(69,11)
+```
+
+**Files Fixed:**
+1. `packages/domain/src/tenancy/tenancy.spec.ts` — Added `timezone: null` to Facility test fixture
+2. `packages/domain/src/authorization/authorization.spec.ts` — Updated permission count tests:
+   - `appointments:view` added to PERMISSION_CODES (9 total)
+   - R09 Clinic Administrator now has 9 permissions (was 8)
+   - Updated contextPermissions filter to exclude both `clinic_admin_overview:view` and `appointments:view`
+   - Updated all hardcoded permission count assertions
+
+**Validation Results:**
+- Domain tests: 108 passed
+- API tests: 419 passed
+- ESLint: 0 errors
+- TypeScript typecheck: passed
+- Production build: passed
+
+**GitHub Actions:** PR #9 updated automatically by pushing to `feat/clinic-admin-todays-appointments-read-v1`. Both `static-and-build` and `postgresql17-validation` jobs will run again.
+
+### 24. Remaining Risks
 
 - PostgreSQL 17 integration tests require GitHub Actions CI validation (not locally available)
 - 21 integration scenarios implemented but not locally executed
 
-### 24. Recommended Next Step
+### 25. Recommended Next Step
 
-1. Create pull request for code review
-2. Wait for GitHub Actions CI validation:
+1. Wait for GitHub Actions CI re-run (triggered automatically by fix push to PR #9):
    - `static-and-build` job (typecheck, lint, unit tests)
    - `postgresql17-validation` job (integration tests with real PostgreSQL 17)
-3. Address any CI failures
-4. Merge after both jobs pass
-5. Stage 2: Add appointment creation/update/cancel operations
+2. Address any remaining CI failures
+3. Merge PR #9 after both jobs pass
+4. Stage 2: Add appointment creation/update/cancel operations

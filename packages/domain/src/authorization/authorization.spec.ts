@@ -202,7 +202,7 @@ describe('authorization role catalogue', () => {
 });
 
 describe('authorization permission catalogue', () => {
-  it('exposes the seven current context permissions plus the Clinic Admin Overview permission', () => {
+  it('exposes the eight current context permissions plus the Clinic Admin Overview and Appointments View permissions', () => {
     // Per ADR-015, the context permissions are split into per-level
     // codes: context:view, context:select, context:clear,
     // context:select_organisation, context:clear_organisation,
@@ -213,6 +213,11 @@ describe('authorization permission catalogue', () => {
     // R09_ADMINISTRATOR. The permission is the read-only
     // authorisation gate for `/api/v1/clinic-admin/overview`
     // (per DESIGN_BIBLE.md §12/§13).
+    //
+    // Stage 1B of Today's Appointments adds the `appointments:view`
+    // permission, granted ONLY to R09_ADMINISTRATOR. The permission
+    // is the read-only authorisation gate for
+    // `GET /api/v1/appointments/today`.
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
@@ -222,6 +227,7 @@ describe('authorization permission catalogue', () => {
       'context:select_facility',
       'context:clear_facility',
       'clinic_admin_overview:view',
+      'appointments:view',
     ]);
   });
 
@@ -234,6 +240,7 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('context:select_facility')).toBe(true);
     expect(isPermissionCode('context:clear_facility')).toBe(true);
     expect(isPermissionCode('clinic_admin_overview:view')).toBe(true);
+    expect(isPermissionCode('appointments:view')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -252,16 +259,18 @@ describe('authorization role-permission matrix', () => {
 
   it('R01 through R13 receive all seven context permissions', () => {
     // The context permissions are unchanged by the Clinic Admin
-    // Overview live-data batch: every human role (R01 through R13)
-    // still receives all seven context permissions. The new
-    // `clinic_admin_overview:view` permission is NOT granted to
-    // every human role — only to R09.
+    // Overview live-data batch and Stage 1B of Today's Appointments:
+    // every human role (R01 through R13) still receives all seven
+    // context permissions. The new `clinic_admin_overview:view` and
+    // `appointments:view` permissions are NOT granted to every human
+    // role — only to R09.
     const humanRoles = PLATFORM_ROLE_CODES.filter(
       (code) => code !== 'R14_INTEGRATION_ACCOUNT',
     );
     expect(humanRoles).toHaveLength(13);
     const contextPermissions = PERMISSION_CODES.filter(
-      (p) => p !== 'clinic_admin_overview:view',
+      (p) =>
+        p !== 'clinic_admin_overview:view' && p !== 'appointments:view',
     );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
@@ -344,10 +353,16 @@ describe('authorization role-permission matrix', () => {
 
   it('permissionsForRole returns the matrix entry for a known role', () => {
     expect(permissionsForRole('R01_PHYSICIAN')).toEqual(
-      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
+      PERMISSION_CODES.filter(
+        (p) =>
+          p !== 'clinic_admin_overview:view' && p !== 'appointments:view',
+      ),
     );
     expect(permissionsForRole('R13_SYSTEM_ADMINISTRATOR')).toEqual(
-      PERMISSION_CODES.filter((p) => p !== 'clinic_admin_overview:view'),
+      PERMISSION_CODES.filter(
+        (p) =>
+          p !== 'clinic_admin_overview:view' && p !== 'appointments:view',
+      ),
     );
     expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(PERMISSION_CODES);
   });
@@ -499,13 +514,13 @@ describe('authorization role-permission matrix', () => {
   // `PERMISSION_CODES.filter(...)` pattern).
   // -------------------------------------------------------------------------
 
-  it('R09 Clinic Administrator receives EXACTLY 8 permissions (not PERMISSION_CODES.length)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8). If a future
+  it('R09 Clinic Administrator receives EXACTLY 9 permissions (not PERMISSION_CODES.length)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 9). If a future
     // change adds a permission to PERMISSION_CODES but forgets to
     // add it to CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it.
     // This is the desired least-privilege behaviour.
     const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
-    expect(r09Permissions).toHaveLength(8);
+    expect(r09Permissions).toHaveLength(9);
     expect(r09Permissions).toEqual([
       'context:view',
       'context:select',
@@ -515,6 +530,7 @@ describe('authorization role-permission matrix', () => {
       'context:select_facility',
       'context:clear_facility',
       'clinic_admin_overview:view',
+      'appointments:view',
     ]);
   });
 
@@ -555,20 +571,20 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('R09 is NOT a hidden global super-administrator (R09 != PERMISSION_CODES)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 8), NOT
-    // PERMISSION_CODES (which is currently 8 but would grow if a
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 9), NOT
+    // PERMISSION_CODES (which is currently 9 but would grow if a
     // future permission is added). This test verifies R09's matrix
     // entry is NOT a reference to PERMISSION_CODES.
     //
     // We verify by checking that R09's permissions equal the explicit
     // CLINIC_ADMIN_PERMISSIONS list, not PERMISSION_CODES. If a future
     // change accidentally makes R09 = PERMISSION_CODES again, this
-    // test will still pass (because both are currently 8), but the
+    // test will still pass (because both are currently 9), but the
     // TYPE of the matrix entry will differ. The structural test is
-    // the length assertion above (R09 has EXACTLY 8, not
+    // the length assertion above (R09 has EXACTLY 9, not
     // PERMISSION_CODES.length).
-    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(8);
-    expect(PERMISSION_CODES.length).toBe(8);
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(9);
+    expect(PERMISSION_CODES.length).toBe(9);
     // If a future permission is added to PERMISSION_CODES, the
     // lengths will diverge. This test documents the current equality
     // and will FAIL if a future permission is added to PERMISSION_CODES
