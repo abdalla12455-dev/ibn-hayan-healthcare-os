@@ -162,11 +162,16 @@ export class AppointmentsTodayService {
 
     // Validate the timezone by attempting to use it. Intl.DateTimeFormat
     // will throw a RangeError for invalid timezone identifiers.
+    // Only RangeError is converted to APPOINTMENT_INVALID_TIMEZONE;
+    // other errors are re-thrown unchanged.
     let boundaries: FacilityDayBoundaries;
     try {
       boundaries = computeFacilityDayBoundaries(operationInstant, timezone);
-    } catch {
-      throw appointmentInvalidTimezone();
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw appointmentInvalidTimezone();
+      }
+      throw error;
     }
 
     const appointmentRows = await this.appointments.findByScheduledStartRange(

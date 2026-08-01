@@ -13,10 +13,7 @@ import type { AuditRequestContext } from '../auth/auth.service.js';
 import type { AuditHelperService } from '../audit/audit-helper.service.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { ClockService } from '../../infrastructure/clock/index.js';
-import {
-  computeFacilityDayBoundaries,
-  getOffsetAtUtc,
-} from './facility-day-boundaries.js';
+import { computeFacilityDayBoundaries } from './facility-day-boundaries.js';
 
 /**
  * Focused unit tests for the AppointmentsTodayService.
@@ -102,32 +99,24 @@ function makeFacility(
   };
 }
 
-function makeAppointment(
-  overrides: Partial<{
-    id: string;
-    patientId: string;
-    providerId: string;
-    scheduledStart: Date;
-    scheduledEnd: Date;
-    status: string;
-    typeCode: string;
-  }> = {},
-) {
-  return {
-    id: 'aaaaaaa0-aaaa-aaaa-aaaa-aaaaaaaaaaaa' as never,
-    tenantId: TEST_TENANT_ID as never,
-    organisationId: TEST_ORG_ID as never,
-    facilityId: TEST_FACILITY_ID as never,
-    patientId: 'bbbbbbb0-bbbb-bbbb-bbbb-bbbbbbbbbbbb' as never,
-    providerId: 'ccccccc0-cccc-cccc-cccc-cccccccccccc' as never,
+function makeAppointment(overrides: Partial<Appointment> = {}): Appointment {
+  const base: Appointment = {
+    id: 'aaaaaaa0-aaaa-aaaa-aaaa-aaaaaaaaaaaa' as Appointment['id'],
+    tenantId: TEST_TENANT_ID as Appointment['tenantId'],
+    organisationId: TEST_ORG_ID as Appointment['organisationId'],
+    facilityId: TEST_FACILITY_ID as Appointment['facilityId'],
+    patientId:
+      'bbbbbbb0-bbbb-bbbb-bbbb-bbbbbbbbbbbb' as Appointment['patientId'],
+    providerId:
+      'ccccccc0-cccc-cccc-cccc-cccccccccccc' as Appointment['providerId'],
     scheduledStart: new Date('2026-08-01T09:00:00.000Z'),
     scheduledEnd: new Date('2026-08-01T09:30:00.000Z'),
     status: 'booked' as const,
     typeCode: 'consultation',
     createdAt: new Date(),
     updatedAt: new Date(),
-    ...overrides,
-  } as Appointment;
+  };
+  return { ...base, ...overrides };
 }
 
 function makeService(overrides: {
@@ -171,9 +160,7 @@ function makeService(overrides: {
   } as unknown as FacilityRepository;
 
   const appointmentsRepo = {
-    findByScheduledStartRange: vi
-      .fn<[never, never, never, Date, Date], Promise<Appointment[]>>()
-      .mockResolvedValue(appointments),
+    findByScheduledStartRange: vi.fn().mockResolvedValue(appointments),
   } as unknown as AppointmentRepository;
 
   const authService = {
@@ -226,7 +213,7 @@ describe('AppointmentsTodayService', () => {
         ...makeAuthResultR09(),
         session: {
           ...makeAuthResultR09().session,
-          activeTenantMembershipId: null,
+          activeTenantMembershipId: null as unknown as string,
         },
       };
       const { service } = makeService({ authResult });
@@ -246,7 +233,7 @@ describe('AppointmentsTodayService', () => {
         ...makeAuthResultR09(),
         session: {
           ...makeAuthResultR09().session,
-          activeOrganisationId: null,
+          activeOrganisationId: null as unknown as string,
         },
       };
       const { service } = makeService({ authResult });
@@ -266,7 +253,7 @@ describe('AppointmentsTodayService', () => {
         ...makeAuthResultR09(),
         session: {
           ...makeAuthResultR09().session,
-          activeFacilityId: null,
+          activeFacilityId: null as unknown as string,
         },
       };
       const { service } = makeService({ authResult });
@@ -316,7 +303,9 @@ describe('AppointmentsTodayService', () => {
         expect.fail('Should have thrown');
       } catch (e) {
         expect(e).toBeInstanceOf(UnprocessableEntityException);
-        expect((e as UnprocessableEntityException).response).toMatchObject({
+        const err = e as UnprocessableEntityException;
+        const response = err.getResponse() as { error?: { code?: string } };
+        expect(response).toMatchObject({
           error: {
             code: 'APPOINTMENT_CONFIGURATION_REQUIRED',
           },
@@ -325,6 +314,57 @@ describe('AppointmentsTodayService', () => {
 
       // Repository should NOT be called
       expect(appointmentsRepo.findByScheduledStartRange).not.toHaveBeenCalled();
+    });
+
+    // --- Non-RangeError re-thrown ---
+
+    it('re-throws non-RangeError from boundary computation unchanged', async () => {
+      const customError = new Error('Unexpected error');
+      const { service, clock } = makeService({
+        facility: makeFacility('Asia/Baghdad'),
+      });
+      // Make clock.now throw an error (not return a throwing function)
+      vi.spyOn(clock, 'now').mockImplementation(() => {
+        throw customError;
+      });
+
+      await expect(
+        service.loadTodayAppointments('cookie', BASE_AUDIT_CONTEXT),
+      ).rejects.toThrow(customError);
+    });
+
+    it('re-throws repository errors unchanged', async () => {
+      const customError = new Error('Database connection failed');
+      const { service, appointmentsRepo } = makeService({
+        clockNow: new Date('2026-08-01T12:00:00.000Z'),
+      });
+      // Make repository throw an error
+      appointmentsRepo.findByScheduledStartRange = vi
+        .fn()
+        .mockRejectedValue(customError);
+
+      await expect(
+        service.loadTodayAppointments('cookie', BASE_AUDIT_CONTEXT),
+      ).rejects.toThrow(customError);
+    });
+
+    it('does NOT emit audit event after non-RangeError', async () => {
+      const customError = new Error('Unexpected error');
+      const { service, clock, auditHelper } = makeService({
+        facility: makeFacility('Asia/Baghdad'),
+      });
+      // Make clock.now throw an error
+      vi.spyOn(clock, 'now').mockImplementation(() => {
+        throw customError;
+      });
+
+      try {
+        await service.loadTodayAppointments('cookie', BASE_AUDIT_CONTEXT);
+      } catch {
+        // Expected
+      }
+
+      expect(auditHelper.emitDirect).not.toHaveBeenCalled();
     });
 
     // --- Audit behavior ---
@@ -408,15 +448,15 @@ describe('AppointmentsTodayService', () => {
     // --- Response contract ---
 
     it('returns successful response with appointments', async () => {
-      const appointments = [
+      const appointments: Appointment[] = [
         makeAppointment({
-          id: 'aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          id: 'aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa' as Appointment['id'],
           scheduledStart: new Date('2026-08-01T09:00:00.000Z'),
           scheduledEnd: new Date('2026-08-01T09:30:00.000Z'),
           status: 'booked',
         }),
         makeAppointment({
-          id: 'aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          id: 'aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaaa' as Appointment['id'],
           scheduledStart: new Date('2026-08-01T14:00:00.000Z'),
           scheduledEnd: new Date('2026-08-01T14:30:00.000Z'),
           status: 'confirmed',
@@ -436,13 +476,13 @@ describe('AppointmentsTodayService', () => {
       expect(result!.localDate).toBe('2026-08-01');
       expect(result!.timezone).toBe('Asia/Baghdad');
       expect(result!.appointments).toHaveLength(2);
-      expect(result!.appointments[0].id).toBe(
+      expect(result!.appointments[0]?.id).toBe(
         'aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       );
-      expect(result!.appointments[0].scheduledStart).toBe(
+      expect(result!.appointments[0]?.scheduledStart).toBe(
         '2026-08-01T09:00:00.000Z',
       );
-      expect(result!.appointments[0].status).toBe('booked');
+      expect(result!.appointments[0]?.status).toBe('booked');
     });
 
     it('returns successful response with empty appointments array', async () => {
@@ -491,13 +531,13 @@ describe('AppointmentsTodayService', () => {
       // Local midnight today: 00:00 Baghdad = 21:00 previous day UTC
       // But we store as start of local day in UTC, so startUtc should be 21:00 UTC
       expect(appointmentsRepo.findByScheduledStartRange).toHaveBeenCalledOnce();
-      const [, , , startArg, endArg] = (
+      const mockCalls = (
         appointmentsRepo.findByScheduledStartRange as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
-
-      // The start boundary should be the UTC equivalent of local midnight
-      // For Asia/Baghdad (UTC+3), at 15:00 Baghdad time:
-      // - Local midnight today: 00:00 Baghdad = 21:00 previous day UTC
+      ).mock.calls;
+      const firstCall = mockCalls[0]!;
+      expect(firstCall).toBeDefined();
+      const startArg = firstCall[3] as Date;
+      const endArg = firstCall[4] as Date;
       expect(startArg).toBeInstanceOf(Date);
       expect(endArg).toBeInstanceOf(Date);
     });
@@ -537,18 +577,20 @@ describe('AppointmentsTodayService', () => {
 
       await service.loadTodayAppointments('cookie', BASE_AUDIT_CONTEXT);
 
-      const [tenantArg, orgArg, facilityArg] = (
+      const mockCalls = (
         appointmentsRepo.findByScheduledStartRange as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
-      expect(tenantArg).toBe(TEST_TENANT_ID);
-      expect(orgArg).toBe(TEST_ORG_ID);
-      expect(facilityArg).toBe(TEST_FACILITY_ID);
+      ).mock.calls;
+      const firstCall = mockCalls[0]!;
+      expect(firstCall).toBeDefined();
+      expect(firstCall[0]).toBe(TEST_TENANT_ID);
+      expect(firstCall[1]).toBe(TEST_ORG_ID);
+      expect(firstCall[2]).toBe(TEST_FACILITY_ID);
     });
 
     // --- Contract field validation ---
 
     it('returns canonical AppointmentStatus values', async () => {
-      const appointments = [
+      const appointments: Appointment[] = [
         makeAppointment({ status: 'booked' }),
         makeAppointment({ status: 'confirmed' }),
         makeAppointment({ status: 'cancelled' }),
@@ -573,7 +615,7 @@ describe('AppointmentsTodayService', () => {
     });
 
     it('returns ISO-8601 formatted timestamps', async () => {
-      const appointments = [
+      const appointments: Appointment[] = [
         makeAppointment({
           scheduledStart: new Date('2026-08-01T09:00:00.000Z'),
           scheduledEnd: new Date('2026-08-01T09:30:00.000Z'),
@@ -590,10 +632,10 @@ describe('AppointmentsTodayService', () => {
       );
 
       // Verify ISO format
-      expect(result!.appointments[0].scheduledStart).toMatch(
+      expect(result!.appointments[0]?.scheduledStart).toMatch(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
       );
-      expect(result!.appointments[0].scheduledEnd).toMatch(
+      expect(result!.appointments[0]?.scheduledEnd).toMatch(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
       );
     });

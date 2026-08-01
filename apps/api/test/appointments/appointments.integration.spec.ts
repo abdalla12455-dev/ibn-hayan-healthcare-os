@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 
 /**
  * Appointments Today Integration Tests.
@@ -17,22 +17,18 @@
  *
  * Per the task specification, these tests require PostgreSQL 17.
  * They are NOT run locally without PostgreSQL 17.
+ *
+ * Determinism: All tests use a fixed clock instant (2026-08-01T12:00:00.000Z)
+ * to ensure consistent behavior regardless of execution date or server timezone.
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { Server } from 'node:http';
 import { INestApplication } from '@nestjs/common';
-import { ThrottlerStorage } from '@nestjs/throttler';
+import { PrismaClient } from '../../generated/prisma/client.js';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { AppModule } from '../../src/app.module.js';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
 import { LocalCredentialService } from '../../src/infrastructure/database/repositories/local-credential.service.js';
@@ -44,10 +40,6 @@ import type {
   TenantRoleAssignmentRepository,
   OrganisationRepository,
   FacilityRepository,
-  TenantId,
-  OrganisationId,
-  FacilityId,
-  TenantMembershipId,
 } from '@ibn-hayan/domain';
 import {
   USER_REPOSITORY,
@@ -59,6 +51,22 @@ import {
 } from '../../src/infrastructure/database/database.module.js';
 import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
 import { TodayAppointmentsResponseSchema } from '@ibn-hayan/contracts';
+import { CLOCK_SERVICE_TOKEN } from '../../src/infrastructure/clock/clock.module.js';
+import type { ClockService } from '../../src/infrastructure/clock/clock.service.js';
+
+// ---------------------------------------------------------------------------
+// Fixed test clock
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed test clock that always returns 2026-08-01T12:00:00.000Z.
+ * This ensures all tests are deterministic regardless of execution date
+ * or server timezone.
+ */
+const FIXED_TEST_INSTANT = new Date('2026-08-01T12:00:00.000Z');
+const mockClockService: ClockService = {
+  now: () => FIXED_TEST_INSTANT,
+};
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -77,7 +85,7 @@ let organisations: OrganisationRepository;
 let facilities: FacilityRepository;
 let credentials: LocalCredentialService;
 let passwordService: PasswordService;
-let throttlerStorage: ThrottlerStorage;
+let seedPrisma: PrismaClient;
 
 const TEST_PASSWORD = 'sufficiently-long-password';
 const ORIGIN = 'http://localhost:3000';
@@ -107,12 +115,15 @@ async function createUser(
   email: string,
   displayName: string,
 ): Promise<{ userId: string }> {
-  const passwordHash = await hashPassword(TEST_PASSWORD);
   const user = await users.create({
     email,
-    passwordHash,
     displayName,
-    status: 'active',
+  });
+  const hash = await hashPassword(TEST_PASSWORD);
+  await credentials.createCredential({
+    userId: user.id,
+    passwordHash: hash,
+    passwordChangedAt: new Date(),
   });
   return { userId: user.id };
 }
@@ -124,21 +135,19 @@ async function createTenant(
   const tenant = await tenants.create({
     slug,
     displayName,
-    status: 'active',
   });
   return { tenantId: tenant.id };
 }
 
 async function createOrganisation(
   tenantId: string,
-  slug: string,
+  code: string,
   displayName: string,
 ): Promise<{ organisationId: string }> {
   const organisation = await organisations.create({
     tenantId: tenantId as never,
-    slug,
+    code,
     displayName,
-    status: 'active',
   });
   return { organisationId: organisation.id };
 }
@@ -146,18 +155,22 @@ async function createOrganisation(
 async function createFacility(
   tenantId: string,
   organisationId: string,
-  slug: string,
+  code: string,
   displayName: string,
   timezone: string | null,
 ): Promise<{ facilityId: string }> {
   const facility = await facilities.create({
     tenantId: tenantId as never,
     organisationId: organisationId as never,
-    slug,
+    code,
     displayName,
-    status: 'active',
-    timezone,
   });
+  // Update timezone via raw SQL
+  await seedPrisma.$executeRaw`
+    UPDATE facilities
+    SET timezone = ${timezone}
+    WHERE id = ${facility.id}
+  `;
   return { facilityId: facility.id };
 }
 
@@ -186,14 +199,25 @@ async function assignRole(
 async function login(
   email: string,
 ): Promise<{ sessionId: string; token: string }> {
-  const credential = await credentials.create({
-    userEmail: email,
-    password: TEST_PASSWORD,
-    origin: ORIGIN,
-  });
+  const loginResponse = await request(server)
+    .post('/api/v1/auth/login')
+    .set('Origin', ORIGIN)
+    .send({
+      email,
+      password: TEST_PASSWORD,
+    })
+    .expect(200);
+
+  const cookies = loginResponse.headers['set-cookie'] as string[] | undefined;
+  const sessionCookie = cookies?.find((c) =>
+    c.startsWith('ibn_hayan_session='),
+  );
+  const cookieValue = sessionCookie?.split(';')[0] ?? '';
+  const sessionId = cookieValue.replace('ibn_hayan_session=', '');
+
   return {
-    sessionId: credential.sessionId,
-    token: credential.token,
+    sessionId: decodeURIComponent(sessionId),
+    token: '',
   };
 }
 
@@ -251,7 +275,10 @@ async function createAppointment(
 beforeAll(async () => {
   const module = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    .overrideProvider(CLOCK_SERVICE_TOKEN)
+    .useValue(mockClockService)
+    .compile();
 
   app = module.createNestApplication();
   await app.init();
@@ -266,17 +293,23 @@ beforeAll(async () => {
   facilities = module.get(FACILITY_REPOSITORY);
   credentials = module.get(LocalCredentialService);
   passwordService = module.get(PasswordService);
-  throttlerStorage = module.get(ThrottlerStorage);
+
+  // Create seedPrisma for raw SQL operations
+  const databaseUrl = process.env['DATABASE_URL'];
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is not set');
+  }
+  const adapter = new PrismaPg({ connectionString: databaseUrl });
+  seedPrisma = new PrismaClient({ adapter });
 });
 
 beforeEach(async () => {
   await truncateAll();
-  // Clear throttler storage
-  throttlerStorage.storage.clear();
 });
 
 afterAll(async () => {
   await app.close();
+  await seedPrisma?.$disconnect();
 });
 
 // ---------------------------------------------------------------------------
@@ -454,9 +487,6 @@ describe('Appointments Today Integration', () => {
     await selectOrganisation(sessionId, organisationId);
     await selectFacility(sessionId, facilityId);
 
-    // Record baseline
-    const baseline = await prisma.auditOutboxEvent.count();
-
     // Request
     await request(server)
       .get('/api/v1/appointments/today')
@@ -481,7 +511,7 @@ describe('Appointments Today Integration', () => {
 
     expect(viewedEvents.length).toBeGreaterThan(0);
     const viewedEvent = JSON.parse(
-      viewedEvents[0].canonicalEventDraft as string,
+      viewedEvents[0]!.canonicalEventDraft as string,
     );
     expect(viewedEvent.outcome).toBe('success');
     expect(viewedEvent.metadata?.endpoint).toBe('appointments_today_view');
@@ -565,7 +595,10 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: user A with R09
-    const { userId: userIdA } = await createUser('usera@example.test', 'User A');
+    const { userId: userIdA } = await createUser(
+      'usera@example.test',
+      'User A',
+    );
     const { membershipId: membershipIdA } = await createMembership(
       userIdA,
       tenantIdA,
@@ -606,7 +639,10 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: user B with R09
-    const { userId: userIdB } = await createUser('userb@example.test', 'User B');
+    const { userId: userIdB } = await createUser(
+      'userb@example.test',
+      'User B',
+    );
     const { membershipId: membershipIdB } = await createMembership(
       userIdB,
       tenantIdB,
@@ -710,15 +746,13 @@ describe('Appointments Today Integration', () => {
 
     // Create appointments at known times
     // Asia/Baghdad is UTC+3
-    // Local midnight today = 21:00 previous day UTC
-    // Local midnight tomorrow = 21:00 today UTC
-    const today = new Date();
-    const baseDate = new Date(today);
-    baseDate.setHours(21, 0, 0, 0); // Start of local day in UTC
+    // Fixed test instant is 2026-08-01T12:00:00.000Z (15:00 Baghdad time)
+    // Local midnight today = 21:00 previous day UTC = 2026-07-31T21:00:00.000Z
+    // Local midnight tomorrow = 21:00 today UTC = 2026-08-01T21:00:00.000Z
 
     // Appointment exactly at start of day (should be included)
-    const atStart = new Date(baseDate.getTime());
-    const atStartEnd = new Date(atStart.getTime() + 30 * 60 * 1000);
+    const atStart = new Date('2026-07-31T21:00:00.000Z');
+    const atStartEnd = new Date('2026-07-31T21:30:00.000Z');
     await createAppointment(
       tenantId,
       organisationId,
@@ -729,8 +763,8 @@ describe('Appointments Today Integration', () => {
     );
 
     // Appointment in middle of day (should be included)
-    const inMiddle = new Date(baseDate.getTime() + 12 * 60 * 60 * 1000);
-    const inMiddleEnd = new Date(inMiddle.getTime() + 30 * 60 * 1000);
+    const inMiddle = new Date('2026-08-01T10:00:00.000Z');
+    const inMiddleEnd = new Date('2026-08-01T10:30:00.000Z');
     await createAppointment(
       tenantId,
       organisationId,
@@ -741,8 +775,8 @@ describe('Appointments Today Integration', () => {
     );
 
     // Appointment exactly at end of day (should be excluded)
-    const atEnd = new Date(baseDate.getTime() + 24 * 60 * 60 * 1000);
-    const atEndEnd = new Date(atEnd.getTime() + 30 * 60 * 1000);
+    const atEnd = new Date('2026-08-01T21:00:00.000Z');
+    const atEndEnd = new Date('2026-08-01T21:30:00.000Z');
     await createAppointment(
       tenantId,
       organisationId,
@@ -763,7 +797,700 @@ describe('Appointments Today Integration', () => {
       appointments: { status: string }[];
     };
     expect(body.appointments.length).toBe(2);
-    expect(body.appointments[0].status).toBe('booked');
-    expect(body.appointments[1].status).toBe('confirmed');
+    expect(body.appointments[0]?.status).toBe('booked');
+    expect(body.appointments[1]?.status).toBe('confirmed');
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 10: Another role (R02 Provider) denied
+  // -------------------------------------------------------------------------
+  it('10. R02 Provider denied access', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-r02', 'Tenant R02');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-r02',
+      'Organisation R02',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-r02',
+      'Facility R02',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R02
+    const { userId } = await createUser('r02@example.test', 'R02 User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R02_PROVIDER');
+
+    // Setup: login and select context
+    const { sessionId } = await login('r02@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Request - should be denied
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(403);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 11: Missing organisation context
+  // -------------------------------------------------------------------------
+  it('11. missing organisation context returns 403', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-no-org', 'Tenant No Org');
+
+    // Setup: user with R09
+    const { userId } = await createUser('noorg@example.test', 'No Org User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login but do NOT select organisation
+    const { sessionId } = await login('noorg@example.test');
+
+    // Request - should fail with 403 (no active org context)
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(403);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 12: Missing facility context
+  // -------------------------------------------------------------------------
+  it('12. missing facility context returns 403', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-no-fac', 'Tenant No Fac');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-no-fac',
+      'Organisation No Fac',
+    );
+    // Note: No facility created - we use a non-existent facility ID
+
+    // Setup: user with R09
+    const { userId } = await createUser('nofac@example.test', 'No Fac User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select org but NOT facility
+    const { sessionId } = await login('nofac@example.test');
+    await selectOrganisation(sessionId, organisationId);
+
+    // Select a non-existent facility
+    await request(server)
+      .put('/api/v1/context/facility')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .send({ facilityId: '00000000-0000-0000-0000-000000000999' })
+      .expect(404);
+
+    // Request - should fail with 403 (no active facility context)
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(403);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 13: Invalid facility timezone returns HTTP 422
+  // -------------------------------------------------------------------------
+  it('13. invalid facility timezone returns HTTP 422', async () => {
+    // Setup
+    const { tenantId } = await createTenant(
+      'tenant-invalid-tz',
+      'Tenant Invalid TZ',
+    );
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-invalid-tz',
+      'Organisation Invalid TZ',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-invalid-tz',
+      'Facility Invalid TZ',
+      'Invalid/Timezone', // invalid timezone
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser(
+      'invalidtz@example.test',
+      'Invalid TZ User',
+    );
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('invalidtz@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Request - should fail with invalid timezone
+    const response = await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(422);
+
+    expect(response.body.error.code).toBe('APPOINTMENT_INVALID_TIMEZONE');
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 14: Deterministic ordering (scheduledStart asc, id asc)
+  // -------------------------------------------------------------------------
+  it('14. appointments returned in deterministic order', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-order', 'Tenant Order');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-order',
+      'Organisation Order',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-order',
+      'Facility Order',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser('order@example.test', 'Order User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('order@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Create appointments at same time with different IDs
+    const apptTime = new Date('2026-08-01T10:00:00.000Z');
+    const apptEnd = new Date('2026-08-01T10:30:00.000Z');
+
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facilityId,
+      apptTime,
+      apptEnd,
+      'booked',
+    );
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facilityId,
+      apptTime,
+      apptEnd,
+      'confirmed',
+    );
+
+    // Request
+    const response = await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    const body = response.body as {
+      appointments: { id: string; scheduledStart: string }[];
+    };
+
+    // Should be ordered by scheduledStart asc, then id asc
+    expect(body.appointments.length).toBe(2);
+    // Both have same scheduledStart, so should be ordered by id
+    const ids = body.appointments.map((a) => a.id);
+    expect(ids[0]!).toBeDefined();
+    expect(ids[1]!).toBeDefined();
+    expect(ids[0]! < ids[1]!).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 15: Organisation isolation
+  // -------------------------------------------------------------------------
+  it('15. organisation isolation - cannot see appointments from another org', async () => {
+    // Setup: org A with appointment
+    const { tenantId } = await createTenant('tenant-iso', 'Tenant ISO');
+    const { organisationId: orgIdA } = await createOrganisation(
+      tenantId,
+      'org-iso-a',
+      'Organisation ISO A',
+    );
+    const { facilityId: facIdA } = await createFacility(
+      tenantId,
+      orgIdA,
+      'fac-iso-a',
+      'Facility ISO A',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09 in org A
+    const { userId } = await createUser('iso@example.test', 'ISO User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select org A
+    const { sessionId } = await login('iso@example.test');
+    await selectOrganisation(sessionId, orgIdA);
+    await selectFacility(sessionId, facIdA);
+
+    // Create appointment in org A
+    await createAppointment(
+      tenantId,
+      orgIdA,
+      facIdA,
+      new Date('2026-08-01T10:00:00.000Z'),
+      new Date('2026-08-01T10:30:00.000Z'),
+      'booked',
+    );
+
+    // Switch to org B
+    const { organisationId: orgIdB } = await createOrganisation(
+      tenantId,
+      'org-iso-b',
+      'Organisation ISO B',
+    );
+    const { facilityId: facIdB } = await createFacility(
+      tenantId,
+      orgIdB,
+      'fac-iso-b',
+      'Facility ISO B',
+      'Asia/Baghdad',
+    );
+    await selectOrganisation(sessionId, orgIdB);
+    await selectFacility(sessionId, facIdB);
+
+    // Request as org B - should see empty (not org A's appointments)
+    const response = await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    const body = response.body as { appointments: unknown[] };
+    expect(body.appointments).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 16: Facility isolation
+  // -------------------------------------------------------------------------
+  it('16. facility isolation - cannot see appointments from another facility', async () => {
+    // Setup: facility A with appointment
+    const { tenantId } = await createTenant('tenant-fac-iso', 'Tenant Fac ISO');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-fac-iso',
+      'Organisation Fac ISO',
+    );
+    const { facilityId: facIdA } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-iso-a',
+      'Facility ISO A',
+      'Asia/Baghdad',
+    );
+    const { facilityId: facIdB } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-iso-b',
+      'Facility ISO B',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser('faciso@example.test', 'Fac ISO User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login as facility A
+    const { sessionId } = await login('faciso@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facIdA);
+
+    // Create appointment in facility A
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facIdA,
+      new Date('2026-08-01T10:00:00.000Z'),
+      new Date('2026-08-01T10:30:00.000Z'),
+      'booked',
+    );
+
+    // Switch to facility B
+    await selectFacility(sessionId, facIdB);
+
+    // Request as facility B - should see empty (not facility A's appointments)
+    const response = await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    const body = response.body as { appointments: unknown[] };
+    expect(body.appointments).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 17: Query/body scope override attempts rejected
+  // -------------------------------------------------------------------------
+  it('17. query/body scope override attempts cannot replace session context', async () => {
+    // Setup
+    const { tenantId } = await createTenant(
+      'tenant-override',
+      'Tenant Override',
+    );
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-override',
+      'Organisation Override',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-override',
+      'Facility Override',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser(
+      'override@example.test',
+      'Override User',
+    );
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login as tenant A, org A, facility A
+    const { sessionId } = await login('override@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Create appointment in tenant A
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facilityId,
+      new Date('2026-08-01T10:00:00.000Z'),
+      new Date('2026-08-01T10:30:00.000Z'),
+      'booked',
+    );
+
+    // Create another tenant/org/facility
+    const { tenantId: tenantB } = await createTenant(
+      'tenant-override-b',
+      'Tenant Override B',
+    );
+    const { organisationId: orgB } = await createOrganisation(
+      tenantB,
+      'org-override-b',
+      'Organisation Override B',
+    );
+    const { facilityId: facB } = await createFacility(
+      tenantB,
+      orgB,
+      'fac-override-b',
+      'Facility Override B',
+      'Asia/Baghdad',
+    );
+
+    // Attempt to override via query params (should be ignored)
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .query({ tenantId: tenantB, organisationId: orgB, facilityId: facB })
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    // Should still see tenant A's appointments (query params ignored)
+    const body = (
+      await request(server)
+        .get('/api/v1/appointments/today')
+        .set('Cookie', `ibn_hayan_session=${sessionId}`)
+        .expect(200)
+    ).body as { appointments: unknown[] };
+    expect(body.appointments.length).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 18: No audit event after auth failure
+  // -------------------------------------------------------------------------
+  it('18. no audit event after authentication failure', async () => {
+    // Setup
+    const { tenantId } = await createTenant(
+      'tenant-no-audit-auth',
+      'Tenant No Audit Auth',
+    );
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-no-audit-auth',
+      'Organisation No Audit Auth',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-no-audit-auth',
+      'Facility No Audit Auth',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser(
+      'noauditauth@example.test',
+      'No Audit Auth User',
+    );
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('noauditauth@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Request without valid session cookie
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', 'ibn_hayan_session=invalid-session-id')
+      .expect(401);
+
+    // Verify no appointments.schedule.viewed event was emitted
+    const events = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+
+    const viewedEvents = events.filter((e) => {
+      try {
+        const draft = JSON.parse(e.canonicalEventDraft as string);
+        return draft.action === 'appointments.schedule.viewed';
+      } catch {
+        return false;
+      }
+    });
+
+    expect(viewedEvents.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 19: No audit event after authorization denial
+  // -------------------------------------------------------------------------
+  it('19. no audit event after authorization denial (R13)', async () => {
+    // Setup
+    const { tenantId } = await createTenant(
+      'tenant-no-audit-r13',
+      'Tenant No Audit R13',
+    );
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-no-audit-r13',
+      'Organisation No Audit R13',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-no-audit-r13',
+      'Facility No Audit R13',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R13
+    const { userId } = await createUser(
+      'noauditr13@example.test',
+      'No Audit R13 User',
+    );
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R13_SYSTEM_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('noauditr13@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Request - should be denied
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(403);
+
+    // Verify no appointments.schedule.viewed event was emitted
+    const events = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+    });
+
+    const viewedEvents = events.filter((e) => {
+      try {
+        const draft = JSON.parse(e.canonicalEventDraft as string);
+        return draft.action === 'appointments.schedule.viewed';
+      } catch {
+        return false;
+      }
+    });
+
+    expect(viewedEvents.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 20: Audit metadata contains no sensitive data
+  // -------------------------------------------------------------------------
+  it('20. audit metadata contains no sensitive patient/provider data', async () => {
+    // Setup
+    const { tenantId } = await createTenant(
+      'tenant-audit-safe',
+      'Tenant Audit Safe',
+    );
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-audit-safe',
+      'Organisation Audit Safe',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-audit-safe',
+      'Facility Audit Safe',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser(
+      'auditsafe@example.test',
+      'Audit Safe User',
+    );
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('auditsafe@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Create an appointment
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facilityId,
+      new Date('2026-08-01T10:00:00.000Z'),
+      new Date('2026-08-01T10:30:00.000Z'),
+      'booked',
+    );
+
+    // Request
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    // Verify audit event contains no sensitive data
+    const events = await prisma.auditOutboxEvent.findMany({
+      where: { deliveredAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const viewedEvents = events.filter((e) => {
+      try {
+        const draft = JSON.parse(e.canonicalEventDraft as string);
+        return draft.action === 'appointments.schedule.viewed';
+      } catch {
+        return false;
+      }
+    });
+
+    expect(viewedEvents.length).toBeGreaterThan(0);
+    const viewedEvent = JSON.parse(
+      viewedEvents[0]!.canonicalEventDraft as string,
+    );
+
+    // Should NOT contain patientId, providerId, appointment details, names, or medical data
+    const eventStr = JSON.stringify(viewedEvent);
+    expect(eventStr).not.toContain('patientId');
+    expect(eventStr).not.toContain('providerId');
+    expect(eventStr).not.toContain('scheduledStart');
+    expect(eventStr).not.toContain('scheduledEnd');
+    expect(eventStr).not.toContain('patient');
+    expect(eventStr).not.toContain('provider');
+    expect(eventStr).not.toContain('00000000-0000-0000-0000-000000000001'); // test patient ID
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 21: generatedAt equals fixed test clock instant
+  // -------------------------------------------------------------------------
+  it('21. generatedAt equals the fixed test clock instant', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-gen-at', 'Tenant Gen At');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-gen-at',
+      'Organisation Gen At',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-gen-at',
+      'Facility Gen At',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser('genat@example.test', 'Gen At User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('genat@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Request
+    const response = await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    const body = response.body as { generatedAt: string };
+
+    // generatedAt should equal the fixed test clock instant
+    expect(body.generatedAt).toBe('2026-08-01T12:00:00.000Z');
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario 22: Audit outbox persistence
+  // -------------------------------------------------------------------------
+  it('22. audit event persisted to outbox table', async () => {
+    // Setup
+    const { tenantId } = await createTenant('tenant-outbox', 'Tenant Outbox');
+    const { organisationId } = await createOrganisation(
+      tenantId,
+      'org-outbox',
+      'Organisation Outbox',
+    );
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-outbox',
+      'Facility Outbox',
+      'Asia/Baghdad',
+    );
+
+    // Setup: user with R09
+    const { userId } = await createUser('outbox@example.test', 'Outbox User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+
+    // Setup: login and select context
+    const { sessionId } = await login('outbox@example.test');
+    await selectOrganisation(sessionId, organisationId);
+    await selectFacility(sessionId, facilityId);
+
+    // Record baseline
+    const baseline = await prisma.auditOutboxEvent.count();
+
+    // Request
+    await request(server)
+      .get('/api/v1/appointments/today')
+      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .expect(200);
+
+    // Verify event was written to the outbox table
+    const newCount = await prisma.auditOutboxEvent.count();
+    expect(newCount).toBeGreaterThan(baseline);
   });
 });

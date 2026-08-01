@@ -159,10 +159,10 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest({ query: { organisationId: 'evil-org' } });
       await controller.getTodayAppointments(req);
-      expect(
-        (service.loadTodayAppointments as ReturnType<typeof vi.fn>).mock
-          .calls[0][0],
-      ).toBe(SESSION_COOKIE_VALUE);
+      const mockCalls = (
+        service.loadTodayAppointments as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(mockCalls[0]?.[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('does NOT read facility scope from query parameters', async () => {
@@ -170,10 +170,10 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest({ query: { facilityId: 'evil-facility' } });
       await controller.getTodayAppointments(req);
-      expect(
-        (service.loadTodayAppointments as ReturnType<typeof vi.fn>).mock
-          .calls[0][0],
-      ).toBe(SESSION_COOKIE_VALUE);
+      const mockCalls = (
+        service.loadTodayAppointments as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(mockCalls[0]?.[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('does NOT read scope from custom headers', async () => {
@@ -187,10 +187,10 @@ describe('AppointmentsController', () => {
         },
       });
       await controller.getTodayAppointments(req);
-      expect(
-        (service.loadTodayAppointments as ReturnType<typeof vi.fn>).mock
-          .calls[0][0],
-      ).toBe(SESSION_COOKIE_VALUE);
+      const mockCalls = (
+        service.loadTodayAppointments as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(mockCalls[0]?.[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('does NOT read scope from body fields', async () => {
@@ -198,10 +198,10 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(service);
       const req = makeRequest({ body: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
-      expect(
-        (service.loadTodayAppointments as ReturnType<typeof vi.fn>).mock
-          .calls[0][0],
-      ).toBe(SESSION_COOKIE_VALUE);
+      const mockCalls = (
+        service.loadTodayAppointments as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      expect(mockCalls[0]?.[0]).toBe(SESSION_COOKIE_VALUE);
     });
 
     it('propagates service errors as-is', async () => {
