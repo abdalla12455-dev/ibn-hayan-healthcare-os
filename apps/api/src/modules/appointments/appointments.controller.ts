@@ -17,9 +17,12 @@ import { AuthorizationGuard } from '../authorization/authorization.guard.js';
 import { RequirePermission } from '../authorization/require-permission.decorator.js';
 import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import { sessionRequired } from '../auth/auth.errors.js';
-import type { AuditRequestContext } from '../auth/auth.service.js';
 import type { TodayAppointmentsResponse } from '@ibn-hayan/contracts';
 import { AppointmentsTodayService } from './appointments-today.service.js';
+import {
+  readCookie,
+  buildAuditContext,
+} from '../../infrastructure/transport/index.js';
 
 /**
  * Appointments controller.
@@ -181,55 +184,4 @@ export class AppointmentsController {
     }
     return result;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Transport helpers (duplicated from auth.controller.ts because the
-// auth controller's helpers are not exported).
-// ---------------------------------------------------------------------------
-
-/**
- * Read a cookie value from the request. Returns `undefined` if the
- * cookie is not present.
- */
-function readCookie(req: Request, name: string): string | undefined {
-  const raw = req.headers.cookie;
-  if (!raw) {
-    return undefined;
-  }
-  for (const part of raw.split(';')) {
-    const trimmed = part.trim();
-    const eq = trimmed.indexOf('=');
-    if (eq < 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, eq);
-    const value = trimmed.slice(eq + 1);
-    if (key === name) {
-      return decodeURIComponent(value);
-    }
-  }
-  return undefined;
-}
-
-/**
- * Build the audit request context from the Express request. Mirrors
- * the helper in `apps/api/src/modules/auth/auth.controller.ts`.
- */
-function buildAuditContext(req: Request): AuditRequestContext {
-  const requestId =
-    (req as { requestId?: string }).requestId ??
-    '00000000-0000-0000-0000-000000000000';
-  const correlationId =
-    (req as { correlationId?: string }).correlationId ?? null;
-  const ipRaw = req.ip ?? req.socket?.remoteAddress ?? null;
-  const ipAddress = ipRaw !== null && ipRaw !== undefined ? ipRaw : null;
-  const uaRaw = req.headers['user-agent'];
-  const userAgent =
-    typeof uaRaw === 'string'
-      ? uaRaw
-      : Array.isArray(uaRaw)
-        ? (uaRaw[0] ?? null)
-        : null;
-  return { requestId, correlationId, ipAddress, userAgent };
 }

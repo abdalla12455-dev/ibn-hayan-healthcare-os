@@ -15,9 +15,9 @@
  * structural enforcement that prevents cross-tenant, cross-organisation,
  * or cross-facility data leakage.
  *
- * The ports return domain values (Appointment), not Prisma-generated
- * row types. The mapping between Prisma types and domain types is
- * explicit and tested in the persistence adapter.
+ * The ports return domain values (AppointmentReadProjection), not
+ * Prisma-generated row types. The mapping between Prisma types and
+ * domain types is explicit and tested in the persistence adapter.
  *
  * No use cases, API DTOs, controllers, or business workflows are
  * declared here. The ports are pure data-access interfaces.
@@ -26,7 +26,9 @@
  * Next.js, React, Zod, or any framework.
  */
 
-import type { Appointment } from './appointment.js';
+import type {
+  AppointmentReadProjection,
+} from './appointment.js';
 import type { TenantId } from '../tenancy/tenant.js';
 import type { OrganisationId } from '../tenancy/organisation.js';
 import type { FacilityId } from '../tenancy/facility.js';
@@ -64,5 +66,5 @@ export interface AppointmentRepository {
     facilityId: FacilityId,
     startUtc: Date,
     endUtc: Date,
-  ): Promise<Appointment[]>;
+  ): Promise<AppointmentReadProjection[]>;
 }

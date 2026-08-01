@@ -13,6 +13,10 @@ import type { AuditRequestContext } from '../auth/auth.service.js';
 import type { AuditHelperService } from '../audit/audit-helper.service.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { ClockService } from '../../infrastructure/clock/index.js';
+import {
+  computeFacilityDayBoundaries,
+  getOffsetAtUtc,
+} from './facility-day-boundaries.js';
 
 /**
  * Focused unit tests for the AppointmentsTodayService.
@@ -498,6 +502,22 @@ describe('AppointmentsTodayService', () => {
       expect(endArg).toBeInstanceOf(Date);
     });
 
+    it('generatedAt equals the exact clock instant', async () => {
+      const clockInstant = new Date('2026-08-01T12:00:00.000Z');
+      const { service } = makeService({
+        clockNow: clockInstant,
+      });
+
+      const result = await service.loadTodayAppointments(
+        'cookie',
+        BASE_AUDIT_CONTEXT,
+      );
+
+      // generatedAt must equal the exact clock instant, not boundaries.startUtc
+      expect(result).not.toBeNull();
+      expect(result!.generatedAt).toBe(clockInstant.toISOString());
+    });
+
     // --- Repository queries ---
 
     it('queries appointments repository when authenticated', async () => {
@@ -777,69 +797,3 @@ describe('Timezone boundary calculation', () => {
     });
   });
 });
-
-// Helper function for timezone boundary tests
-// (duplicated from service for isolated unit testing)
-function getOffsetAtUtc(utcInstant: Date, timezone: string): number {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-      .formatToParts(utcInstant)
-      .map((p) => [p.type, p.value]),
-  );
-  const utcEquiv = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-  );
-  return utcEquiv - utcInstant.getTime();
-}
-
-function computeFacilityDayBoundaries(
-  now: Date,
-  timezone: string,
-): { localDate: string; startUtc: Date; endUtc: Date } {
-  const nowParts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    })
-      .formatToParts(now)
-      .map((p) => [p.type, p.value]),
-  );
-
-  const localYear = Number(nowParts.year);
-  const localMonth = Number(nowParts.month) - 1;
-  const localDay = Number(nowParts.day);
-  const localDate = `${localYear}-${nowParts.month}-${nowParts.day}`;
-
-  const todayUtcMidnight = Date.UTC(localYear, localMonth, localDay);
-  const tomorrowUtcMidnight = Date.UTC(localYear, localMonth, localDay + 1);
-
-  const offsetAtStart = getOffsetAtUtc(new Date(todayUtcMidnight), timezone);
-  const startUtc = new Date(todayUtcMidnight - offsetAtStart);
-
-  const offsetAtEnd = getOffsetAtUtc(new Date(tomorrowUtcMidnight), timezone);
-  const naiveEndUtc = todayUtcMidnight + 24 * 60 * 60 * 1000 - offsetAtStart;
-  const offsetDelta = offsetAtEnd - offsetAtStart;
-  const adjustedEndUtc = naiveEndUtc - offsetDelta;
-
-  return { localDate, startUtc, endUtc: new Date(adjustedEndUtc) };
-}

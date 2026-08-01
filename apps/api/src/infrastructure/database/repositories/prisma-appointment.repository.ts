@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import type {
   AppointmentRepository,
-  Appointment,
+  AppointmentReadProjection,
   TenantId,
   OrganisationId,
   FacilityId,
 } from '@ibn-hayan/domain';
 import { PrismaService } from '../prisma.service.js';
-import { appointmentFromPrisma } from '../mappers/appointment.mapper.js';
+import { appointmentRowFromPrisma } from '../mappers/appointment.mapper.js';
 
 /**
  * Prisma-backed implementation of {@link AppointmentRepository} from
@@ -23,7 +23,7 @@ import { appointmentFromPrisma } from '../mappers/appointment.mapper.js';
  * adapter's public signatures.
  *
  * The query uses a `select` clause to load only the fields required
- * by the domain/read contract, avoiding unnecessary column reads.
+ * by the AppointmentReadProjection, avoiding unnecessary column reads.
  */
 @Injectable()
 export class PrismaAppointmentRepository implements AppointmentRepository {
@@ -35,7 +35,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     facilityId: FacilityId,
     startUtc: Date,
     endUtc: Date,
-  ): Promise<Appointment[]> {
+  ): Promise<AppointmentReadProjection[]> {
     const rows = await this.prisma.appointment.findMany({
       where: {
         tenantId,
@@ -57,6 +57,6 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         typeCode: true,
       },
     });
-    return rows.map(appointmentFromPrisma);
+    return rows.map(appointmentRowFromPrisma);
   }
 }

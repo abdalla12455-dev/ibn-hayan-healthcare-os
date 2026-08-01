@@ -81,3 +81,25 @@ export interface Appointment {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
+
+/**
+ * Read projection for the "Today's Appointments" query.
+ *
+ * This projection contains ONLY the fields required for the read contract.
+ * It is NOT the full Appointment aggregate. Fields that are only needed
+ * for write operations (tenantId, organisationId, facilityId, createdAt,
+ * updatedAt) are excluded to avoid fabricating values.
+ *
+ * Used by:
+ * - `AppointmentRepository.findByScheduledStartRange()` return type
+ * - `PrismaAppointmentRepository` mapper input type
+ */
+export interface AppointmentReadProjection {
+  readonly id: AppointmentId;
+  readonly patientId: PatientId;
+  readonly providerId: ProviderId;
+  readonly scheduledStart: Date;
+  readonly scheduledEnd: Date;
+  readonly status: AppointmentStatus;
+  readonly typeCode: string;
+}

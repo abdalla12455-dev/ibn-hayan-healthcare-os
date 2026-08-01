@@ -314,10 +314,9 @@ describe('Appointments Today Integration', () => {
     await selectFacility(sessionId, facilityId);
 
     // Create an appointment for today
-    const today = new Date();
-    today.setHours(9, 0, 0, 0);
-    const todayEnd = new Date(today);
-    todayEnd.setHours(9, 30, 0, 0);
+    // Asia/Baghdad is UTC+3. At 2026-08-01 09:00 Baghdad time = 2026-08-01 06:00 UTC
+    const today = new Date('2026-08-01T06:00:00.000Z');
+    const todayEnd = new Date('2026-08-01T06:30:00.000Z');
     await createAppointment(
       tenantId,
       organisationId,
@@ -551,13 +550,13 @@ describe('Appointments Today Integration', () => {
   // -------------------------------------------------------------------------
   it('7. tenant isolation - cannot see appointments from another tenant', async () => {
     // Setup: tenant A with appointment
-    const { tenantIdA } = await createTenant('tenant-a', 'Tenant A');
-    const { organisationIdA } = await createOrganisation(
+    const { tenantId: tenantIdA } = await createTenant('tenant-a', 'Tenant A');
+    const { organisationId: organisationIdA } = await createOrganisation(
       tenantIdA,
       'org-a',
       'Organisation A',
     );
-    const { facilityIdA } = await createFacility(
+    const { facilityId: facilityIdA } = await createFacility(
       tenantIdA,
       organisationIdA,
       'fac-a',
@@ -566,20 +565,22 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: user A with R09
-    const { userIdA } = await createUser('usera@example.test', 'User A');
-    const { membershipIdA } = await createMembership(userIdA, tenantIdA);
+    const { userId: userIdA } = await createUser('usera@example.test', 'User A');
+    const { membershipId: membershipIdA } = await createMembership(
+      userIdA,
+      tenantIdA,
+    );
     await assignRole(membershipIdA, 'R09_ADMINISTRATOR');
 
     // Setup: login as user A and select context
-    const { sessionIdA } = await login('usera@example.test');
+    const { sessionId: sessionIdA } = await login('usera@example.test');
     await selectOrganisation(sessionIdA, organisationIdA);
     await selectFacility(sessionIdA, facilityIdA);
 
     // Create appointment in tenant A
-    const today = new Date();
-    today.setHours(9, 0, 0, 0);
-    const todayEnd = new Date(today);
-    todayEnd.setHours(9, 30, 0, 0);
+    // Asia/Baghdad is UTC+3. At 2026-08-01 09:00 Baghdad time = 2026-08-01 06:00 UTC
+    const today = new Date('2026-08-01T06:00:00.000Z');
+    const todayEnd = new Date('2026-08-01T06:30:00.000Z');
     await createAppointment(
       tenantIdA,
       organisationIdA,
@@ -590,13 +591,13 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: tenant B (no appointments)
-    const { tenantIdB } = await createTenant('tenant-b', 'Tenant B');
-    const { organisationIdB } = await createOrganisation(
+    const { tenantId: tenantIdB } = await createTenant('tenant-b', 'Tenant B');
+    const { organisationId: organisationIdB } = await createOrganisation(
       tenantIdB,
       'org-b',
       'Organisation B',
     );
-    const { facilityIdB } = await createFacility(
+    const { facilityId: facilityIdB } = await createFacility(
       tenantIdB,
       organisationIdB,
       'fac-b',
@@ -605,12 +606,15 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: user B with R09
-    const { userIdB } = await createUser('userb@example.test', 'User B');
-    const { membershipIdB } = await createMembership(userIdB, tenantIdB);
+    const { userId: userIdB } = await createUser('userb@example.test', 'User B');
+    const { membershipId: membershipIdB } = await createMembership(
+      userIdB,
+      tenantIdB,
+    );
     await assignRole(membershipIdB, 'R09_ADMINISTRATOR');
 
     // Setup: login as user B and select context
-    const { sessionIdB } = await login('userb@example.test');
+    const { sessionId: sessionIdB } = await login('userb@example.test');
     await selectOrganisation(sessionIdB, organisationIdB);
     await selectFacility(sessionIdB, facilityIdB);
 

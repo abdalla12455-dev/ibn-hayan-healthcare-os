@@ -1,5 +1,6 @@
 import type {
   Appointment,
+  AppointmentReadProjection,
   AppointmentId,
   AppointmentStatus,
   FacilityId,
@@ -15,15 +16,12 @@ import type {
 
 /**
  * Maps between the Prisma-generated `Appointment` row type and the
- * framework-independent `Appointment` domain type.
+ * framework-independent domain types.
  *
  * Per CODING_STANDARDS.md §5, the mapping is explicit and tested.
- *
- * The input type accepts the full Prisma row (for general queries) or
- * a partial row with only selected fields (for optimized read queries).
  */
 
-/** Input type: subset of Appointment fields that can come from a SELECT clause */
+/** Input type: subset of Appointment fields from a SELECT clause */
 export type AppointmentRowInput = Pick<
   PrismaAppointment,
   | 'id'
@@ -41,19 +39,47 @@ function prismaStatusToDomain(
   return status;
 }
 
-export function appointmentFromPrisma(row: AppointmentRowInput): Appointment {
+/**
+ * Maps a Prisma row to an AppointmentReadProjection.
+ *
+ * This is the mapper used by the PrismaAppointmentRepository for the
+ * "Today's Appointments" read projection. It only maps the fields
+ * required by the read contract and does NOT fabricate tenantId,
+ * organisationId, facilityId, createdAt, or updatedAt.
+ */
+export function appointmentRowFromPrisma(
+  row: AppointmentRowInput,
+): AppointmentReadProjection {
   return {
     id: row.id as AppointmentId,
-    tenantId: undefined as unknown as TenantId,
-    organisationId: undefined as unknown as OrganisationId,
-    facilityId: undefined as unknown as FacilityId,
     patientId: row.patientId as PatientId,
     providerId: row.providerId as ProviderId,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
     status: prismaStatusToDomain(row.status),
     typeCode: row.typeCode,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+  };
+}
+
+/**
+ * Maps a Prisma row to a full Appointment domain object.
+ *
+ * This is used when the complete Appointment aggregate is needed
+ * (e.g., for detailed views or write operations that need all fields).
+ */
+export function appointmentFromPrisma(row: PrismaAppointment): Appointment {
+  return {
+    id: row.id as AppointmentId,
+    tenantId: row.tenantId as TenantId,
+    organisationId: row.organisationId as OrganisationId,
+    facilityId: row.facilityId as FacilityId,
+    patientId: row.patientId as PatientId,
+    providerId: row.providerId as ProviderId,
+    scheduledStart: row.scheduledStart,
+    scheduledEnd: row.scheduledEnd,
+    status: prismaStatusToDomain(row.status),
+    typeCode: row.typeCode,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   };
 }
