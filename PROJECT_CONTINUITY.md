@@ -4310,19 +4310,20 @@ None.
 | `prisma generate` | PASS |
 | `pnpm run build` | PASS |
 | `pnpm run lint` | PASS (0 errors, 0 warnings) |
-| `pnpm exec vitest run` | PASS (393 tests, 17 test files) |
+| `pnpm exec vitest run` | PASS (419 tests, 17 test files) |
 | `git diff --check` | PASS |
 | `git status` | Clean (no uncommitted changes) |
 
 ### 15. PostgreSQL 17 Execution Status
 
-NOT AVAILABLE. No PostgreSQL 17 instance in local environment. Integration tests require GitHub Actions.
+NOT AVAILABLE locally. No PostgreSQL 17 instance in this environment. Integration tests require GitHub Actions CI validation.
 
 ### 16. Test Results
 
-- Unit tests: 25 passing (12 service + 10 controller + 3 error tests)
-- Full suite: 393 tests passing across 17 test files
+- Unit tests: 419 passing across 17 test files
+- Full suite: 419 tests passing across 17 test files
 - No regressions in existing tests
+- Integration test scenarios: 21 scenarios (see `apps/api/test/appointments/appointments.integration.spec.ts`)
 
 ### 17. Confirmation
 
@@ -4385,7 +4386,7 @@ Implement Stage 1B of the Ibn Hayan Today Appointments feature:
 - Comprehensive unit tests for DST handling (spring-forward, fall-back)
 - Tests for null timezone, invalid timezone behavior
 - No UTC fallback behavior verification
-- PostgreSQL 17 integration test suite (9 scenarios)
+- PostgreSQL 17 integration test suite (21 scenarios)
 
 #### New Files
 
@@ -4438,27 +4439,52 @@ Implement Stage 1B of the Ibn Hayan Today Appointments feature:
 
 6. **CORRECTION 6: Accurate reporting**
    - Count files directly from Git
-   - Total: 5 commits, 36 files changed, 3573 insertions, 24 deletions
+   - Total: 7 commits, 38 files changed, 4561 insertions, 79 deletions
 
-#### Final File Summary (vs origin/main)
+### 22. Final Fix Commit (2026-08-01)
+
+**Commit SHA:** 36248ca03c752488ea3af443be3caecaeed9b3e2
+
+#### Fixes Applied
+
+1. **TypeScript null safety**:
+   - Only RangeError is converted to APPOINTMENT_INVALID_TIMEZONE
+   - Other errors are re-thrown unchanged (not silently swallowed)
+   - Fixed TypeScript null safety for `mock.calls[0]?.[0]` access patterns
+
+2. **Shared transport helpers**:
+   - Extracted `readCookie` and `buildAuditContext` from auth.controller.ts to `transport.helpers.ts`
+   - Updated auth.controller.ts to import from shared helpers
+   - Added `apps/api/test/infrastructure/transport.helpers.spec.ts`
+
+3. **Integration test fixes**:
+   - Fixed PrismaClient and PrismaPg adapter imports for raw SQL operations
+   - Fixed session cookie parsing with proper null safety
+   - Fixed appointment array access with proper null safety
+   - Applied lint fixes (prettier formatting)
+
+#### Final File Summary (vs origin/main a452007)
 
 | Metric | Count |
 |--------|-------|
-| Commits | 5 |
+| Commits | 7 |
 | Files created | 23 |
-| Files modified | 23 |
-| Total files changed | 36 |
-| Insertions | 3573 |
-| Deletions | 24 |
+| Files modified | 25 |
+| Total files changed | 38 |
+| Insertions | 4561 |
+| Deletions | 79 |
 
-### 22. Remaining Risks
+### 23. Remaining Risks
 
-- PostgreSQL 17 integration tests not locally validated
-- Full authorization regression tests pending GitHub Actions
-- No actual patient/provider data for integration testing
+- PostgreSQL 17 integration tests require GitHub Actions CI validation (not locally available)
+- 21 integration scenarios implemented but not locally executed
 
-### 23. Recommended Next Step
+### 24. Recommended Next Step
 
 1. Create pull request for code review
-2. Wait for GitHub Actions PostgreSQL 17 validation
-3. Stage 2: Add appointment creation/update/cancel operations
+2. Wait for GitHub Actions CI validation:
+   - `static-and-build` job (typecheck, lint, unit tests)
+   - `postgresql17-validation` job (integration tests with real PostgreSQL 17)
+3. Address any CI failures
+4. Merge after both jobs pass
+5. Stage 2: Add appointment creation/update/cancel operations
