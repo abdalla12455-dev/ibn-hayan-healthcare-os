@@ -4603,3 +4603,76 @@ Main CI run #27 failed with 22 PostgreSQL 17 integration test failures originati
 
 - PostgreSQL 17 integration tests still require GitHub Actions CI validation
 - 22 tests may still fail until CI re-run confirms the fixes
+
+### 28. HTTP Bootstrap and Role Code Fix (2026-08-01)
+
+**Commit SHA:** 314e868de6e9fca239e97f1ac4ce77604e3eac75
+
+#### Root Cause
+
+Main CI run #27 showed all 22 tests failing. Two root causes identified:
+
+**Problem 1: HTTP bootstrap missing global prefix**
+- Production `main.ts` sets `app.setGlobalPrefix('api/v1')`
+- Appointments integration test bootstrap did NOT set the prefix
+- Routes `/api/v1/auth/login` and `/api/v1/appointments/today` returned HTTP 404
+- The canonical context e2e test (`context.e2e.context-spec.ts`) correctly applies the prefix
+
+**Problem 2: Invalid role code R02_PROVIDER**
+- Test used `R02_PROVIDER` which does not exist in canonical role catalogue
+- Canonical roles from `packages/domain/src/authorization/role-catalogue.ts`:
+  - R01_PHYSICIAN
+  - R02_NURSE
+  - R03_PHARMACIST
+  - ... (R04-R14)
+
+#### Corrections Applied
+
+**1. HTTP bootstrap alignment:**
+- Added `app.setGlobalPrefix('api/v1')` to beforeAll bootstrap
+- Routes now registered at the correct paths matching production
+
+**2. Route registration smoke tests:**
+- Added `describe('Application bootstrap smoke')` with two tests proving:
+  - POST /api/v1/auth/login is registered (returns 401 not 404)
+  - GET /api/v1/appointments/today is registered (returns 401 not 404)
+
+**3. Role code correction:**
+- Replaced `R02_PROVIDER` with `R02_NURSE`
+- Updated test description from 'R02 Provider' to 'R02 Nurse'
+- This is the canonical role per `role-catalogue.ts`
+
+#### Files Modified
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — Added prefix, smoke tests, fixed R02_NURSE
+
+#### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Unit tests (API) | 419 passed |
+| Unit tests (web) | 227 passed |
+| Prisma format | PASS |
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Typecheck | PASS |
+| Lint | PASS (0 errors) |
+| Production build | PASS |
+| Git diff-check | PASS |
+
+#### SHA Verification
+
+- Local SHA: 314e868de6e9fca239e97f1ac4ce77604e3eac75
+- Remote SHA (via GitHub API): 314e868de6e9fca239e97f1ac4ce77604e3eac75
+- All three SHAs match: YES
+- Push status: SUCCESS
+- PR #9 head SHA: 314e868de6e9fca239e97f1ac4ce77604e3eac75
+
+#### PostgreSQL 17 Execution Status
+
+NOT AVAILABLE locally. No PostgreSQL 17 instance in this environment. GitHub Actions remains authoritative.
+
+#### Remaining Risks
+
+- PostgreSQL 17 integration tests require GitHub Actions CI validation
+- 22 tests may still fail or pass — GitHub Actions CI will confirm
