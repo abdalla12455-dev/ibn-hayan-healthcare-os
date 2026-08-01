@@ -4540,3 +4540,66 @@ apps/api/src/modules/appointments/appointments.controller.spec.ts(114,13)
 2. Address any remaining CI failures
 3. Merge PR #9 after both jobs pass
 4. Stage 2: Add appointment creation/update/cancel operations
+
+### 27. Integration Test Infrastructure Fix (2026-08-01)
+
+**Commit SHA:** 8394d5e5ac71dc97514fd03a4cd47b04978b7af2
+
+#### Root Cause
+
+Main CI run #27 failed with 22 PostgreSQL 17 integration test failures originating from two test-infrastructure root causes:
+
+**Problem 1: Foreign-key violation on cleanup**
+- `truncateAll()` called `prisma.user.deleteMany()` before `prisma.localCredential.deleteMany()`
+- `LocalCredential.userId` has `onDelete: Restrict` foreign key referencing `User.id`
+- Deleting parent rows first caused `local_credentials_user_id_fkey` violation
+
+**Problem 2: Missing scope fields for facility-scoped role assignments**
+- `assignRole()` helper called `roleAssignments.create({ scopeLevel: 'facility' })` without passing required `scopeOrganisationId` and `scopeFacilityId` fields
+- Per `TenantRoleAssignmentRepository.create()` validation, facility-scoped assignments require both fields
+- R13 call lacked tenant-scoped base assignment prerequisite per ADR-015 §1.5
+
+#### Corrections Applied
+
+**1. truncateAll cleanup order:**
+- Added `prisma.localCredential.deleteMany()` BEFORE `prisma.user.deleteMany()`
+- Now respects the `onDelete: Restrict` foreign key from `LocalCredential.userId` to `User.id`
+- New sequence: AuthSession → TenantRoleAssignment → TenantMembership → LocalCredential → User → Facility → Organisation → Tenant
+
+**2. assignRole helper refactored:**
+- Always creates tenant-scoped base assignment first (canonical pattern)
+- For `requiresFacilityScope = true` (R09, R02, etc.): additionally creates facility-scoped assignment with `scopeOrganisationId` and `scopeFacilityId`
+- For `requiresFacilityScope = false` (R13 per ADR-015 §1.5 exception): skips facility-scoped assignment
+
+**Updated all assignRole call sites:**
+- R09 with org/facility context: pass `organisationId`, `facilityId`
+- R02 with org/facility context: pass `organisationId`, `facilityId`
+- R13: pass `requiresFacilityScope = false` (tenant-scoped only)
+- Missing org/facility context tests: no scope parameters (tenant-scoped only)
+
+#### Files Modified
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — Fixed truncateAll cleanup order and assignRole helper
+
+#### Validation Results
+
+- Unit tests: 419 passed (API), 227 passed (web)
+- Prisma format: PASS
+- Prisma validate: PASS
+- Prisma generate: PASS
+- Typecheck: PASS
+- Lint: PASS (0 errors)
+- Production build: PASS
+- Git diff-check: PASS
+
+#### SHA Verification
+
+- Local SHA: 8394d5e5ac71dc97514fd03a4cd47b04978b7af2
+- Remote SHA (via GitHub API): 8394d5e5ac71dc97514fd03a4cd47b04978b7af2
+- All three SHAs match: YES
+- Push status: SUCCESS
+
+#### Remaining Risks
+
+- PostgreSQL 17 integration tests still require GitHub Actions CI validation
+- 22 tests may still fail until CI re-run confirms the fixes
