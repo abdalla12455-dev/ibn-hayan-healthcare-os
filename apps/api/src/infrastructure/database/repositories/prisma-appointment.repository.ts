@@ -21,6 +21,9 @@ import { appointmentFromPrisma } from '../mappers/appointment.mapper.js';
  * Per ADR-012 §1.4 safeguard 1, this adapter maps Prisma row types to
  * domain types before returning; Prisma types do not leak through the
  * adapter's public signatures.
+ *
+ * The query uses a `select` clause to load only the fields required
+ * by the domain/read contract, avoiding unnecessary column reads.
  */
 @Injectable()
 export class PrismaAppointmentRepository implements AppointmentRepository {
@@ -44,6 +47,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         },
       },
       orderBy: [{ scheduledStart: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        patientId: true,
+        providerId: true,
+        scheduledStart: true,
+        scheduledEnd: true,
+        status: true,
+        typeCode: true,
+      },
     });
     return rows.map(appointmentFromPrisma);
   }

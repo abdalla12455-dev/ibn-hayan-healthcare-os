@@ -20,7 +20,10 @@ import type {
   TodayAppointmentsResponse,
   AppointmentSummary,
 } from '@ibn-hayan/contracts';
-import { appointmentConfigurationRequired } from './appointments.errors.js';
+import {
+  appointmentConfigurationRequired,
+  appointmentInvalidTimezone,
+} from './appointments.errors.js';
 
 /**
  * Appointments application service.
@@ -37,18 +40,21 @@ import { appointmentConfigurationRequired } from './appointments.errors.js';
  *   does NOT accept tenant, organisation, or facility scope from
  *   the request body or query string.
  * - Facility timezone is the authoritative timezone for facility-local
- *   operations. A null timezone is a configuration-required state.
+ *   operations. A null or invalid timezone is a configuration-required
+ *   state.
  * - No fallback to UTC, tenant timezone, server timezone, browser
  *   timezone, or any hard-coded default is applied.
  * - Results are ordered by `scheduledStart` ascending, with `id`
  *   ascending as a stable tie-breaker.
+ * - The clock is called exactly once per operation. The same instant
+ *   is used for day-boundary calculation and for generatedAt.
  *
  * Audit trail: the service emits an explicit
  * `appointments.schedule.viewed` audit event via
  * `auditHelper.emitDirect(...)` AFTER the appointments query completes
  * successfully (including empty results). The event is NOT emitted
- * when configuration is required (null timezone) or when the service
- * throws. The event is mapped to the existing `facility_context`
+ * when configuration is required (null/invalid timezone) or when the
+ * service throws. The event is mapped to the existing `facility_context`
  * category.
  */
 @Injectable()
@@ -78,7 +84,10 @@ export class AppointmentsTodayService {
    * - the user has no active memberships.
    *
    * Throws `appointmentConfigurationRequired()` (HTTP 422) if:
-   * - the active facility has no configured timezone.
+   * - the active facility has no configured timezone (null).
+   *
+   * Throws `appointmentInvalidTimezone()` (HTTP 422) if:
+   * - the active facility has an invalid IANA timezone identifier.
    *
    * The authorisation check (R09 role assignment on the active
    * membership) is performed by the `AuthorizationGuard` before
@@ -142,19 +151,23 @@ export class AppointmentsTodayService {
     }
 
     const timezone = facility.timezone;
-    const now = this.clock.now();
 
-    const [localDateStr, startUtc, endUtc] = computeFacilityDayBoundaries(
-      now,
-      timezone,
-    );
+    // Validate the timezone by attempting to use it. Intl.DateTimeFormat
+    // will throw a RangeError for invalid timezone identifiers.
+    let boundaries: { localDate: string; startUtc: Date; endUtc: Date };
+    try {
+      const now = this.clock.now();
+      boundaries = computeFacilityDayBoundaries(now, timezone);
+    } catch {
+      throw appointmentInvalidTimezone();
+    }
 
     const appointmentRows = await this.appointments.findByScheduledStartRange(
       tenantId,
       organisationId,
       facilityId,
-      startUtc,
-      endUtc,
+      boundaries.startUtc,
+      boundaries.endUtc,
     );
 
     const summaries: AppointmentSummary[] = appointmentRows.map((a) => ({
@@ -167,10 +180,11 @@ export class AppointmentsTodayService {
       typeCode: a.typeCode,
     }));
 
-    const generatedAt = this.clock.now().toISOString();
+    // Use the same instant that was used for boundary calculation.
+    const generatedAt = boundaries.startUtc.toISOString();
 
     const response: TodayAppointmentsResponse = {
-      localDate: localDateStr,
+      localDate: boundaries.localDate,
       timezone,
       generatedAt,
       appointments: summaries,
@@ -200,34 +214,85 @@ export class AppointmentsTodayService {
 }
 
 /**
+ * Compute the UTC offset for a specific UTC instant in a given timezone.
+ * Returns offset in milliseconds (positive = east of UTC).
+ *
+ * We determine the offset by:
+ * 1. Formatting the UTC instant in the target timezone to get local parts.
+ * 2. Converting those local parts to UTC using Date.UTC (not system local time).
+ * 3. Computing the difference between that UTC equivalent and the original UTC instant.
+ */
+function getOffsetAtUtc(utcInstant: Date, timezone: string): number {
+  // Get local parts at the UTC instant
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+      .formatToParts(utcInstant)
+      .map((p) => [p.type, p.value]),
+  );
+
+  // Convert local parts to UTC using Date.UTC (NOT the Date constructor,
+  // which uses system local time). This gives us the UTC instant that
+  // corresponds to "this local time in this timezone".
+  const utcEquiv = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+
+  return utcEquiv - utcInstant.getTime();
+}
+
+/**
  * Compute the UTC boundaries for the facility-local calendar day that
  * contains the given instant.
  *
- * The approach uses the `Intl.DateTimeFormat` API (available in Node.js
- * 14+) which natively supports IANA timezone identifiers. This correctly
- * handles:
+ * This function is independent of the server/process timezone. It uses
+ * `Intl.DateTimeFormat` (available in Node.js 14+) which natively supports
+ * IANA timezone identifiers and correctly handles:
  * - whole-hour offsets (e.g., UTC+3)
  * - half-hour offsets (e.g., India Standard Time, UTC+5:30)
  * - quarter-hour offsets (e.g., Nepal Time, UTC+5:45)
- * - daylight-saving transitions (DST)
+ * - daylight-saving transitions (DST) including spring-forward (23-hour)
+ *   and fall-back (25-hour) days
  * - negative offsets (e.g., UTC-5)
  *
  * The returned interval is a half-open range: `[startUtc, endUtc)`.
  * An appointment with `scheduledStart` equal to `startUtc` is included;
  * an appointment with `scheduledStart` equal to `endUtc` is excluded.
  *
+ * The algorithm correctly handles DST by:
+ * 1. Computing the offset at the START of the local day (at midnight).
+ * 2. Computing the offset at the START of the NEXT local day (at midnight).
+ * 3. Using those offsets to compute the UTC boundaries.
+ * 4. If the offsets differ (DST transition occurred), adjusting the
+ *    interval by the difference to get the correct duration.
+ *
  * @param now The current instant.
  * @param timezone The facility's IANA timezone identifier (e.g. 'Asia/Baghdad').
- * @returns A tuple of `[localDateStr, startUtc, endUtc]` where:
- *   - `localDateStr` is the facility-local date in YYYY-MM-DD format.
- *   - `startUtc` is the UTC instant when the local day begins.
- *   - `endUtc` is the UTC instant when the next local day begins.
+ * @returns An object containing:
+ *   - `localDate`: the facility-local date in YYYY-MM-DD format.
+ *   - `startUtc`: the UTC instant when the local day begins (inclusive).
+ *   - `endUtc`: the UTC instant when the next local day begins (exclusive).
+ * @throws RangeError if the timezone is not a valid IANA identifier.
  */
 function computeFacilityDayBoundaries(
   now: Date,
   timezone: string,
-): [localDateStr: string, startUtc: Date, endUtc: Date] {
+): { localDate: string; startUtc: Date; endUtc: Date } {
   // Get the facility-local date parts at the current instant.
+  // Using 'en-CA' locale gives YYYY-MM-DD format for unambiguous parsing.
   const nowParts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
@@ -247,68 +312,41 @@ function computeFacilityDayBoundaries(
   const localYear = Number(nowParts.year);
   const localMonth = Number(nowParts.month) - 1; // JS months are 0-indexed
   const localDay = Number(nowParts.day);
-  const localDateStr = `${localYear}-${nowParts.month}-${nowParts.day}`;
+  const localDate = `${localYear}-${nowParts.month}-${nowParts.day}`;
 
-  // Compute the UTC offset between the facility timezone and UTC at the
-  // current instant. This accounts for DST automatically.
-  // We do this by:
-  // 1. Formatting the current instant in UTC to get the UTC parts.
-  // 2. Computing the UTC timestamp in milliseconds.
-  // 3. Computing the "facility-equivalent local" timestamp (the same
-  //    calendar date/time components interpreted as local system time).
-  // 4. The difference gives the offset in milliseconds.
+  // Compute UTC midnight for today and tomorrow using UTC date arithmetic.
+  const todayUtcMidnight = Date.UTC(localYear, localMonth, localDay);
+  const tomorrowUtcMidnight = Date.UTC(localYear, localMonth, localDay + 1);
 
-  const utcParts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'UTC',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      fractionalSecondDigits: 3,
-      hour12: false,
-    })
-      .formatToParts(now)
-      .map((p) => [p.type, p.value]),
-  );
+  // Get the offset at today's midnight (not at the current instant).
+  // This correctly handles the offset for the start of the day.
+  const offsetAtStart = getOffsetAtUtc(new Date(todayUtcMidnight), timezone);
 
-  const nowUtcMs = Date.UTC(
-    Number(utcParts.year),
-    Number(utcParts.month) - 1,
-    Number(utcParts.day),
-    Number(utcParts.hour),
-    Number(utcParts.minute),
-    Number(utcParts.second),
-    Number(utcParts.fractionalSecond ?? '0'),
-  );
+  // Calculate the UTC instant of local midnight today.
+  const startUtc = new Date(todayUtcMidnight - offsetAtStart);
 
-  // Create a Date that represents the same calendar date/time in the
-  // local system timezone. Its internal timestamp is offset from UTC by
-  // the system timezone offset.
-  const facilityEquivalentNow = new Date(
-    localYear,
-    localMonth,
-    localDay,
-    Number(nowParts.hour),
-    Number(nowParts.minute),
-    Number(nowParts.second),
-    Number(nowParts.fractionalSecond ?? '0'),
-  );
+  // Get the offset at tomorrow's UTC midnight.
+  // This tells us the offset at the START of the next local day.
+  const offsetAtEnd = getOffsetAtUtc(new Date(tomorrowUtcMidnight), timezone);
 
-  // The difference between the facility-equivalent Date and the true
-  // UTC Date is the offset from UTC to the facility timezone at this
-  // instant (positive = east of UTC).
-  const facilityOffsetMs = facilityEquivalentNow.getTime() - nowUtcMs;
+  // Calculate the naive UTC instant of tomorrow's local midnight
+  // (using today's offset, which is what the simple algorithm does).
+  const naiveEndUtc = todayUtcMidnight + 24 * 60 * 60 * 1000 - offsetAtStart;
 
-  // Create a Date at facility local midnight (in the local system TZ).
-  // This Date's internal timestamp is wrong (it's offset by the system TZ
-  // offset, not the facility TZ offset), so we correct it.
-  const localMidnightMs =
-    Date.UTC(localYear, localMonth, localDay) - facilityOffsetMs;
-  const startUtc = new Date(localMidnightMs);
-  const endUtc = new Date(localMidnightMs + 24 * 60 * 60 * 1000);
+  // If the offset changed between today and tomorrow (DST transition),
+  // we need to adjust the end boundary.
+  // - For fall-back (offset becomes MORE negative, e.g., -4h -> -5h):
+  //   the interval is 24 + 1 = 25 hours.
+  // - For spring-forward (offset becomes LESS negative, e.g., -5h -> -4h):
+  //   the interval is 24 - 1 = 23 hours.
+  // The difference in offsets (offsetAtEnd - offsetAtStart) tells us
+  // how to adjust.
+  // - Fall-back: offsetDelta < 0 (e.g., -3600000), we need to ADD to interval
+  // - Spring-forward: offsetDelta > 0 (e.g., +3600000), we need to SUBTRACT from interval
+  const offsetDelta = offsetAtEnd - offsetAtStart; // in ms
+  // For fall-back (offset becomes more negative), add |offsetDelta|
+  // For spring-forward (offset becomes less negative), subtract offsetDelta
+  const adjustedEndUtc = naiveEndUtc - offsetDelta;
 
-  return [localDateStr, startUtc, endUtc];
+  return { localDate, startUtc, endUtc: new Date(adjustedEndUtc) };
 }
