@@ -4158,3 +4158,214 @@ This enforces all three ownership levels at the database level.
 **Immediate next step:** Merge branch into `main` via pull request.
 
 **Recovery:** If branch needs to be discarded, simply delete it. The base commit `4755a43f29b81f1ab6024b1bacfc31bce7c1a0f4` is unchanged on `main`.
+
+---
+
+## Stage 1B: Today's Appointments Read-Only Backend (2026-08-01)
+
+**Branch:** `feat/clinic-admin-todays-appointments-read-v1`
+**Created from:** `origin/main` at verified commit `a452007d4acadfaccdd344fd19319caeb5315adc`
+
+### 1. Objective
+
+Implement read-only backend vertical slice for "Today's Appointments" feature:
+- GET /api/v1/appointments/today endpoint
+- R09 Clinic Administrator role only
+- Facility-local day boundary calculation
+- appointments:view permission
+- appointments.schedule.viewed audit event
+
+### 2. Repository and Branch
+
+- Repository: https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os.git
+- Branch: feat/clinic-admin-todays-appointments-read-v1
+- Verified base commit: a452007d4acadfaccdd344fd19319caeb5315adc
+
+### 3. Repository Skills Applied
+
+- ibn-hayan-implementation-guardian
+- ibn-hayan-database-tenancy
+- ibn-hayan-completion-git-proof
+
+### 4. Architecture and Patterns Inspected
+
+- ADR-015 scoped context implementation
+- Clinic Admin Overview controller, service, tests
+- Existing authentication and authorization guards
+- Audit action codes and emission patterns
+- Clock abstraction pattern
+- Repository and domain layering conventions
+- Prisma-generated client types
+
+### 5. Endpoint Contract
+
+```
+GET /api/v1/appointments/today
+Authorization: R09 Clinic Administrator
+Permission: appointments:view
+
+Response:
+{
+  "localDate": "2026-08-01",
+  "timezone": "Asia/Baghdad",
+  "generatedAt": "2026-08-01T12:00:00.000Z",
+  "appointments": [
+    {
+      "id": "uuid",
+      "patientId": "uuid",
+      "providerId": "uuid",
+      "scheduledStart": "2026-08-01T09:00:00.000Z",
+      "scheduledEnd": "2026-08-01T09:30:00.000Z",
+      "status": "booked",
+      "typeCode": "consultation"
+    }
+  ]
+}
+
+Error (422): APPOINTMENT_CONFIGURATION_REQUIRED
+Error (401): Unauthorized
+Error (403): Forbidden
+```
+
+### 6. Facility-Local-Day Calculation
+
+- Resolves current instant from injected clock
+- Converts to facility configured timezone
+- Determines facility-local calendar date
+- Calculates UTC start of local date (inclusive)
+- Calculates UTC start of next local date (exclusive)
+- Queries using half-open interval: scheduledStart >= start AND scheduledStart < nextDayStart
+
+### 7. Null and Invalid Timezone Behavior
+
+- Null timezone: Throws APPOINTMENT_CONFIGURATION_REQUIRED (422)
+- No fallback to UTC, tenant timezone, or server timezone
+- Audit event NOT emitted for configuration errors
+
+### 8. Repository Query Scope
+
+Filter by:
+- tenantId (from authenticated context)
+- organisationId (from authenticated context)
+- facilityId (from authenticated context)
+- scheduledStart >= startUtc
+- scheduledStart < nextDayStartUtc
+
+### 9. Permission Decision
+
+Added permission: `appointments:view`
+- Granted to: R09 Clinic Administrator only
+- Denied to: R13 Platform Super Admin and all other roles
+
+### 10. Audit Action and Category
+
+Action: `appointments.schedule.viewed`
+Category: `facility_context` (existing)
+Metadata: `{ endpoint: "appointments_today_view" }` (minimal, non-sensitive)
+
+### 11. Files Created
+
+- `apps/api/src/infrastructure/clock/clock.service.ts` — ClockService interface and SystemClockService
+- `apps/api/src/infrastructure/clock/clock.module.ts` — ClockModule with CLOCK_SERVICE_TOKEN
+- `apps/api/src/infrastructure/clock/index.ts` — Clock module exports
+- `apps/api/src/infrastructure/database/mappers/appointment.mapper.ts` — appointmentFromPrisma mapper
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` — AppointmentRepository implementation
+- `apps/api/src/modules/appointments/appointments.module.ts` — AppointmentsModule
+- `apps/api/src/modules/appointments/appointments-today.service.ts` — AppointmentsTodayService
+- `apps/api/src/modules/appointments/appointments-today.service.spec.ts` — Service unit tests (12 tests)
+- `apps/api/src/modules/appointments/appointments.controller.ts` — AppointmentsController
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts` — Controller tests (10 tests)
+- `apps/api/src/modules/appointments/appointments.errors.ts` — appointmentConfigurationRequired helper
+- `apps/api/src/modules/appointments/appointments.errors.spec.ts` — Error tests (3 tests)
+- `apps/api/src/modules/appointments/index.ts` — Appointments module exports
+- `packages/contracts/src/appointments/appointments.schema.ts` — TodayAppointmentsResponse Zod schema
+- `packages/contracts/src/appointments/index.ts` — Appointments contracts exports
+- `packages/domain/src/scheduling/appointment.ts` — Appointment domain type
+- `packages/domain/src/scheduling/repositories.ts` — AppointmentRepository interface
+- `packages/domain/src/scheduling/index.ts` — Scheduling domain exports
+
+### 12. Files Modified
+
+- `apps/api/src/app.module.ts` — Added ClockModule, AppointmentsModule imports
+- `apps/api/src/infrastructure/database/database.module.ts` — Added APPOINTMENT_REPOSITORY provider
+- `apps/api/src/infrastructure/database/index.ts` — Added APPOINTMENT_REPOSITORY export
+- `apps/api/src/infrastructure/database/mappers/facility.mapper.ts` — Added timezone field mapping
+- `packages/contracts/src/index.ts` — Added appointments contracts export
+- `packages/domain/src/authorization/permissions.ts` — Added appointments:view permission
+- `packages/domain/src/authorization/role-permissions.ts` — Added appointments:view to R09 only
+- `packages/domain/src/index.ts` — Added scheduling domain exports
+- `packages/domain/src/tenancy/facility.ts` — Added timezone field to Facility type
+- `packages/observability/src/audit/action-codes.ts` — Added appointments.schedule.viewed action
+
+### 13. Files Deleted
+
+None.
+
+### 14. Validation Results
+
+| Validation | Result |
+|------------|--------|
+| `prisma format` | PASS |
+| `prisma validate` | PASS |
+| `prisma generate` | PASS |
+| `pnpm run build` | PASS |
+| `pnpm run lint` | PASS (0 errors, 0 warnings) |
+| `pnpm exec vitest run` | PASS (393 tests, 17 test files) |
+| `git diff --check` | PASS |
+| `git status` | Clean (no uncommitted changes) |
+
+### 15. PostgreSQL 17 Execution Status
+
+NOT AVAILABLE. No PostgreSQL 17 instance in local environment. Integration tests require GitHub Actions.
+
+### 16. Test Results
+
+- Unit tests: 25 passing (12 service + 10 controller + 3 error tests)
+- Full suite: 393 tests passing across 17 test files
+- No regressions in existing tests
+
+### 17. Confirmation
+
+- Prisma schema NOT modified (Stage 1A migration unchanged)
+- No migrations created or modified
+- Frontend NOT modified
+- Platform Super Admin (R13) NOT granted access
+- No patient, provider, billing, or notification code added
+
+### 18. Commit Message
+
+```
+feat: add read-only today's appointments backend
+
+Implement Stage 1B of the Ibn Hayan Today Appointments feature:
+
+- Add GET /api/v1/appointments/today endpoint for R09 Clinic Admin
+- Implement AppointmentsTodayService with facility-local day boundary
+- Add appointments:view permission for R09 only
+- Add clock abstraction for deterministic timezone testing
+- Add appointment mapper and repository
+- Add shared contracts for TodayAppointmentsResponse
+- Add APPOINTMENT_REPOSITORY to database infrastructure
+- Add audit action appointments.schedule.viewed
+- Add comprehensive unit and controller tests
+- Update Facility domain type with timezone field
+```
+
+### 19. SHA Verification
+
+- Local SHA: 6b73462af538d1b06795b5c45f0bf8a93d1474e9
+- Remote SHA (via GitHub API): 6b73462af538d1b06795b5c45f0bf8a93d1474e9
+- All three SHAs match: YES
+- Push status: SUCCESS
+
+### 20. Remaining Risks
+
+- PostgreSQL 17 integration tests not locally validated
+- Full authorization regression tests pending GitHub Actions
+- No actual patient/provider data for integration testing
+
+### 21. Recommended Next Step
+
+1. Create pull request for code review
+2. Wait for GitHub Actions PostgreSQL 17 validation
+3. Stage 2: Add appointment creation/update/cancel operations
