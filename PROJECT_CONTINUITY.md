@@ -4403,13 +4403,61 @@ Implement Stage 1B of the Ibn Hayan Today Appointments feature:
 - `.github/workflows/main-ci.yml` — Registered pnpm test:appointments
 - `apps/api/package.json` — Added test:appointments script
 
-### 21. Remaining Risks
+### 21. Finalization Commit (2026-08-01)
+
+**Commit SHA:** b72dbc55054d43fedf303d7e31973ad340ba2bbd
+
+#### Corrections Applied
+
+1. **CORRECTION 1: generatedAt behavior**
+   - Call clock.now() exactly once, store in `operationInstant`
+   - Use `operationInstant` for both boundary calculation AND `generatedAt`
+   - Added test proving `generatedAt` equals the exact clock instant
+
+2. **CORRECTION 2: Test the real timezone implementation**
+   - Extracted timezone helpers to `facility-day-boundaries.ts`
+   - Removed duplicated implementation from test file
+   - Tests now import from the real production module
+   - Added tests for spring-forward (23h) and fall-back (25h) DST transitions
+
+3. **CORRECTION 3: Read projection**
+   - Created `AppointmentReadProjection` interface in domain package
+   - Only map fields required for read contract (no fabricated values)
+   - Repository returns `AppointmentReadProjection[]` not `Appointment[]`
+   - Mapper `appointmentRowFromPrisma` without fabricating tenantId/organisationId/facilityId/createdAt/updatedAt
+
+4. **CORRECTION 4: Shared request helpers**
+   - Extracted `readCookie` and `buildAuditContext` to `transport.helpers.ts`
+   - Updated appointments controller to use shared helpers
+   - Removed duplicated helper implementations
+
+5. **CORRECTION 5: Integration tests**
+   - Fixed destructuring with explicit aliases (`tenantId: tenantIdA`)
+   - Used fixed UTC timestamps instead of `new Date()` + `setHours()`
+   - Added comments explaining timezone conversions
+
+6. **CORRECTION 6: Accurate reporting**
+   - Count files directly from Git
+   - Total: 5 commits, 36 files changed, 3573 insertions, 24 deletions
+
+#### Final File Summary (vs origin/main)
+
+| Metric | Count |
+|--------|-------|
+| Commits | 5 |
+| Files created | 23 |
+| Files modified | 23 |
+| Total files changed | 36 |
+| Insertions | 3573 |
+| Deletions | 24 |
+
+### 22. Remaining Risks
 
 - PostgreSQL 17 integration tests not locally validated
 - Full authorization regression tests pending GitHub Actions
 - No actual patient/provider data for integration testing
 
-### 22. Recommended Next Step
+### 23. Recommended Next Step
 
 1. Create pull request for code review
 2. Wait for GitHub Actions PostgreSQL 17 validation
