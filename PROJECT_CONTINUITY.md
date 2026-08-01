@@ -4358,13 +4358,58 @@ Implement Stage 1B of the Ibn Hayan Today Appointments feature:
 - All three SHAs match: YES
 - Push status: SUCCESS
 
-### 20. Remaining Risks
+### 20. Bug Fix Commit (2026-08-01)
+
+**Commit SHA:** 51eb61b022bd61fc796ae74793a33b26435bee9d
+
+#### Bug Fixes Applied
+
+1. **Facility-local day boundary calculation**:
+   - Fixed computation of start-of-day UTC using Date.UTC() with local date parts
+   - Fixed computation of end-of-day UTC using offset at the next local midnight
+   - Added DST transition adjustment (spring-forward/fall-back)
+
+2. **Clock instant reuse**:
+   - Fixed to call clock.now() once and reuse the same instant for both boundary calculation and generatedAt timestamp
+
+3. **Timezone validation**:
+   - Added RangeError catch from Intl.DateTimeFormat for invalid IANA timezone identifiers
+   - Added appointmentInvalidTimezone() error function (HTTP 422)
+
+4. **Repository optimization**:
+   - Updated to select only required fields (id, patientId, providerId, scheduledStart, scheduledEnd, status, typeCode)
+   - Updated mapper to accept selected row type
+
+#### New Test Coverage
+
+- Comprehensive unit tests for DST handling (spring-forward, fall-back)
+- Tests for null timezone, invalid timezone behavior
+- No UTC fallback behavior verification
+- PostgreSQL 17 integration test suite (9 scenarios)
+
+#### New Files
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — Integration tests
+- `apps/api/vitest.appointments.config.ts` — Vitest config for appointments
+
+#### Modified Files
+
+- `apps/api/src/modules/appointments/appointments-today.service.ts` — DST fix, clock reuse, timezone validation
+- `apps/api/src/modules/appointments/appointments-today.service.spec.ts` — 30 tests (added DST, invalid timezone)
+- `apps/api/src/modules/appointments/appointments.errors.ts` — Added appointmentInvalidTimezone()
+- `apps/api/src/modules/appointments/appointments.errors.spec.ts` — Added invalid timezone tests
+- `apps/api/src/infrastructure/database/mappers/appointment.mapper.ts` — Added AppointmentRowInput type
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` — Added select clause
+- `.github/workflows/main-ci.yml` — Registered pnpm test:appointments
+- `apps/api/package.json` — Added test:appointments script
+
+### 21. Remaining Risks
 
 - PostgreSQL 17 integration tests not locally validated
 - Full authorization regression tests pending GitHub Actions
 - No actual patient/provider data for integration testing
 
-### 21. Recommended Next Step
+### 22. Recommended Next Step
 
 1. Create pull request for code review
 2. Wait for GitHub Actions PostgreSQL 17 validation
