@@ -27,6 +27,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { Server } from 'node:http';
 import { INestApplication } from '@nestjs/common';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { PrismaClient } from '../../generated/prisma/client.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { AppModule } from '../../src/app.module.js';
@@ -86,6 +87,7 @@ let facilities: FacilityRepository;
 let credentials: LocalCredentialService;
 let passwordService: PasswordService;
 let seedPrisma: PrismaClient;
+let throttlerStorage: ThrottlerStorage;
 
 const TEST_PASSWORD = 'sufficiently-long-password';
 const ORIGIN = 'http://localhost:3000';
@@ -234,51 +236,112 @@ async function assignRole(
   }
 }
 
-async function login(
-  email: string,
-): Promise<{ sessionId: string; token: string }> {
-  const loginResponse = await request(server)
-    .post('/api/v1/auth/login')
-    .set('Origin', ORIGIN)
-    .send({
-      email,
-      password: TEST_PASSWORD,
-    })
-    .expect(200);
-
-  const cookies = loginResponse.headers['set-cookie'] as string[] | undefined;
-  const sessionCookie = cookies?.find((c) =>
-    c.startsWith('ibn_hayan_session='),
-  );
-  const cookieValue = sessionCookie?.split(';')[0] ?? '';
-  const sessionId = cookieValue.replace('ibn_hayan_session=', '');
-
-  return {
-    sessionId: decodeURIComponent(sessionId),
-    token: '',
-  };
+/**
+ * Extracts the session cookie value from a supertest response.
+ * Returns just the cookie name=value portion (before the semicolon).
+ */
+function extractSessionCookie(response: { headers?: Record<string, unknown> }): string {
+  const setCookie = response.headers?.['set-cookie'];
+  if (!setCookie) return '';
+  if (Array.isArray(setCookie)) {
+    const first = setCookie[0];
+    if (typeof first === 'string') {
+      return first.split(';')[0] ?? '';
+    }
+    return '';
+  }
+  if (typeof setCookie === 'string') {
+    return setCookie.split(';')[0] ?? '';
+  }
+  return '';
 }
 
+/**
+ * Fetch a CSRF token using the supplied session cookie.
+ */
+async function fetchCsrfToken(cookie: string): Promise<string> {
+  const response = await request(server)
+    .get('/api/v1/auth/csrf')
+    .set('Cookie', cookie)
+    .expect(200);
+  return (response.body as { token: string }).token;
+}
+
+/**
+ * Log in and return the full session cookie string (name=value).
+ */
+async function login(email: string): Promise<string> {
+  const response = await request(server)
+    .post('/api/v1/auth/login')
+    .set('Origin', ORIGIN)
+    .send({ email, password: TEST_PASSWORD })
+    .expect(200);
+  return extractSessionCookie(response);
+}
+
+/**
+ * Select tenant membership.
+ * Requires: Cookie, Origin, X-CSRF-Token
+ */
+async function selectTenant(
+  cookie: string,
+  csrfToken: string,
+  membershipId: string,
+): Promise<void> {
+  await request(server)
+    .put('/api/v1/context/tenant')
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
+    .send({ membershipId })
+    .expect(200);
+}
+
+/**
+ * Select organisation.
+ * Requires: Cookie, Origin, X-CSRF-Token
+ */
 async function selectOrganisation(
-  sessionId: string,
+  cookie: string,
+  csrfToken: string,
   organisationId: string,
 ): Promise<void> {
   await request(server)
     .put('/api/v1/context/organisation')
-    .set('Cookie', `ibn_hayan_session=${sessionId}`)
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
     .send({ organisationId })
     .expect(200);
 }
 
+/**
+ * Select facility.
+ * Requires: Cookie, Origin, X-CSRF-Token
+ */
 async function selectFacility(
-  sessionId: string,
+  cookie: string,
+  csrfToken: string,
   facilityId: string,
 ): Promise<void> {
   await request(server)
     .put('/api/v1/context/facility')
-    .set('Cookie', `ibn_hayan_session=${sessionId}`)
+    .set('Cookie', cookie)
+    .set('Origin', ORIGIN)
+    .set('X-CSRF-Token', csrfToken)
     .send({ facilityId })
     .expect(200);
+}
+
+/**
+ * Reset the ThrottlerStorage between tests to prevent throttle state leakage.
+ * The database is cleaned in truncateAll(); the in-memory throttler must also be reset.
+ */
+function resetThrottlerStorage(): void {
+  const storage = throttlerStorage as unknown as { storage?: Map<string, unknown> };
+  if (storage.storage instanceof Map) {
+    storage.storage.clear();
+  }
 }
 
 async function createAppointment(
@@ -333,6 +396,7 @@ beforeAll(async () => {
   facilities = module.get(FACILITY_REPOSITORY);
   credentials = module.get(LocalCredentialService);
   passwordService = module.get(PasswordService);
+  throttlerStorage = app.get(ThrottlerStorage);
 
   // Create seedPrisma for raw SQL operations
   const databaseUrl = process.env['DATABASE_URL'];
@@ -345,6 +409,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
+  resetThrottlerStorage();
 });
 
 afterAll(async () => {
@@ -363,10 +428,12 @@ describe('Application bootstrap smoke', () => {
     const { userId } = await createUser('smoke@example.test', 'Smoke User');
     await createMembership(userId, tenantId);
 
-    // Request with wrong password - should return 401, NOT 404
+    // Request with wrong password and valid Origin - should return 401, NOT 404 or 403
     // 404 would mean the route is not registered with the /api/v1 prefix
+    // 403 would mean Origin validation is rejecting the request
     const response = await request(server)
       .post('/api/v1/auth/login')
+      .set('Origin', ORIGIN)
       .send({ email: 'smoke@example.test', password: 'wrong-password' });
     expect(response.status).toBe(401);
   });
@@ -413,10 +480,12 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('r09@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('r09@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Create an appointment for today
     // Asia/Baghdad is UTC+3. At 2026-08-01 09:00 Baghdad time = 2026-08-01 06:00 UTC
@@ -434,7 +503,7 @@ describe('Appointments Today Integration', () => {
     // Request
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Validate response shape
@@ -480,15 +549,17 @@ describe('Appointments Today Integration', () => {
       false,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('r13@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('r13@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should be denied
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(403);
   });
 
@@ -528,15 +599,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('nulltz@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('nulltz@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should fail with configuration required
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(422);
 
     expect(response.body.error.code).toBe('APPOINTMENT_CONFIGURATION_REQUIRED');
@@ -571,15 +644,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('audit@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('audit@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Verify audit event was emitted
@@ -641,15 +716,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('noaudit@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('noaudit@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - will fail
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(422);
 
     // Verify no appointments.schedule.viewed event was emitted
@@ -705,9 +782,11 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: login as user A and select context
-    const { sessionId: sessionIdA } = await login('usera@example.test');
-    await selectOrganisation(sessionIdA, organisationIdA);
-    await selectFacility(sessionIdA, facilityIdA);
+    const cookieA = await login('usera@example.test');
+    const csrfA = await fetchCsrfToken(cookieA);
+    await selectTenant(cookieA, csrfA, membershipIdA);
+    await selectOrganisation(cookieA, csrfA, organisationIdA);
+    await selectFacility(cookieA, csrfA, facilityIdA);
 
     // Create appointment in tenant A
     // Asia/Baghdad is UTC+3. At 2026-08-01 09:00 Baghdad time = 2026-08-01 06:00 UTC
@@ -754,14 +833,16 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: login as user B and select context
-    const { sessionId: sessionIdB } = await login('userb@example.test');
-    await selectOrganisation(sessionIdB, organisationIdB);
-    await selectFacility(sessionIdB, facilityIdB);
+    const cookieB = await login('userb@example.test');
+    const csrfB = await fetchCsrfToken(cookieB);
+    await selectTenant(cookieB, csrfB, membershipIdB);
+    await selectOrganisation(cookieB, csrfB, organisationIdB);
+    await selectFacility(cookieB, csrfB, facilityIdB);
 
     // Request as user B - should see empty (not user A's appointments)
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionIdB}`)
+      .set('Cookie', cookieB)
       .expect(200);
 
     const body = response.body as { appointments: unknown[] };
@@ -797,15 +878,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context (no appointments created)
-    const { sessionId } = await login('empty@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context (no appointments created)
+    const cookie = await login('empty@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should return empty array
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     const body = response.body as {
@@ -853,10 +936,12 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('boundary@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('boundary@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Create appointments at known times
     // Asia/Baghdad is UTC+3
@@ -903,7 +988,7 @@ describe('Appointments Today Integration', () => {
     // Request
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Should include start and middle, exclude end
@@ -939,15 +1024,17 @@ describe('Appointments Today Integration', () => {
     const { membershipId } = await createMembership(userId, tenantId);
     await assignRole(membershipId, 'R02_NURSE', organisationId, facilityId);
 
-    // Setup: login and select context
-    const { sessionId } = await login('r02@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('r02@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should be denied
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(403);
   });
 
@@ -964,13 +1051,15 @@ describe('Appointments Today Integration', () => {
     // No organisation/facility created, so only tenant-scoped role
     await assignRole(membershipId, 'R09_ADMINISTRATOR');
 
-    // Setup: login but do NOT select organisation
-    const { sessionId } = await login('noorg@example.test');
+    // Setup: login and select tenant but do NOT select organisation
+    const cookie = await login('noorg@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
 
     // Request - should fail with 403 (no active org context)
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(403);
   });
 
@@ -992,21 +1081,25 @@ describe('Appointments Today Integration', () => {
     const { membershipId } = await createMembership(userId, tenantId);
     await assignRole(membershipId, 'R09_ADMINISTRATOR');
 
-    // Setup: login and select org but NOT facility
-    const { sessionId } = await login('nofac@example.test');
-    await selectOrganisation(sessionId, organisationId);
+    // Setup: login, fetch CSRF, select tenant and org but NOT facility
+    const cookie = await login('nofac@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
 
-    // Select a non-existent facility
+    // Try to select a non-existent facility (should fail with 404)
     await request(server)
       .put('/api/v1/context/facility')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
+      .set('Origin', ORIGIN)
+      .set('X-CSRF-Token', csrf)
       .send({ facilityId: '00000000-0000-0000-0000-000000000999' })
       .expect(404);
 
     // Request - should fail with 403 (no active facility context)
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(403);
   });
 
@@ -1045,15 +1138,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('invalidtz@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('invalidtz@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should fail with invalid timezone
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(422);
 
     expect(response.body.error.code).toBe('APPOINTMENT_INVALID_TIMEZONE');
@@ -1088,10 +1183,12 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('order@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('order@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Create appointments at same time with different IDs
     const apptTime = new Date('2026-08-01T10:00:00.000Z');
@@ -1117,7 +1214,7 @@ describe('Appointments Today Integration', () => {
     // Request
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     const body = response.body as {
@@ -1157,10 +1254,12 @@ describe('Appointments Today Integration', () => {
     const { membershipId } = await createMembership(userId, tenantId);
     await assignRole(membershipId, 'R09_ADMINISTRATOR', orgIdA, facIdA);
 
-    // Setup: login and select org A
-    const { sessionId } = await login('iso@example.test');
-    await selectOrganisation(sessionId, orgIdA);
-    await selectFacility(sessionId, facIdA);
+    // Setup: login, fetch CSRF, select org A
+    const cookie = await login('iso@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, orgIdA);
+    await selectFacility(cookie, csrf, facIdA);
 
     // Create appointment in org A
     await createAppointment(
@@ -1185,13 +1284,13 @@ describe('Appointments Today Integration', () => {
       'Facility ISO B',
       'Asia/Baghdad',
     );
-    await selectOrganisation(sessionId, orgIdB);
-    await selectFacility(sessionId, facIdB);
+    await selectOrganisation(cookie, csrf, orgIdB);
+    await selectFacility(cookie, csrf, facIdB);
 
     // Request as org B - should see empty (not org A's appointments)
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     const body = response.body as { appointments: unknown[] };
@@ -1231,9 +1330,11 @@ describe('Appointments Today Integration', () => {
     await assignRole(membershipId, 'R09_ADMINISTRATOR', organisationId, facIdA);
 
     // Setup: login as facility A
-    const { sessionId } = await login('faciso@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facIdA);
+    const cookie = await login('faciso@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facIdA);
 
     // Create appointment in facility A
     await createAppointment(
@@ -1246,12 +1347,12 @@ describe('Appointments Today Integration', () => {
     );
 
     // Switch to facility B
-    await selectFacility(sessionId, facIdB);
+    await selectFacility(cookie, csrf, facIdB);
 
     // Request as facility B - should see empty (not facility A's appointments)
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     const body = response.body as { appointments: unknown[] };
@@ -1294,9 +1395,11 @@ describe('Appointments Today Integration', () => {
     );
 
     // Setup: login as tenant A, org A, facility A
-    const { sessionId } = await login('override@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    const cookie = await login('override@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Create appointment in tenant A
     await createAppointment(
@@ -1330,14 +1433,14 @@ describe('Appointments Today Integration', () => {
     await request(server)
       .get('/api/v1/appointments/today')
       .query({ tenantId: tenantB, organisationId: orgB, facilityId: facB })
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Should still see tenant A's appointments (query params ignored)
     const body = (
       await request(server)
         .get('/api/v1/appointments/today')
-        .set('Cookie', `ibn_hayan_session=${sessionId}`)
+        .set('Cookie', cookie)
         .expect(200)
     ).body as { appointments: unknown[] };
     expect(body.appointments.length).toBe(1);
@@ -1378,12 +1481,14 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('noauditauth@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login and select context with valid session
+    const cookie = await login('noauditauth@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
-    // Request without valid session cookie
+    // Request without valid session cookie - should get 401
     await request(server)
       .get('/api/v1/appointments/today')
       .set('Cookie', 'ibn_hayan_session=invalid-session-id')
@@ -1436,15 +1541,17 @@ describe('Appointments Today Integration', () => {
     const { membershipId } = await createMembership(userId, tenantId);
     await assignRole(membershipId, 'R13_SYSTEM_ADMINISTRATOR');
 
-    // Setup: login and select context
-    const { sessionId } = await login('noauditr13@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('noauditr13@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request - should be denied
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(403);
 
     // Verify no appointments.schedule.viewed event was emitted
@@ -1499,10 +1606,12 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('auditsafe@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('auditsafe@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Create an appointment
     await createAppointment(
@@ -1517,7 +1626,7 @@ describe('Appointments Today Integration', () => {
     // Request
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Verify audit event contains no sensitive data
@@ -1580,15 +1689,17 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('genat@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('genat@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Request
     const response = await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     const body = response.body as { generatedAt: string };
@@ -1626,10 +1737,12 @@ describe('Appointments Today Integration', () => {
       facilityId,
     );
 
-    // Setup: login and select context
-    const { sessionId } = await login('outbox@example.test');
-    await selectOrganisation(sessionId, organisationId);
-    await selectFacility(sessionId, facilityId);
+    // Setup: login, fetch CSRF, select context
+    const cookie = await login('outbox@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facilityId);
 
     // Record baseline
     const baseline = await prisma.auditOutboxEvent.count();
@@ -1637,7 +1750,7 @@ describe('Appointments Today Integration', () => {
     // Request
     await request(server)
       .get('/api/v1/appointments/today')
-      .set('Cookie', `ibn_hayan_session=${sessionId}`)
+      .set('Cookie', cookie)
       .expect(200);
 
     // Verify event was written to the outbox table

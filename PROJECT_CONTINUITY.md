@@ -4676,3 +4676,94 @@ NOT AVAILABLE locally. No PostgreSQL 17 instance in this environment. GitHub Act
 
 - PostgreSQL 17 integration tests require GitHub Actions CI validation
 - 22 tests may still fail or pass — GitHub Actions CI will confirm
+
+### 29. Integration Test Harness Security Context Fix (2026-08-01)
+
+**Commit SHA:** (pending — see SHA verification after push)
+
+#### Root Cause
+
+Main CI run #28 showed 22 PostgreSQL 17 integration test failures due to four root causes in the test harness:
+
+**Problem A: Login smoke test missing Origin header**
+- Smoke test sent `POST /api/v1/auth/login` without the allowed Origin header
+- Expected HTTP 401 but received HTTP 403 from Origin validation
+
+**Problem B: Context-selection helpers missing Origin and CSRF**
+- `selectOrganisation` and `selectFacility` helpers sent session cookie and request body
+- Did not send `Origin` header or `X-CSRF-Token`
+- Context endpoints require both per ADR-015 §1.1
+
+**Problem C: Missing tenant membership selection**
+- Test setup performed: login → organisation selection → facility selection
+- Missing step: tenant membership selection
+- Canonical sequence per ADR-015: login → fetch CSRF → select tenant → select org → select facility
+
+**Problem D: Throttler state leakage**
+- `beforeEach` cleaned database but not the in-memory NestJS ThrottlerStorage
+- Later login attempts received HTTP 429 Too Many Requests
+- Canonical pattern from `context.e2e.context-spec.ts` resets throttler storage between tests
+
+#### Corrections Applied
+
+**1. Added helper functions following canonical patterns from `context.e2e.context-spec.ts`:**
+- `extractSessionCookie(response)` — extracts cookie name=value from set-cookie header
+- `fetchCsrfToken(cookie)` — calls GET /api/v1/auth/csrf with session cookie
+- `selectTenant(cookie, csrfToken, membershipId)` — PUT /api/v1/context/tenant with Origin + CSRF
+- `resetThrottlerStorage()` — clears in-memory throttler state
+
+**2. Updated `login` helper:**
+- Now returns full cookie string instead of `sessionId` object
+- Preserves Origin header in login request
+
+**3. Updated `selectOrganisation` and `selectFacility` helpers:**
+- Now accept cookie and CSRF token parameters
+- Send `Origin` header and `X-CSRF-Token` header
+- Canonical request format: Cookie + Origin + X-CSRF-Token + body
+
+**4. Updated `beforeAll`:**
+- Added `throttlerStorage = app.get(ThrottlerStorage)` to get throttler instance
+
+**5. Updated `beforeEach`:**
+- Added `resetThrottlerStorage()` call after `truncateAll()`
+
+**6. Fixed login smoke test:**
+- Added `Origin` header to the smoke test request
+- Now expects HTTP 401 with valid Origin (not HTTP 403)
+
+**7. Updated all 22 test scenarios:**
+- Full-context scenarios: login → fetch CSRF → select tenant → select org → select facility
+- Missing org context scenario: login → fetch CSRF → select tenant (no org)
+- Missing facility context scenario: login → fetch CSRF → select tenant → select org (no facility)
+- Auth failure scenario: uses valid session cookie for context setup, then tests with invalid cookie
+- All scenarios use canonical cookie string format
+
+#### Files Modified
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — Added CSRF/Origin helpers, tenant selection, throttler reset
+- `PROJECT_CONTINUITY.md` — This section
+
+#### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Lint | PASS (pre-existing errors unrelated to this change) |
+| Git diff-check | PASS |
+
+#### SHA Verification
+
+- Local SHA: (pending — see after push)
+- Remote SHA: (pending)
+- All SHAs match: (pending)
+
+#### PostgreSQL 17 Execution Status
+
+NOT AVAILABLE locally. No PostgreSQL 17 instance in this environment. GitHub Actions remains authoritative.
+
+#### Remaining Risks
+
+- PostgreSQL 17 integration tests require GitHub Actions CI validation
+- Test harness corrections may introduce new failures if assumptions about endpoint behavior are incorrect
+- GitHub Actions CI will confirm final pass/fail status
