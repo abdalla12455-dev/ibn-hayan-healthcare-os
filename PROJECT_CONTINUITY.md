@@ -4914,15 +4914,37 @@ const viewedEvents = newEvents.filter((e) => {
 
 #### SHA Verification
 
-- Local SHA: (pending — see after push)
-- Remote SHA: (pending)
-- All SHAs match: (pending)
+| Reference | SHA |
+|-----------|-----|
+| Verified pre-task SHA | `3d9269c41d3f2e6c3c9e95e843c2975434af48e6` |
+| Implementation/test-correction commit | `b1c6d4e01360772c0d1b093de2a4daa63fb16eef` |
+| Local HEAD | `b1c6d4e01360772c0d1b093de2a4daa63fb16eef` |
+| Direct remote SHA | `b1c6d4e01360772c0d1b093de2a4daa63fb16eef` |
+| Remote-tracking SHA | `b1c6d4e01360772c0d1b093de2a4daa63fb16eef` |
+| All SHAs match | YES |
 
-#### PostgreSQL 17 Execution Status
+#### GitHub Actions CI Verification
 
-NOT AVAILABLE locally. GitHub Actions CI validates PostgreSQL 17 suites.
+| Run ID | Result |
+|--------|--------|
+| 30725931879 | **SUCCESS** |
+
+**PostgreSQL 17 validation suites:** PASS
+**Static analysis, lint, unit tests, and build:** PASS
+
+#### Appointments Integration Test Results
+
+| Metric | Value |
+|--------|-------|
+| Total tests | 24 |
+| Passed | 24 |
+| Failed | 0 |
+
+Individual test results confirmed via GitHub Actions run 30725931879.
 
 #### Remaining Risks
 
-- PostgreSQL 17 integration tests require GitHub Actions CI validation
-- Test fixture corrections applied; CI will confirm all 24 tests pass
+- PostgreSQL 17 integration tests verified by GitHub Actions CI
+- All 24 appointments integration tests passing
+- Whole-PR operator review and merge approval remain pending
+- PR #9 remains in Draft state
