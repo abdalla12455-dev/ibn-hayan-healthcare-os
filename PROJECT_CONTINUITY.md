@@ -4767,3 +4767,68 @@ NOT AVAILABLE locally. No PostgreSQL 17 instance in this environment. GitHub Act
 - PostgreSQL 17 integration tests require GitHub Actions CI validation
 - Test harness corrections may introduce new failures if assumptions about endpoint behavior are incorrect
 - GitHub Actions CI will confirm final pass/fail status
+
+### 30. Integration Test Harness Prettier Formatting Fix (2026-08-01)
+
+**Commit SHA:** (pending — see SHA verification after push)
+
+#### Root Cause
+
+Main CI run #32 failed during lint due to two Prettier formatting errors in:
+`apps/api/test/appointments/appointments.integration.spec.ts`
+
+**Failure 1:** `extractSessionCookie` function parameter type on single line
+**Failure 2:** `resetThrottlerStorage` variable type on single line
+
+Both had inline object types that Prettier requires on separate lines.
+
+#### Corrections Applied
+
+**1. extractSessionCookie formatting:**
+```typescript
+// Before (failing)
+function extractSessionCookie(response: { headers?: Record<string, unknown> }): string {
+
+// After (fixed)
+function extractSessionCookie(response: {
+  headers?: Record<string, unknown>;
+}): string {
+```
+
+**2. resetThrottlerStorage formatting:**
+```typescript
+// Before (failing)
+const storage = throttlerStorage as unknown as { storage?: Map<string, unknown> };
+
+// After (fixed)
+const storage = throttlerStorage as unknown as {
+  storage?: Map<string, unknown>;
+};
+```
+
+#### Files Modified
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — Prettier formatting fix only
+
+#### Validation Results
+
+| Validation | Result |
+|-----------|--------|
+| Prettier check | PASS |
+| Target file lint | PASS (0 errors) |
+| Git diff-check | PASS |
+
+#### SHA Verification
+
+- Local SHA: (pending — see after push)
+- Remote SHA: (pending)
+- All SHAs match: (pending)
+
+#### PostgreSQL 17 Execution Status
+
+NOT AVAILABLE locally. GitHub Actions CI validates PostgreSQL 17 suites.
+
+#### Remaining Risks
+
+- PostgreSQL 17 integration tests require GitHub Actions CI validation
+- Test harness formatting corrections applied; CI will confirm
