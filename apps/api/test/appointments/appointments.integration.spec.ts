@@ -240,7 +240,9 @@ async function assignRole(
  * Extracts the session cookie value from a supertest response.
  * Returns just the cookie name=value portion (before the semicolon).
  */
-function extractSessionCookie(response: { headers?: Record<string, unknown> }): string {
+function extractSessionCookie(response: {
+  headers?: Record<string, unknown>;
+}): string {
   const setCookie = response.headers?.['set-cookie'];
   if (!setCookie) return '';
   if (Array.isArray(setCookie)) {
@@ -338,7 +340,9 @@ async function selectFacility(
  * The database is cleaned in truncateAll(); the in-memory throttler must also be reset.
  */
 function resetThrottlerStorage(): void {
-  const storage = throttlerStorage as unknown as { storage?: Map<string, unknown> };
+  const storage = throttlerStorage as unknown as {
+    storage?: Map<string, unknown>;
+  };
   if (storage.storage instanceof Map) {
     storage.storage.clear();
   }
