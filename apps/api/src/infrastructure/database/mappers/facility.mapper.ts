@@ -29,6 +29,7 @@ export function facilityFromPrisma(row: PrismaFacility): Facility {
     code: row.code,
     displayName: row.displayName,
     status: prismaStatusToDomain(row.status),
+    timezone: row.timezone,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

@@ -73,6 +73,7 @@ describe('tenancy domain exports', () => {
       code: 'FACILITY_ALPHA',
       displayName: 'Facility Alpha',
       status: 'active',
+      timezone: null,
       createdAt: new Date('2026-01-01T00:00:00Z'),
       updatedAt: new Date('2026-01-01T00:00:00Z'),
     };

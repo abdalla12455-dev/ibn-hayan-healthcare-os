@@ -57,6 +57,10 @@ export type FacilityLifecycleStatus = 'active' | 'inactive';
  *   within `(tenantId, organisationId)`. Maximum 50 characters.
  * - `displayName`: human-readable name. Maximum 200 characters.
  * - `status`: current lifecycle status.
+ * - `timezone`: the facility's configured IANA timezone identifier
+ *   (e.g. 'Asia/Baghdad', 'Europe/London'). Null means the timezone
+ *   has not been configured; the facility is in a configuration-required
+ *   state for facility-local workflows. No fallback is applied.
  * - `createdAt`: timezone-aware timestamp; set by persistence layer.
  * - `updatedAt`: timezone-aware timestamp; updated by persistence layer.
  */
@@ -67,6 +71,7 @@ export interface Facility {
   readonly code: string;
   readonly displayName: string;
   readonly status: FacilityLifecycleStatus;
+  readonly timezone: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }

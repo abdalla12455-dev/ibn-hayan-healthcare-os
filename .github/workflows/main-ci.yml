@@ -302,6 +302,7 @@ jobs:
             pnpm test:context
             pnpm test:database
             pnpm test:clinic-admin
+            pnpm test:appointments
             pnpm test:role-preview
             pnpm audit:test:atomicity
             pnpm audit:test:integration
