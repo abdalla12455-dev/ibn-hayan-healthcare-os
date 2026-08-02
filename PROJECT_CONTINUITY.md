@@ -4832,3 +4832,97 @@ NOT AVAILABLE locally. GitHub Actions CI validates PostgreSQL 17 suites.
 
 - PostgreSQL 17 integration tests require GitHub Actions CI validation
 - Test harness formatting corrections applied; CI will confirm
+
+### 31. Integration Test Audit and Isolation Fixture Corrections (2026-08-01)
+
+**Commit SHA:** (pending — see SHA verification after push)
+
+#### Root Cause
+
+Main CI run #33 showed 5 PostgreSQL 17 integration test failures with two distinct root causes:
+
+**Root Cause A: Prisma JSONB Parsing Error (Tests 5 and 20)**
+- Tests called `JSON.parse(e.canonicalEventDraft as string)` on Prisma JSONB fields
+- Prisma deserializes JSONB columns automatically to JavaScript objects
+- `JSON.parse()` on an object throws an error, caught silently returning `false`
+- Filter found 0 matching events → tests failed expecting `> 0`
+
+**Root Cause B: Incorrect Fixture Authorization (Tests 12, 15, 16)**
+- Test 12: Used tenant-scoped R09 without org scope, then tried to selectOrganisation
+  - Per ADR-015, tenant-scoped R09 does NOT grant org selection permission
+  - `listForMembershipAtOrganisation` returns empty for tenant-scoped R09
+  - selectOrganisation fails with 403 before reaching the appointments endpoint
+- Tests 15 and 16: Tried to switch context to org/facility without R09 assignment
+  - User had R09 only for org A/facility A
+  - Tests attempted to switch to org B/facility B
+  - Context selection fails with 403 before reaching the appointments endpoint
+
+#### Corrections Applied
+
+**1. Audit JSONB Parsing (Tests 5, 6, 18, 19, 20):**
+```typescript
+// Before (failing)
+const viewedEvents = newEvents.filter((e) => {
+  try {
+    const draft = JSON.parse(e.canonicalEventDraft as string);
+    return draft.action === 'appointments.schedule.viewed';
+  } catch {
+    return false;
+  }
+});
+
+// After (fixed)
+const viewedEvents = newEvents.filter((e) => {
+  const draft = e.canonicalEventDraft as { action?: string };
+  return draft.action === 'appointments.schedule.viewed';
+});
+```
+
+**2. Test 12 Fixture Correction:**
+- Created a facility to enable facility-scoped R09 assignment
+- Used facility-scoped R09 to allow org selection
+- Select tenant and org successfully
+- Intentionally skip facility selection
+- Endpoint now correctly returns 403 due to missing facility context
+
+**3. Test 15 Isolation Fixture Correction:**
+- Created both org A and org B with facilities
+- Created appointments in both orgs (via direct DB insert before user context)
+- Gave user R09 only for org A
+- Selected org A context
+- Verified only org A appointment is returned (org B appointment is NOT visible)
+
+**4. Test 16 Isolation Fixture Correction:**
+- Created same org with facility A and facility B
+- Created appointments in both facilities (via direct DB insert before user context)
+- Gave user R09 only for facility A
+- Selected facility A context
+- Verified only facility A appointment is returned (facility B appointment is NOT visible)
+
+#### Files Modified
+
+- `apps/api/test/appointments/appointments.integration.spec.ts` — JSONB parsing fix, fixture corrections for tests 5, 6, 12, 15, 16, 18, 19, 20
+
+#### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Lint | PASS (0 errors) |
+| Git diff-check | PASS |
+
+#### SHA Verification
+
+- Local SHA: (pending — see after push)
+- Remote SHA: (pending)
+- All SHAs match: (pending)
+
+#### PostgreSQL 17 Execution Status
+
+NOT AVAILABLE locally. GitHub Actions CI validates PostgreSQL 17 suites.
+
+#### Remaining Risks
+
+- PostgreSQL 17 integration tests require GitHub Actions CI validation
+- Test fixture corrections applied; CI will confirm all 24 tests pass

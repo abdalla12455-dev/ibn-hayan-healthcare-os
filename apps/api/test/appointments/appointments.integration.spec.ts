@@ -668,19 +668,17 @@ describe('Appointments Today Integration', () => {
     });
 
     // Find the appointments.schedule.viewed event
+    // canonicalEventDraft is Prisma Json (JSONB) — already deserialized as an object
     const viewedEvents = newEvents.filter((e) => {
-      try {
-        const draft = JSON.parse(e.canonicalEventDraft as string);
-        return draft.action === 'appointments.schedule.viewed';
-      } catch {
-        return false;
-      }
+      const draft = e.canonicalEventDraft as { action?: string };
+      return draft.action === 'appointments.schedule.viewed';
     });
 
     expect(viewedEvents.length).toBeGreaterThan(0);
-    const viewedEvent = JSON.parse(
-      viewedEvents[0]!.canonicalEventDraft as string,
-    );
+    const viewedEvent = viewedEvents[0]!.canonicalEventDraft as {
+      outcome: string;
+      metadata?: { endpoint?: string };
+    };
     expect(viewedEvent.outcome).toBe('success');
     expect(viewedEvent.metadata?.endpoint).toBe('appointments_today_view');
   });
@@ -738,13 +736,10 @@ describe('Appointments Today Integration', () => {
       where: { deliveredAt: null },
     });
 
+    // canonicalEventDraft is Prisma Json (JSONB) — already deserialized as an object
     const viewedEvents = events.filter((e) => {
-      try {
-        const draft = JSON.parse(e.canonicalEventDraft as string);
-        return draft.action === 'appointments.schedule.viewed';
-      } catch {
-        return false;
-      }
+      const draft = e.canonicalEventDraft as { action?: string };
+      return draft.action === 'appointments.schedule.viewed';
     });
 
     expect(viewedEvents.length).toBe(0);
@@ -1078,27 +1073,33 @@ describe('Appointments Today Integration', () => {
       'org-no-fac',
       'Organisation No Fac',
     );
-    // Note: No facility created - we use a non-existent facility ID
+    // Create a facility so we can create a facility-scoped R09 assignment
+    // that allows org selection, but we will NOT select the facility
+    const { facilityId } = await createFacility(
+      tenantId,
+      organisationId,
+      'fac-no-fac',
+      'Facility No Fac',
+      'Asia/Baghdad',
+    );
 
-    // Setup: user with R09
+    // Setup: user with R09 at facility scope
+    // Facility-scoped R09 grants org selection and facility selection permissions
     const { userId } = await createUser('nofac@example.test', 'No Fac User');
     const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR');
+    await assignRole(
+      membershipId,
+      'R09_ADMINISTRATOR',
+      organisationId,
+      facilityId,
+    );
 
     // Setup: login, fetch CSRF, select tenant and org but NOT facility
     const cookie = await login('nofac@example.test');
     const csrf = await fetchCsrfToken(cookie);
     await selectTenant(cookie, csrf, membershipId);
     await selectOrganisation(cookie, csrf, organisationId);
-
-    // Try to select a non-existent facility (should fail with 404)
-    await request(server)
-      .put('/api/v1/context/facility')
-      .set('Cookie', cookie)
-      .set('Origin', ORIGIN)
-      .set('X-CSRF-Token', csrf)
-      .send({ facilityId: '00000000-0000-0000-0000-000000000999' })
-      .expect(404);
+    // Intentionally do NOT select facility
 
     // Request - should fail with 403 (no active facility context)
     await request(server)
@@ -1238,7 +1239,7 @@ describe('Appointments Today Integration', () => {
   // Scenario 15: Organisation isolation
   // -------------------------------------------------------------------------
   it('15. organisation isolation - cannot see appointments from another org', async () => {
-    // Setup: org A with appointment
+    // Setup: create both orgs with facilities first
     const { tenantId } = await createTenant('tenant-iso', 'Tenant ISO');
     const { organisationId: orgIdA } = await createOrganisation(
       tenantId,
@@ -1252,30 +1253,6 @@ describe('Appointments Today Integration', () => {
       'Facility ISO A',
       'Asia/Baghdad',
     );
-
-    // Setup: user with R09 in org A
-    const { userId } = await createUser('iso@example.test', 'ISO User');
-    const { membershipId } = await createMembership(userId, tenantId);
-    await assignRole(membershipId, 'R09_ADMINISTRATOR', orgIdA, facIdA);
-
-    // Setup: login, fetch CSRF, select org A
-    const cookie = await login('iso@example.test');
-    const csrf = await fetchCsrfToken(cookie);
-    await selectTenant(cookie, csrf, membershipId);
-    await selectOrganisation(cookie, csrf, orgIdA);
-    await selectFacility(cookie, csrf, facIdA);
-
-    // Create appointment in org A
-    await createAppointment(
-      tenantId,
-      orgIdA,
-      facIdA,
-      new Date('2026-08-01T10:00:00.000Z'),
-      new Date('2026-08-01T10:30:00.000Z'),
-      'booked',
-    );
-
-    // Switch to org B
     const { organisationId: orgIdB } = await createOrganisation(
       tenantId,
       'org-iso-b',
@@ -1288,24 +1265,61 @@ describe('Appointments Today Integration', () => {
       'Facility ISO B',
       'Asia/Baghdad',
     );
-    await selectOrganisation(cookie, csrf, orgIdB);
-    await selectFacility(cookie, csrf, facIdB);
 
-    // Request as org B - should see empty (not org A's appointments)
+    // Create appointments in both orgs (before user context is established)
+    // Org A appointment
+    await createAppointment(
+      tenantId,
+      orgIdA,
+      facIdA,
+      new Date('2026-08-01T10:00:00.000Z'),
+      new Date('2026-08-01T10:30:00.000Z'),
+      'booked',
+    );
+    // Org B appointment
+    await createAppointment(
+      tenantId,
+      orgIdB,
+      facIdB,
+      new Date('2026-08-01T11:00:00.000Z'),
+      new Date('2026-08-01T11:30:00.000Z'),
+      'booked',
+    );
+
+    // Setup: user with R09 only in org A (NOT org B)
+    const { userId } = await createUser('iso@example.test', 'ISO User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR', orgIdA, facIdA);
+
+    // Setup: login, fetch CSRF, select org A context
+    const cookie = await login('iso@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, orgIdA);
+    await selectFacility(cookie, csrf, facIdA);
+
+    // Request as org A - should see org A appointment but NOT org B appointment
     const response = await request(server)
       .get('/api/v1/appointments/today')
       .set('Cookie', cookie)
       .expect(200);
 
-    const body = response.body as { appointments: unknown[] };
-    expect(body.appointments).toEqual([]);
+    const body = response.body as {
+      appointments: { id: string; scheduledStart: string }[];
+    };
+    // Should see org A appointment
+    expect(body.appointments.length).toBe(1);
+    // Should NOT see org B appointment (different scheduled start time)
+    expect(body.appointments[0]?.scheduledStart).toBe(
+      '2026-08-01T10:00:00.000Z',
+    );
   });
 
   // -------------------------------------------------------------------------
   // Scenario 16: Facility isolation
   // -------------------------------------------------------------------------
   it('16. facility isolation - cannot see appointments from another facility', async () => {
-    // Setup: facility A with appointment
+    // Setup: create both facilities first
     const { tenantId } = await createTenant('tenant-fac-iso', 'Tenant Fac ISO');
     const { organisationId } = await createOrganisation(
       tenantId,
@@ -1327,20 +1341,8 @@ describe('Appointments Today Integration', () => {
       'Asia/Baghdad',
     );
 
-    // Setup: user with R09
-    const { userId } = await createUser('faciso@example.test', 'Fac ISO User');
-    const { membershipId } = await createMembership(userId, tenantId);
-    // User needs facility-scoped role for facility A to switch to it
-    await assignRole(membershipId, 'R09_ADMINISTRATOR', organisationId, facIdA);
-
-    // Setup: login as facility A
-    const cookie = await login('faciso@example.test');
-    const csrf = await fetchCsrfToken(cookie);
-    await selectTenant(cookie, csrf, membershipId);
-    await selectOrganisation(cookie, csrf, organisationId);
-    await selectFacility(cookie, csrf, facIdA);
-
-    // Create appointment in facility A
+    // Create appointments in both facilities (before user context is established)
+    // Facility A appointment
     await createAppointment(
       tenantId,
       organisationId,
@@ -1349,18 +1351,43 @@ describe('Appointments Today Integration', () => {
       new Date('2026-08-01T10:30:00.000Z'),
       'booked',
     );
+    // Facility B appointment
+    await createAppointment(
+      tenantId,
+      organisationId,
+      facIdB,
+      new Date('2026-08-01T11:00:00.000Z'),
+      new Date('2026-08-01T11:30:00.000Z'),
+      'booked',
+    );
 
-    // Switch to facility B
-    await selectFacility(cookie, csrf, facIdB);
+    // Setup: user with R09 only for facility A (NOT facility B)
+    const { userId } = await createUser('faciso@example.test', 'Fac ISO User');
+    const { membershipId } = await createMembership(userId, tenantId);
+    await assignRole(membershipId, 'R09_ADMINISTRATOR', organisationId, facIdA);
 
-    // Request as facility B - should see empty (not facility A's appointments)
+    // Setup: login, fetch CSRF, select facility A context
+    const cookie = await login('faciso@example.test');
+    const csrf = await fetchCsrfToken(cookie);
+    await selectTenant(cookie, csrf, membershipId);
+    await selectOrganisation(cookie, csrf, organisationId);
+    await selectFacility(cookie, csrf, facIdA);
+
+    // Request as facility A - should see facility A appointment but NOT facility B appointment
     const response = await request(server)
       .get('/api/v1/appointments/today')
       .set('Cookie', cookie)
       .expect(200);
 
-    const body = response.body as { appointments: unknown[] };
-    expect(body.appointments).toEqual([]);
+    const body = response.body as {
+      appointments: { id: string; scheduledStart: string }[];
+    };
+    // Should see facility A appointment
+    expect(body.appointments.length).toBe(1);
+    // Should NOT see facility B appointment (different scheduled start time)
+    expect(body.appointments[0]?.scheduledStart).toBe(
+      '2026-08-01T10:00:00.000Z',
+    );
   });
 
   // -------------------------------------------------------------------------
@@ -1503,13 +1530,10 @@ describe('Appointments Today Integration', () => {
       where: { deliveredAt: null },
     });
 
+    // canonicalEventDraft is Prisma Json (JSONB) — already deserialized as an object
     const viewedEvents = events.filter((e) => {
-      try {
-        const draft = JSON.parse(e.canonicalEventDraft as string);
-        return draft.action === 'appointments.schedule.viewed';
-      } catch {
-        return false;
-      }
+      const draft = e.canonicalEventDraft as { action?: string };
+      return draft.action === 'appointments.schedule.viewed';
     });
 
     expect(viewedEvents.length).toBe(0);
@@ -1563,13 +1587,10 @@ describe('Appointments Today Integration', () => {
       where: { deliveredAt: null },
     });
 
+    // canonicalEventDraft is Prisma Json (JSONB) — already deserialized as an object
     const viewedEvents = events.filter((e) => {
-      try {
-        const draft = JSON.parse(e.canonicalEventDraft as string);
-        return draft.action === 'appointments.schedule.viewed';
-      } catch {
-        return false;
-      }
+      const draft = e.canonicalEventDraft as { action?: string };
+      return draft.action === 'appointments.schedule.viewed';
     });
 
     expect(viewedEvents.length).toBe(0);
@@ -1639,19 +1660,17 @@ describe('Appointments Today Integration', () => {
       orderBy: { createdAt: 'asc' },
     });
 
+    // canonicalEventDraft is Prisma Json (JSONB) — already deserialized as an object
     const viewedEvents = events.filter((e) => {
-      try {
-        const draft = JSON.parse(e.canonicalEventDraft as string);
-        return draft.action === 'appointments.schedule.viewed';
-      } catch {
-        return false;
-      }
+      const draft = e.canonicalEventDraft as { action?: string };
+      return draft.action === 'appointments.schedule.viewed';
     });
 
     expect(viewedEvents.length).toBeGreaterThan(0);
-    const viewedEvent = JSON.parse(
-      viewedEvents[0]!.canonicalEventDraft as string,
-    );
+    const viewedEvent = viewedEvents[0]!.canonicalEventDraft as Record<
+      string,
+      unknown
+    >;
 
     // Should NOT contain patientId, providerId, appointment details, names, or medical data
     const eventStr = JSON.stringify(viewedEvent);
