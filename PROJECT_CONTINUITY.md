@@ -4948,3 +4948,80 @@ Individual test results confirmed via GitHub Actions run 30725931879.
 - All 24 appointments integration tests passing
 - Whole-PR operator review and merge approval remain pending
 - PR #9 remains in Draft state
+
+## Stage 1B Post-Merge Closeout
+
+> **Recorded:** 2026-08-02 (documentation-only, post-merge)
+> **Authority:** This section supersedes the earlier pending-state statements above and records the authoritative completed state of Stage 1B.
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Source branch:** main
+- **Documentation branch:** docs/stage-1b-post-merge-closeout
+
+### Stage
+
+- **Stage:** Stage 1B — Today's Appointments read-only backend
+- **Target role:** R09 Clinic Administrator
+- **Endpoint:** GET /api/v1/appointments/today
+- **Permission:** appointments:view
+
+### Pull Request
+
+- **Pull request:** #9
+- **PR result:** MERGED
+- **Merge commit:** 25f805017423c0c8ae476fe2286cdf70f26a4558
+- **Merge target:** main
+
+### Post-Merge Validation
+
+- **Post-merge GitHub Actions run:** 30727665444
+- **Post-merge validation:**
+  - static analysis: PASS
+  - type checking: PASS
+  - lint: PASS
+  - unit tests: PASS
+  - production build: PASS
+  - PostgreSQL 17 validation: PASS
+  - appointments integration: 24 passed, 0 failed
+
+### Security Results
+
+- R09 access: PASS
+- R13 denial: PASS
+- R02_NURSE denial: PASS
+- tenant isolation: PASS
+- organisation isolation: PASS
+- facility isolation: PASS
+- audit metadata safety: PASS
+- no timezone fallback: PASS
+
+### Files Changed by This Closeout Task
+
+- **created:** none
+- **modified:** PROJECT_CONTINUITY.md
+- **deleted:** none
+
+### Current Project State
+
+Stage 1B is completed, validated, merged into main, and verified by post-merge CI.
+
+### Feature Branch Status
+
+- **Branch:** feat/clinic-admin-todays-appointments-read-v1
+- **Status:** retained temporarily; not deleted during this task
+
+### Known Risks
+
+- no known Stage 1B technical blockers
+- future feature work must begin from the verified main commit: 25f805017423c0c8ae476fe2286cdf70f26a4558
+
+### Immediate Next Step
+
+define and approve the exact Stage 1C scope before implementation
+
+### Recovery Information
+
+- **Authoritative Stage 1B recovery point:** merge commit 25f805017423c0c8ae476fe2286cdf70f26a4558
+- **Note:** This documentation commit's own final SHA will be reported externally, not recorded in this section.
