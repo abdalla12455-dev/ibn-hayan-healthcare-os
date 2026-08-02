@@ -27,6 +27,8 @@
  */
 
 import type {
+  Appointment,
+  AppointmentCreateInput,
   AppointmentReadProjection,
 } from './appointment.js';
 import type { TenantId } from '../tenancy/tenant.js';
@@ -40,6 +42,9 @@ import type { FacilityId } from '../tenancy/facility.js';
  * There is no unscoped `findById` method. This is the structural
  * enforcement of CODING_STANDARDS.md §10 and the Stage 1B specification
  * requirement that all scope is derived from the authenticated session.
+ *
+ * Per Stage 1C, the repository also supports appointment creation with
+ * concurrency-safe provider overlap prevention.
  */
 export interface AppointmentRepository {
   /**
@@ -67,4 +72,38 @@ export interface AppointmentRepository {
     startUtc: Date,
     endUtc: Date,
   ): Promise<AppointmentReadProjection[]>;
+
+  /**
+   * Create a new appointment.
+   *
+   * The appointment is scoped to the authenticated session's tenant,
+   * organisation, and facility. The caller does NOT supply scope;
+   * scope is always derived from the authenticated context.
+   *
+   * Overlap prevention: the creation atomically checks for provider
+   * appointment overlaps within the same tenant, organisation, and
+   * facility. If an overlap exists (existingStart < requestedEnd AND
+   * existingEnd > requestedStart for the same provider), the creation
+   * fails with an overlap error. Adjacent appointments where one ends
+   * exactly when another begins are NOT considered overlapping.
+   *
+   * Concurrency safety: overlap detection is performed within a
+   * transaction with SERIALIZABLE isolation to prevent race conditions
+   * where two concurrent requests could both create overlapping
+   * appointments.
+   *
+   * @param tenantId The Tenant that owns the facility.
+   * @param organisationId The Organisation that owns the facility.
+   * @param facilityId The Facility where the appointment occurs.
+   * @param input The appointment creation input.
+   * @returns The created appointment on success.
+   * @throws AppointmentOverlapError if the provider has an overlapping
+   *         appointment in the same tenant, organisation, and facility.
+   */
+  create(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    input: AppointmentCreateInput,
+  ): Promise<Appointment>;
 }

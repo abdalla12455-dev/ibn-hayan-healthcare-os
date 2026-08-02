@@ -5,10 +5,10 @@ import { z } from 'zod';
  * System.
  *
  * This module is the single source of truth for the shape of the
- * "Today's Appointments" API response. Both `@ibn-hayan/api` (the
- * NestJS backend that produces the response) and `@ibn-hayan/web`
- * (the Next.js thin client that consumes it) derive their types from
- * the schemas defined here.
+ * "Today's Appointments" API response and appointment booking contracts.
+ * Both `@ibn-hayan/api` (the NestJS backend that produces the response)
+ * and `@ibn-hayan/web` (the Next.js thin client that consumes it)
+ * derive their types from the schemas defined here.
  *
  * Per ADR-012 and CODING_STANDARDS.md Section 6, Zod is the validation
  * library ratified for contract and boundary validation. TypeScript
@@ -20,6 +20,12 @@ import { z } from 'zod';
  * R09 Clinic Administrator role. The endpoint `GET /api/v1/appointments/today`
  * returns appointments for the authenticated facility's current local
  * calendar day.
+ *
+ * Per the Stage 1C implementation specification, this module also
+ * provides the appointment booking request and response contracts for
+ * R06 Receptionist, R07 Scheduler, and R09 Clinic Administrator roles.
+ * The endpoint `POST /api/v1/appointments` creates a new appointment
+ * for the authenticated facility.
  *
  * All objects use `.strict()` so that adding an unexpected field at
  * any boundary is rejected by the Zod parse.
@@ -188,3 +194,122 @@ export const AppointmentOverviewErrorResponseSchema = z
 export type AppointmentOverviewErrorResponse = z.infer<
   typeof AppointmentOverviewErrorResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// BookAppointmentRequest
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical request schema for booking an appointment via
+ * `POST /api/v1/appointments`.
+ *
+ * All scope (tenantId, organisationId, facilityId) is derived from
+ * the authenticated session context. The request body contains ONLY
+ * the patient, provider, timing, and type information required to
+ * create an appointment.
+ *
+ * Fields:
+ * - `patientId`: the UUID of the patient for the appointment.
+ * - `providerId`: the UUID of the provider for the appointment.
+ * - `scheduledStart`: the appointment start time in ISO 8601 format
+ *   with UTC offset (e.g. '2026-08-01T09:00:00.000Z').
+ * - `scheduledEnd`: the appointment end time in ISO 8601 format
+ *   with UTC offset. Must be strictly after scheduledStart.
+ * - `typeCode`: the appointment type code (e.g. 'consultation',
+ *   'follow-up', 'procedure').
+ *
+ * Per the Stage 1C specification, the request does NOT include:
+ * - Tenant, organisation, or facility identifiers (derived from session)
+ * - Status (always 'booked' for new appointments)
+ * - Patient or provider names (logical identifiers only)
+ * - Billing or payment information
+ * - Reminder or notification preferences
+ */
+export const BookAppointmentRequestSchema = z
+  .object({
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      const start = new Date(data.scheduledStart);
+      const end = new Date(data.scheduledEnd);
+      return end > start;
+    },
+    {
+      message: 'scheduledEnd must be strictly after scheduledStart',
+      path: ['scheduledEnd'],
+    },
+  );
+
+export type BookAppointmentRequest = z.infer<
+  typeof BookAppointmentRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// BookAppointmentResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical response schema for a successful appointment booking
+ * via `POST /api/v1/appointments`.
+ *
+ * Returns the created appointment with all persisted fields.
+ */
+export const BookAppointmentResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict();
+
+export type BookAppointmentResponse = z.infer<
+  typeof BookAppointmentResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// BookingErrorResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical error response schema for the appointment booking
+ * endpoint.
+ *
+ * Error codes:
+ * - `APPOINTMENT_VALIDATION_ERROR`: invalid timestamps, missing fields,
+ *   or other validation failures.
+ * - `APPOINTMENT_PATIENT_NOT_FOUND`: the patient does not exist in
+ *   the authenticated tenant.
+ * - `APPOINTMENT_PROVIDER_NOT_FOUND`: the provider does not exist in
+ *   the authenticated tenant.
+ * - `APPOINTMENT_OVERLAP`: the requested time slot overlaps with an
+ *   existing appointment for the same provider.
+ * - `APPOINTMENT_PAST_TIME`: the requested start time is in the past.
+ */
+export const BookingErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum([
+          'APPOINTMENT_VALIDATION_ERROR',
+          'APPOINTMENT_PATIENT_NOT_FOUND',
+          'APPOINTMENT_PROVIDER_NOT_FOUND',
+          'APPOINTMENT_OVERLAP',
+          'APPOINTMENT_PAST_TIME',
+        ]),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type BookingErrorResponse = z.infer<typeof BookingErrorResponseSchema>;

@@ -1,7 +1,9 @@
 import {
   Controller,
   Get,
+  Post,
   Req,
+  Body,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -17,8 +19,13 @@ import { AuthorizationGuard } from '../authorization/authorization.guard.js';
 import { RequirePermission } from '../authorization/require-permission.decorator.js';
 import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import { sessionRequired } from '../auth/auth.errors.js';
-import type { TodayAppointmentsResponse } from '@ibn-hayan/contracts';
+import type {
+  TodayAppointmentsResponse,
+  BookAppointmentRequest,
+  BookAppointmentResponse,
+} from '@ibn-hayan/contracts';
 import { AppointmentsTodayService } from './appointments-today.service.js';
+import { AppointmentsBookingService } from './appointments-booking.service.js';
 import {
   readCookie,
   buildAuditContext,
@@ -65,7 +72,10 @@ import {
 @Controller('appointments')
 @UseGuards(AuthorizationGuard)
 export class AppointmentsController {
-  constructor(private readonly todayService: AppointmentsTodayService) {}
+  constructor(
+    private readonly todayService: AppointmentsTodayService,
+    private readonly bookingService: AppointmentsBookingService,
+  ) {}
 
   /**
    * GET /api/v1/appointments/today
@@ -182,6 +192,112 @@ export class AppointmentsController {
     if (result === null) {
       throw sessionRequired();
     }
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments
+   *
+   * Create a new appointment for the authenticated session's active
+   * tenant, organisation, and facility context.
+   *
+   * The request body contains the patient, provider, timing, and type
+   * information. All scope (tenantId, organisationId, facilityId) is
+   * derived from the authenticated session.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant `appointments:book`
+   * (only R06 Receptionist, R07 Scheduler, and R09 Administrator).
+   * Returns 400 for invalid timestamps (end not after start).
+   * Returns 422 for past appointment times, nonexistent patient/provider,
+   * or overlapping appointment conflicts.
+   *
+   * Per the Stage 1C implementation specification, the endpoint does NOT
+   * accept tenant, organisation, or facility identifiers from the request
+   * body.
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission('appointments:book', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'Book a new appointment for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 201,
+    description:
+      'The created appointment. Returns the appointment with all persisted fields.',
+    schema: {
+      type: 'object',
+      required: ['id', 'patientId', 'providerId', 'scheduledStart', 'scheduledEnd', 'status', 'typeCode'],
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        patientId: { type: 'string', format: 'uuid' },
+        providerId: { type: 'string', format: 'uuid' },
+        scheduledStart: { type: 'string', format: 'date-time' },
+        scheduledEnd: { type: 'string', format: 'date-time' },
+        status: {
+          type: 'string',
+          enum: ['booked', 'confirmed', 'arrived', 'in_progress', 'completed', 'cancelled', 'no_show'],
+        },
+        typeCode: { type: 'string', minLength: 1, maxLength: 80 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request (e.g. end time not after start time).',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Authorisation denied (principal does not hold the appointments:book permission).',
+  })
+  @ApiResponse({
+    status: 422,
+    description:
+      'Unprocessable entity: past time, patient not found, provider not found, or appointment overlap.',
+  })
+  async bookAppointment(
+    @Req() req: Request,
+    @Body() body: unknown,
+  ): Promise<BookAppointmentResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+
+    // Parse and validate the request body using Zod
+    const { BookAppointmentRequestSchema } = await import('@ibn-hayan/contracts');
+    const parseResult = BookAppointmentRequestSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      // Return 400 with validation errors
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues
+        .map((i) => i.message)
+        .join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+
+    const result = await this.bookingService.bookAppointment(
+      parseResult.data,
+      cookieValue,
+      buildAuditContext(req),
+    );
+
+    if (result === null) {
+      throw sessionRequired();
+    }
+
     return result;
   }
 }

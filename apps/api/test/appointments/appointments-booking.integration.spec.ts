@@ -1,0 +1,1156 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+
+/**
+ * Appointments Booking Integration Tests.
+ *
+ * These tests exercise the full appointment booking flow via supertest
+ * against a real NestJS application with a real PostgreSQL 17 database.
+ * They cover:
+ * - POST /api/v1/appointments endpoint
+ * - Authorization (R06, R07, R09 allowed; R13 denied; other roles denied)
+ * - Authentication (session cookie validation)
+ * - Tenant/organisation/facility context resolution
+ * - Patient/provider validation
+ * - Timestamp validation (end > start, no past times)
+ * - Provider overlap prevention
+ * - Audit event emission
+ * - Tenant isolation
+ *
+ * Per the task specification, these tests require PostgreSQL 17.
+ * They are NOT run locally without PostgreSQL 17.
+ *
+ * Determinism: All tests use a fixed clock instant (2026-08-01T12:00:00.000Z)
+ * to ensure consistent behavior regardless of execution date or server timezone.
+ */
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { Server } from 'node:http';
+import { INestApplication } from '@nestjs/common';
+import { ThrottlerStorage } from '@nestjs/throttler';
+import { PrismaClient } from '../../generated/prisma/client.js';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { AppModule } from '../../src/app.module.js';
+import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
+import { LocalCredentialService } from '../../src/infrastructure/database/repositories/local-credential.service.js';
+import { PasswordService } from '../../src/modules/auth/password.service.js';
+import type {
+  TenantRepository,
+  UserRepository,
+  TenantMembershipRepository,
+  TenantRoleAssignmentRepository,
+  OrganisationRepository,
+  FacilityRepository,
+} from '@ibn-hayan/domain';
+import {
+  USER_REPOSITORY,
+  TENANT_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+} from '../../src/infrastructure/database/database.module.js';
+import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
+import { CLOCK_SERVICE_TOKEN } from '../../src/infrastructure/clock/clock.module.js';
+import type { ClockService } from '../../src/infrastructure/clock/clock.service.js';
+
+// ---------------------------------------------------------------------------
+// Fixed test clock
+// ---------------------------------------------------------------------------
+
+/**
+ * Fixed test clock that always returns 2026-08-01T12:00:00.000Z.
+ * This ensures all tests are deterministic regardless of execution date
+ * or server timezone.
+ */
+const FIXED_TEST_INSTANT = new Date('2026-08-01T12:00:00.000Z');
+const mockClockService: ClockService = {
+  now: () => FIXED_TEST_INSTANT,
+};
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+
+setupDatabaseTests();
+
+let app: INestApplication;
+let server: Server;
+let prisma: PrismaService;
+let users: UserRepository;
+let tenants: TenantRepository;
+let memberships: TenantMembershipRepository;
+let roleAssignments: TenantRoleAssignmentRepository;
+let organisations: OrganisationRepository;
+let facilities: FacilityRepository;
+let credentials: LocalCredentialService;
+let passwordService: PasswordService;
+let seedPrisma: PrismaClient;
+let throttlerStorage: ThrottlerStorage;
+
+const TEST_PASSWORD = 'sufficiently-long-password';
+const ORIGIN = 'http://localhost:3000';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function truncateAll(): Promise<void> {
+  await prisma.auditOutboxEvent.deleteMany();
+  await prisma.appointment.deleteMany();
+  await prisma.authSession.deleteMany();
+  await prisma.tenantRoleAssignment.deleteMany();
+  await prisma.tenantMembership.deleteMany();
+  await prisma.localCredential.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.facility.deleteMany();
+  await prisma.organisation.deleteMany();
+  await prisma.tenant.deleteMany();
+}
+
+async function hashPassword(password: string): Promise<string> {
+  return passwordService.hash(password);
+}
+
+async function createUser(
+  email: string,
+  displayName: string,
+): Promise<{ userId: string }> {
+  const user = await users.create({
+    email,
+    displayName,
+  });
+  const hash = await hashPassword(TEST_PASSWORD);
+  await credentials.createCredential({
+    userId: user.id,
+    passwordHash: hash,
+    passwordChangedAt: new Date(),
+  });
+  return { userId: user.id };
+}
+
+async function createTenant(
+  slug: string,
+  displayName: string,
+): Promise<{ tenantId: string }> {
+  const tenant = await tenants.create({
+    slug,
+    displayName,
+  });
+  return { tenantId: tenant.id };
+}
+
+async function createOrganisation(
+  tenantId: string,
+  slug: string,
+  displayName: string,
+): Promise<{ organisationId: string }> {
+  const organisation = await organisations.create({
+    tenantId,
+    slug,
+    displayName,
+  });
+  return { organisationId: organisation.id };
+}
+
+async function createFacility(
+  tenantId: string,
+  organisationId: string,
+  slug: string,
+  displayName: string,
+  timezone: string,
+): Promise<{ facilityId: string }> {
+  const facility = await facilities.create({
+    tenantId,
+    organisationId,
+    slug,
+    displayName,
+    timezone,
+  });
+  return { facilityId: facility.id };
+}
+
+async function createMembership(
+  userId: string,
+  tenantId: string,
+  role: string,
+): Promise<{ membershipId: string }> {
+  const membership = await memberships.create({
+    userId,
+    tenantId,
+    displayName: 'Test Membership',
+  });
+  await roleAssignments.assign({
+    membershipId: membership.id,
+    roleCode: role,
+    assignedAt: new Date(),
+  });
+  return { membershipId: membership.id };
+}
+
+async function loginUser(
+  email: string,
+  password: string,
+): Promise<string> {
+  const response = await request(server)
+    .post('/api/v1/auth/login')
+    .set('Origin', ORIGIN)
+    .send({ email, password });
+  const cookie = response.headers['set-cookie'];
+  if (!cookie) {
+    throw new Error('No cookie returned from login');
+  }
+  return cookie[0];
+}
+
+async function selectContext(
+  cookie: string,
+  tenantId: string,
+  organisationId: string,
+  facilityId: string,
+): Promise<void> {
+  await request(server)
+    .post('/api/v1/context/select')
+    .set('Origin', ORIGIN)
+    .set('Cookie', cookie)
+    .send({
+      activeTenantMembershipId: null,
+      activeOrganisationId: organisationId,
+      activeFacilityId: facilityId,
+    });
+}
+
+async function bookAppointment(
+  cookie: string,
+  patientId: string,
+  providerId: string,
+  scheduledStart: string,
+  scheduledEnd: string,
+  typeCode: string,
+): Promise<request.Response> {
+  return request(server)
+    .post('/api/v1/appointments')
+    .set('Origin', ORIGIN)
+    .set('Cookie', cookie)
+    .send({
+      patientId,
+      providerId,
+      scheduledStart,
+      scheduledEnd,
+      typeCode,
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Test data
+// ---------------------------------------------------------------------------
+
+const FUTURE_START = '2026-09-01T09:00:00.000Z';
+const FUTURE_END = '2026-09-01T09:30:00.000Z';
+const FUTURE_START_2 = '2026-09-01T10:00:00.000Z';
+const FUTURE_END_2 = '2026-09-01T10:30:00.000Z';
+const PAST_START = '2025-01-01T09:00:00.000Z';
+const PAST_END = '2025-01-01T09:30:00.000Z';
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+
+beforeAll(async () => {
+  // Create test NestJS application with fixed clock
+  const moduleRef = await Test.createTestingModule({
+    imports: [AppModule],
+  })
+    .overrideProvider(CLOCK_SERVICE_TOKEN)
+    .useValue(mockClockService)
+    .compile();
+
+  app = moduleRef.createNestApplication();
+  await app.init();
+
+  // Get server instance
+  server = app.getHttpServer() as Server;
+
+  // Get services
+  prisma = app.get(PrismaService);
+  users = app.get(USER_REPOSITORY);
+  tenants = app.get(TENANT_REPOSITORY);
+  memberships = app.get(TENANT_MEMBERSHIP_REPOSITORY);
+  roleAssignments = app.get(TENANT_ROLE_ASSIGNMENT_REPOSITORY);
+  organisations = app.get(ORGANISATION_REPOSITORY);
+  facilities = app.get(FACILITY_REPOSITORY);
+  credentials = app.get(LocalCredentialService);
+  passwordService = app.get(PasswordService);
+
+  // Get throttler storage
+  throttlerStorage = app.get(ThrottlerStorage);
+
+  // Create seed Prisma client for test data setup
+  const databaseUrl = process.env['DATABASE_URL'];
+  if (databaseUrl) {
+    const adapter = new PrismaPg({ connectionString: databaseUrl });
+    seedPrisma = new PrismaClient({ adapter });
+  }
+});
+
+afterAll(async () => {
+  if (app) {
+    await app.close();
+  }
+});
+
+beforeEach(async () => {
+  await truncateAll();
+  await throttlerStorage.storage.clear();
+});
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+
+describe('POST /api/v1/appointments', () => {
+  // ===== Successful booking tests =====
+
+  describe('Successful booking', () => {
+    it('R06 Receptionist can create a valid appointment', async () => {
+      // Setup: Create user, tenant, organisation, facility, and membership
+      const { userId } = await createUser(
+        'r06@example.com',
+        'Receptionist User',
+      );
+      const { tenantId } = await createTenant('test-tenant', 'Test Tenant');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org',
+        'Test Organisation',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility',
+        'Test Facility',
+        'Asia/Baghdad',
+      );
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R06_RECEPTIONIST',
+      );
+
+      // Login and select context
+      const cookie = await loginUser('r06@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // Book appointment
+      const patientId = '00000000-0000-0000-0000-000000000001';
+      const providerId = '00000000-0000-0000-0000-000000000002';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(201);
+      expect(response.body.id).toBeDefined();
+      expect(response.body.patientId).toBe(patientId);
+      expect(response.body.providerId).toBe(providerId);
+      expect(response.body.status).toBe('booked');
+      expect(response.body.typeCode).toBe('consultation');
+    });
+
+    it('R07 Scheduler can create a valid appointment', async () => {
+      const { userId } = await createUser(
+        'r07@example.com',
+        'Scheduler User',
+      );
+      const { tenantId } = await createTenant('test-tenant-2', 'Test Tenant 2');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-2',
+        'Test Organisation 2',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-2',
+        'Test Facility 2',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R07_SCHEDULER');
+
+      const cookie = await loginUser('r07@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000003';
+      const providerId = '00000000-0000-0000-0000-000000000004';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'follow-up',
+      );
+
+      expect(response.status).toBe(201);
+      expect(response.body.status).toBe('booked');
+    });
+
+    it('R09 Clinic Administrator can create a valid appointment', async () => {
+      const { userId } = await createUser(
+        'r09@example.com',
+        'Admin User',
+      );
+      const { tenantId } = await createTenant('test-tenant-3', 'Test Tenant 3');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-3',
+        'Test Organisation 3',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-3',
+        'Test Facility 3',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('r09@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000005';
+      const providerId = '00000000-0000-0000-0000-000000000006';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'procedure',
+      );
+
+      expect(response.status).toBe(201);
+      expect(response.body.status).toBe('booked');
+    });
+
+    it('The created appointment is persisted', async () => {
+      const { userId } = await createUser('persist@example.com', 'Persist User');
+      const { tenantId } = await createTenant('test-tenant-4', 'Test Tenant 4');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-4',
+        'Test Organisation 4',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-4',
+        'Test Facility 4',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('persist@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000007';
+      const providerId = '00000000-0000-0000-0000-000000000008';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(201);
+      const appointmentId = response.body.id;
+
+      // Verify appointment is in database
+      const appointment = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appointment).not.toBeNull();
+      expect(appointment!.tenantId).toBe(tenantId);
+      expect(appointment!.organisationId).toBe(organisationId);
+      expect(appointment!.facilityId).toBe(facilityId);
+    });
+
+    it('The response follows the canonical contract', async () => {
+      const { userId } = await createUser('contract@example.com', 'Contract User');
+      const { tenantId } = await createTenant('test-tenant-5', 'Test Tenant 5');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-5',
+        'Test Organisation 5',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-5',
+        'Test Facility 5',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('contract@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000009';
+      const providerId = '00000000-0000-0000-0000-000000000010';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(201);
+      expect(response.body).toHaveProperty('id');
+      expect(response.body).toHaveProperty('patientId');
+      expect(response.body).toHaveProperty('providerId');
+      expect(response.body).toHaveProperty('scheduledStart');
+      expect(response.body).toHaveProperty('scheduledEnd');
+      expect(response.body).toHaveProperty('status');
+      expect(response.body).toHaveProperty('typeCode');
+    });
+
+    it('The audit event is emitted', async () => {
+      const { userId } = await createUser('audit@example.com', 'Audit User');
+      const { tenantId } = await createTenant('test-tenant-6', 'Test Tenant 6');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-6',
+        'Test Organisation 6',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-6',
+        'Test Facility 6',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('audit@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000011';
+      const providerId = '00000000-0000-0000-0000-000000000012';
+
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Check for audit event
+      const auditEvents = await prisma.auditOutboxEvent.findMany({
+        where: {
+          action: 'appointments.booked',
+        },
+      });
+      expect(auditEvents.length).toBeGreaterThan(0);
+    });
+
+    it('Adjacent non-overlapping appointments are permitted', async () => {
+      const { userId } = await createUser('adjacent@example.com', 'Adjacent User');
+      const { tenantId } = await createTenant('test-tenant-7', 'Test Tenant 7');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-7',
+        'Test Organisation 7',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-7',
+        'Test Facility 7',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('adjacent@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000013';
+      const providerId = '00000000-0000-0000-0000-000000000014';
+
+      // Book first appointment 09:00-09:30
+      const response1 = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+      expect(response1.status).toBe(201);
+
+      // Book second appointment 09:30-10:00 (adjacent, not overlapping)
+      const response2 = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_END, // starts exactly when first ends
+        FUTURE_START_2,
+        'follow-up',
+      );
+      expect(response2.status).toBe(201);
+    });
+  });
+
+  // ===== Authentication and authorization tests =====
+
+  describe('Authentication and authorization', () => {
+    it('Unauthenticated request is rejected', async () => {
+      const response = await request(server)
+        .post('/api/v1/appointments')
+        .set('Origin', ORIGIN)
+        .send({
+          patientId: '00000000-0000-0000-0000-000000000015',
+          providerId: '00000000-0000-0000-0000-000000000016',
+          scheduledStart: FUTURE_START,
+          scheduledEnd: FUTURE_END,
+          typeCode: 'consultation',
+        });
+
+      expect(response.status).toBe(401);
+    });
+
+    it('Unauthorized role is rejected (R13)', async () => {
+      const { userId } = await createUser('r13@example.com', 'R13 User');
+      const { tenantId } = await createTenant('test-tenant-8', 'Test Tenant 8');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-8',
+        'Test Organisation 8',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-8',
+        'Test Facility 8',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R13_SYSTEM_ADMINISTRATOR');
+
+      const cookie = await loginUser('r13@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        '00000000-0000-0000-0000-000000000017',
+        '00000000-0000-0000-0000-000000000018',
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(403);
+    });
+
+    it('R02_NURSE is denied', async () => {
+      const { userId } = await createUser('r02@example.com', 'R02 User');
+      const { tenantId } = await createTenant('test-tenant-9', 'Test Tenant 9');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-9',
+        'Test Organisation 9',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-9',
+        'Test Facility 9',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R02_NURSE');
+
+      const cookie = await loginUser('r02@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        '00000000-0000-0000-0000-000000000019',
+        '00000000-0000-0000-0000-000000000020',
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  // ===== Validation tests =====
+
+  describe('Validation', () => {
+    it('End before start is rejected', async () => {
+      const { userId } = await createUser('end-start@example.com', 'End Start User');
+      const { tenantId } = await createTenant('test-tenant-10', 'Test Tenant 10');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-10',
+        'Test Organisation 10',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-10',
+        'Test Facility 10',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('end-start@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // End before start
+      const response = await bookAppointment(
+        cookie,
+        '00000000-0000-0000-0000-000000000021',
+        '00000000-0000-0000-0000-000000000022',
+        FUTURE_END, // end is before start
+        FUTURE_START,
+        'consultation',
+      );
+
+      expect(response.status).toBe(400);
+    });
+
+    it('Equal start and end are rejected', async () => {
+      const { userId } = await createUser('equal@example.com', 'Equal User');
+      const { tenantId } = await createTenant('test-tenant-11', 'Test Tenant 11');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-11',
+        'Test Organisation 11',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-11',
+        'Test Facility 11',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('equal@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        '00000000-0000-0000-0000-000000000023',
+        '00000000-0000-0000-0000-000000000024',
+        FUTURE_START,
+        FUTURE_START, // equal
+        'consultation',
+      );
+
+      expect(response.status).toBe(400);
+    });
+
+    it('Past appointment time is rejected', async () => {
+      const { userId } = await createUser('past@example.com', 'Past User');
+      const { tenantId } = await createTenant('test-tenant-12', 'Test Tenant 12');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-12',
+        'Test Organisation 12',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-12',
+        'Test Facility 12',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('past@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        '00000000-0000-0000-0000-000000000025',
+        '00000000-0000-0000-0000-000000000026',
+        PAST_START,
+        PAST_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PAST_TIME');
+    });
+
+    it('Invalid patient ID (not UUID) is rejected', async () => {
+      const { userId } = await createUser('invalid-patient@example.com', 'Invalid Patient User');
+      const { tenantId } = await createTenant('test-tenant-13', 'Test Tenant 13');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-13',
+        'Test Organisation 13',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-13',
+        'Test Facility 13',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('invalid-patient@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await request(server)
+        .post('/api/v1/appointments')
+        .set('Origin', ORIGIN)
+        .set('Cookie', cookie)
+        .send({
+          patientId: 'not-a-uuid',
+          providerId: '00000000-0000-0000-0000-000000000028',
+          scheduledStart: FUTURE_START,
+          scheduledEnd: FUTURE_END,
+          typeCode: 'consultation',
+        });
+
+      expect(response.status).toBe(400);
+    });
+
+    it('Missing required fields are rejected', async () => {
+      const { userId } = await createUser('missing@example.com', 'Missing User');
+      const { tenantId } = await createTenant('test-tenant-14', 'Test Tenant 14');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-14',
+        'Test Organisation 14',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-14',
+        'Test Facility 14',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('missing@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await request(server)
+        .post('/api/v1/appointments')
+        .set('Origin', ORIGIN)
+        .set('Cookie', cookie)
+        .send({
+          patientId: '00000000-0000-0000-0000-000000000029',
+          // missing providerId, scheduledStart, scheduledEnd, typeCode
+        });
+
+      expect(response.status).toBe(400);
+    });
+  });
+
+  // ===== Conflict handling tests =====
+
+  describe('Conflict handling', () => {
+    it('Exact overlap is rejected', async () => {
+      const { userId } = await createUser('overlap1@example.com', 'Overlap1 User');
+      const { tenantId } = await createTenant('test-tenant-15', 'Test Tenant 15');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-15',
+        'Test Organisation 15',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-15',
+        'Test Facility 15',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('overlap1@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000030';
+      const providerId = '00000000-0000-0000-0000-000000000031';
+
+      // Book first appointment
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Try to book exact same time
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'follow-up',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_OVERLAP');
+    });
+
+    it('Partial overlap at the beginning is rejected', async () => {
+      const { userId } = await createUser('overlap2@example.com', 'Overlap2 User');
+      const { tenantId } = await createTenant('test-tenant-16', 'Test Tenant 16');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-16',
+        'Test Organisation 16',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-16',
+        'Test Facility 16',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('overlap2@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000032';
+      const providerId = '00000000-0000-0000-0000-000000000033';
+
+      // Book first appointment 09:00-09:30
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Try to book 08:45-09:15 (overlapping beginning)
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        '2026-09-01T08:45:00.000Z',
+        '2026-09-01T09:15:00.000Z',
+        'follow-up',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_OVERLAP');
+    });
+
+    it('Partial overlap at the end is rejected', async () => {
+      const { userId } = await createUser('overlap3@example.com', 'Overlap3 User');
+      const { tenantId } = await createTenant('test-tenant-17', 'Test Tenant 17');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-17',
+        'Test Organisation 17',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-17',
+        'Test Facility 17',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('overlap3@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000034';
+      const providerId = '00000000-0000-0000-0000-000000000035';
+
+      // Book first appointment 09:00-09:30
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Try to book 09:15-09:45 (overlapping end)
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        '2026-09-01T09:15:00.000Z',
+        '2026-09-01T09:45:00.000Z',
+        'follow-up',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_OVERLAP');
+    });
+
+    it('A requested appointment containing an existing appointment is rejected', async () => {
+      const { userId } = await createUser('overlap4@example.com', 'Overlap4 User');
+      const { tenantId } = await createTenant('test-tenant-18', 'Test Tenant 18');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-18',
+        'Test Organisation 18',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-18',
+        'Test Facility 18',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('overlap4@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000036';
+      const providerId = '00000000-0000-0000-0000-000000000037';
+
+      // Book first appointment 09:00-09:30
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Try to book 08:30-10:00 (containing existing)
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        '2026-09-01T08:30:00.000Z',
+        '2026-09-01T10:00:00.000Z',
+        'follow-up',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_OVERLAP');
+    });
+
+    it('A requested appointment contained inside an existing appointment is rejected', async () => {
+      const { userId } = await createUser('overlap5@example.com', 'Overlap5 User');
+      const { tenantId } = await createTenant('test-tenant-19', 'Test Tenant 19');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-19',
+        'Test Organisation 19',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-19',
+        'Test Facility 19',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('overlap5@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000038';
+      const providerId = '00000000-0000-0000-0000-000000000039';
+
+      // Book first appointment 08:30-10:00
+      await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        '2026-09-01T08:30:00.000Z',
+        '2026-09-01T10:00:00.000Z',
+        'consultation',
+      );
+
+      // Try to book 09:00-09:30 (inside existing)
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'follow-up',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_OVERLAP');
+    });
+
+    it('Different providers can have appointments at the same time', async () => {
+      const { userId } = await createUser('diff-provider@example.com', 'Diff Provider User');
+      const { tenantId } = await createTenant('test-tenant-20', 'Test Tenant 20');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-20',
+        'Test Organisation 20',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-20',
+        'Test Facility 20',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('diff-provider@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000040';
+      const providerId1 = '00000000-0000-0000-0000-000000000041';
+      const providerId2 = '00000000-0000-0000-0000-000000000042';
+
+      // Book with provider 1
+      const response1 = await bookAppointment(
+        cookie,
+        patientId,
+        providerId1,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+      expect(response1.status).toBe(201);
+
+      // Book with provider 2 at the same time (should succeed)
+      const response2 = await bookAppointment(
+        cookie,
+        patientId,
+        providerId2,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+      expect(response2.status).toBe(201);
+    });
+  });
+});

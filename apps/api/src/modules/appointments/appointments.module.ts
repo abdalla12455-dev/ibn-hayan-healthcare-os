@@ -6,24 +6,25 @@ import { AuthorizationModule } from '../authorization/index.js';
 import { ClockModule } from '../../infrastructure/clock/index.js';
 import { AppointmentsController } from './appointments.controller.js';
 import { AppointmentsTodayService } from './appointments-today.service.js';
+import { AppointmentsBookingService } from './appointments-booking.service.js';
 
 /**
  * Appointments module.
  *
- * Provides the "Today's Appointments" endpoint at `GET /api/v1/appointments/today`
- * for the R09 Clinic Administrator role.
+ * Provides:
+ * - `GET /api/v1/appointments/today` for the R09 Clinic Administrator role
+ *   (requires `appointments:view` permission).
+ * - `POST /api/v1/appointments` for creating appointments, authorized for
+ *   R06 Receptionist, R07 Scheduler, and R09 Clinic Administrator roles
+ *   (requires `appointments:book` permission).
  *
  * The module depends on:
- * - {@link DatabaseModule} for the AppointmentRepository and
- *   FacilityRepository.
+ * - {@link DatabaseModule} for the AppointmentRepository,
+ *   PatientRepository, ProviderRepository, and FacilityRepository.
  * - {@link AuditModule} for the AuditHelperService.
  * - {@link AuthModule} for the AuthService.
  * - {@link AuthorizationModule} for the AuthorizationGuard.
  * - {@link ClockModule} for the ClockService.
- *
- * The route is guarded by `AuthorizationGuard` and requires the
- * `appointments:view` permission, which is granted ONLY to
- * `R09_ADMINISTRATOR`.
  */
 @Module({
   imports: [
@@ -34,6 +35,6 @@ import { AppointmentsTodayService } from './appointments-today.service.js';
     ClockModule,
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsTodayService],
+  providers: [AppointmentsTodayService, AppointmentsBookingService],
 })
 export class AppointmentsModule {}

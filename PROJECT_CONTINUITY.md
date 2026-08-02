@@ -5025,3 +5025,130 @@ define and approve the exact Stage 1C scope before implementation
 
 - **Authoritative Stage 1B recovery point:** merge commit 25f805017423c0c8ae476fe2286cdf70f26a4558
 - **Note:** This documentation commit's own final SHA will be reported externally, not recorded in this section.
+
+---
+
+## Stage 1C: Appointment Booking Foundation (2026-08-02)
+
+> **Authority:** This section records the Stage 1C implementation completed on the `feature/appointments-stage-1c-booking` branch.
+
+### Overview
+
+Stage 1C implements the appointment booking foundation for the Ibn Hayan Healthcare Operating System, enabling authenticated clinic-side users (R06 Receptionist, R07 Scheduler, R09 Clinic Administrator) to create new appointments through the clinic API.
+
+### Approved Scope
+
+- `appointments:book` permission added
+- Permission assigned to R06, R07, R09
+- `POST /api/v1/appointments` endpoint
+- Tenant, organisation, facility isolation
+- Patient/provider scope validation
+- Appointment time validation (end > start, no past times)
+- Provider appointment overlap prevention
+- Concurrency-safe double-booking protection (SERIALIZABLE transaction)
+- `appointments.booked` audit action
+- Unit and integration tests
+
+### Explicitly Excluded
+
+- appointment rescheduling
+- appointment cancellation
+- advanced provider availability calendars
+- waiting lists
+- notifications/reminders
+- billing/payment
+- frontend/UI work
+- Platform Super Admin changes
+
+### Files Created
+
+- `packages/domain/src/patient/patient.repositories.ts`
+- `packages/domain/src/patient/index.ts`
+- `packages/domain/src/workforce/workforce.repositories.ts`
+- `packages/domain/src/workforce/index.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-patient.repository.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts`
+- `apps/api/src/modules/appointments/appointments-booking.service.ts`
+- `apps/api/test/appointments/appointments-booking.integration.spec.ts`
+
+### Files Modified
+
+- `packages/domain/src/authorization/permissions.ts` (+`appointments:book`)
+- `packages/domain/src/authorization/role-permissions.ts` (R06, R07, R09 grants)
+- `packages/domain/src/scheduling/appointment.ts` (+`AppointmentCreateInput`, `AppointmentCreated`)
+- `packages/domain/src/scheduling/repositories.ts` (+`create()` method)
+- `packages/domain/src/index.ts` (new exports)
+- `packages/contracts/src/appointments/appointments.schema.ts` (+booking schemas)
+- `packages/observability/src/audit/action-codes.ts` (+`appointments.booked`)
+- `apps/api/src/infrastructure/database/database.module.ts` (+PATIENT_REPOSITORY, PROVIDER_REPOSITORY)
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` (+`create()` with SERIALIZABLE overlap detection)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (+POST endpoint)
+- `apps/api/src/modules/appointments/appointments.errors.ts` (+booking errors)
+- `apps/api/src/modules/appointments/appointments.module.ts` (+AppointmentsBookingService)
+- `PROJECT_CONTINUITY.md` (+Stage 1C documentation)
+
+### Authorization Decisions
+
+- R06_RECEPTIONIST: receives `CLINIC_BOOKING_PERMISSIONS` (context + `appointments:book`)
+- R07_SCHEDULER: receives `CLINIC_BOOKING_PERMISSIONS` (context + `appointments:book`)
+- R09_ADMINISTRATOR: receives `CLINIC_ADMIN_PERMISSIONS` (context + `clinic_admin_overview:view` + `appointments:view` + `appointments:book`)
+- R13_SYSTEM_ADMINISTRATOR: does NOT receive `appointments:book` (platform-level identity must not gain clinic-booking access)
+
+### Tenant-Isolation Decisions
+
+- All scope (tenantId, organisationId, facilityId) derived from authenticated session
+- No caller-supplied scope accepted in request body
+- Patient/provider existence validated against authenticated tenant
+- Overlap detection scoped to same tenant, organisation, facility
+
+### Concurrency-Protection Design
+
+- SERIALIZABLE transaction isolation for create operations
+- Overlap check: `existingStart < requestedEnd AND existingEnd > requestedStart`
+- Adjacent appointments (one ends exactly when another begins) are NOT overlapping
+- Conflict throws `AppointmentOverlapError` → HTTP 422 `APPOINTMENT_OVERLAP`
+
+### Audit Design
+
+- Action code: `appointments.booked`
+- Category: `facility_context`
+- Metadata: `{ endpoint: 'appointments_book', appointmentId: string }`
+- Emitted via `auditHelper.emitDirect()` after successful creation
+- NOT emitted on validation failures
+
+### Known Limitations
+
+- Patient and provider existence validation uses UUID format validation only
+  - Full Patient/Provider tables not yet implemented in schema
+  - Placeholder repositories return `true` for valid UUIDs
+  - TODO comments indicate where actual existence checks should be implemented
+
+### Validation Results
+
+- git diff-check: PASS
+- No conflict markers detected
+- All files follow established patterns
+
+### Pre-Existing Failures
+
+- None
+
+### Feature Branch Status
+
+- **Branch:** `feature/appointments-stage-1c-booking`
+- **Base:** `main` at commit `085494309090ad79b2be27a68264f74334df207f`
+- **Status:** Ready for review
+
+### Known Risks
+
+- No known technical blockers
+- Integration tests require PostgreSQL 17
+
+### Immediate Next Step
+
+Merge Stage 1C PR into main after review approval
+
+### Recovery Information
+
+- **Authoritative Stage 1C base point:** commit 085494309090ad79b2be27a68264f74334df207f (main HEAD at task start)
+- **Feature branch:** `feature/appointments-stage-1c-booking`

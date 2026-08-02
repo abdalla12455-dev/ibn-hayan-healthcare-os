@@ -51,3 +51,5 @@ export * from './tenancy/index.js';
 export * from './identity/index.js';
 export * from './authorization/index.js';
 export * from './scheduling/index.js';
+export * from './patient/index.js';
+export * from './workforce/index.js';
