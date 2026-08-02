@@ -287,10 +287,10 @@ export type BookAppointmentResponse = z.infer<
  * Error codes:
  * - `APPOINTMENT_VALIDATION_ERROR`: invalid timestamps, missing fields,
  *   or other validation failures.
- * - `APPOINTMENT_PATIENT_NOT_FOUND`: the patient does not exist in
- *   the authenticated tenant.
- * - `APPOINTMENT_PROVIDER_NOT_FOUND`: the provider does not exist in
- *   the authenticated tenant.
+ * - `APPOINTMENT_PATIENT_NOT_FOUND`: (reserved for future use when
+ *   Patient bounded context BC01 is implemented)
+ * - `APPOINTMENT_PROVIDER_NOT_FOUND`: (reserved for future use when
+ *   Workforce bounded context BC10 is implemented)
  * - `APPOINTMENT_OVERLAP`: the requested time slot overlaps with an
  *   existing appointment for the same provider.
  * - `APPOINTMENT_PAST_TIME`: the requested start time is in the past.

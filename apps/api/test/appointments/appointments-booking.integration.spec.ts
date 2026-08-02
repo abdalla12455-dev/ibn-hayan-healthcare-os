@@ -10,11 +10,18 @@
  * - Authorization (R06, R07, R09 allowed; R13 denied; other roles denied)
  * - Authentication (session cookie validation)
  * - Tenant/organisation/facility context resolution
- * - Patient/provider validation
  * - Timestamp validation (end > start, no past times)
+ * - Contract validation (UUID format, required fields)
  * - Provider overlap prevention
  * - Audit event emission
  * - Tenant isolation
+ * - Concurrent overlap prevention
+ *
+ * NOTE: Patient and provider existence validation is NOT implemented in Stage 1C.
+ * Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the
+ * Patient (BC01) and Workforce (BC10) bounded contexts for existence validation.
+ * Those contexts are not yet implemented. This test suite accepts logical
+ * patientId and providerId identifiers without existence verification.
  *
  * Per the task specification, these tests require PostgreSQL 17.
  * They are NOT run locally without PostgreSQL 17.
@@ -1151,6 +1158,125 @@ describe('POST /api/v1/appointments', () => {
         'consultation',
       );
       expect(response2.status).toBe(201);
+    });
+  });
+
+  // ===== Concurrency tests =====
+
+  describe('Concurrency', () => {
+    /**
+     * Test that two concurrent overlapping booking requests result in exactly
+     * one successful appointment creation.
+     *
+     * The SERIALIZABLE transaction isolation ensures that only one of the
+     * concurrent requests can succeed. The other receives a conflict error.
+     *
+     * This test verifies:
+     * - Exactly one appointment is created
+     * - One request succeeds (201) and one fails (422 with OVERLAP)
+     * - No database constraint violations occur
+     * - No serialization failures result in 500 errors
+     */
+    it('Concurrent overlapping requests result in exactly one appointment', async () => {
+      const { userId } = await createUser('concurrent@example.com', 'Concurrent User');
+      const { tenantId } = await createTenant('test-tenant-21', 'Test Tenant 21');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-21',
+        'Test Organisation 21',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-21',
+        'Test Facility 21',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('concurrent@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000050';
+      const providerId = '00000000-0000-0000-0000-000000000051';
+
+      // Send two concurrent overlapping booking requests
+      const [response1, response2] = await Promise.all([
+        bookAppointment(cookie, patientId, providerId, FUTURE_START, FUTURE_END, 'consultation'),
+        bookAppointment(cookie, patientId, providerId, FUTURE_START, FUTURE_END, 'consultation'),
+      ]);
+
+      // Exactly one should succeed
+      const successCount = [response1.status, response2.status].filter((s) => s === 201).length;
+      expect(successCount).toBe(1);
+
+      // Exactly one should fail with OVERLAP
+      const conflictCount = [response1, response2].filter(
+        (r) => r.status === 422 && r.body.error?.code === 'APPOINTMENT_OVERLAP',
+      ).length;
+      expect(conflictCount).toBe(1);
+
+      // No internal server errors
+      const errorCount = [response1, response2].filter((r) => r.status >= 500).length;
+      expect(errorCount).toBe(0);
+
+      // Exactly one appointment should be in the database
+      const appointments = await prisma.appointment.findMany({
+        where: {
+          tenantId,
+          organisationId,
+          facilityId,
+          providerId,
+          scheduledStart: new Date(FUTURE_START),
+        },
+      });
+      expect(appointments.length).toBe(1);
+    });
+
+    it('Concurrent requests with adjacent times both succeed', async () => {
+      const { userId } = await createUser('concurrent-adjacent@example.com', 'Concurrent Adjacent User');
+      const { tenantId } = await createTenant('test-tenant-22', 'Test Tenant 22');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-22',
+        'Test Organisation 22',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-22',
+        'Test Facility 22',
+        'Asia/Baghdad',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      const cookie = await loginUser('concurrent-adjacent@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const patientId = '00000000-0000-0000-0000-000000000052';
+      const providerId = '00000000-0000-0000-0000-000000000053';
+
+      // Send two concurrent non-overlapping booking requests
+      // First: 09:00-09:30, Second: 09:30-10:00
+      const [response1, response2] = await Promise.all([
+        bookAppointment(cookie, patientId, providerId, FUTURE_START, FUTURE_END, 'consultation'),
+        bookAppointment(cookie, patientId, providerId, FUTURE_END, FUTURE_START_2, 'follow-up'),
+      ]);
+
+      // Both should succeed (adjacent appointments don't overlap)
+      expect(response1.status).toBe(201);
+      expect(response2.status).toBe(201);
+
+      // Both appointments should be in the database
+      const appointments = await prisma.appointment.findMany({
+        where: {
+          tenantId,
+          organisationId,
+          facilityId,
+          providerId,
+        },
+      });
+      expect(appointments.length).toBe(2);
     });
   });
 });

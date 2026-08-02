@@ -208,9 +208,13 @@ export class AppointmentsController {
    * Returns 401 for missing/invalid/expired/revoked sessions.
    * Returns 403 for principals whose roles do not grant `appointments:book`
    * (only R06 Receptionist, R07 Scheduler, and R09 Administrator).
-   * Returns 400 for invalid timestamps (end not after start).
-   * Returns 422 for past appointment times, nonexistent patient/provider,
-   * or overlapping appointment conflicts.
+   * Returns 400 for invalid timestamps (end not after start) or invalid UUIDs.
+   * Returns 422 for past appointment times or overlapping appointment conflicts.
+   *
+   * NOTE: Patient and provider existence validation is NOT performed in Stage 1C.
+   * The patientId and providerId are accepted as logical identifiers. Existence
+   * validation will be added when Patient (BC01) and Workforce (BC10) bounded
+   * contexts are implemented.
    *
    * Per the Stage 1C implementation specification, the endpoint does NOT
    * accept tenant, organisation, or facility identifiers from the request
@@ -262,7 +266,7 @@ export class AppointmentsController {
   @ApiResponse({
     status: 422,
     description:
-      'Unprocessable entity: past time, patient not found, provider not found, or appointment overlap.',
+      'Unprocessable entity: past time or appointment overlap.',
   })
   async bookAppointment(
     @Req() req: Request,
