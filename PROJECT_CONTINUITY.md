@@ -5034,7 +5034,8 @@ define and approve the exact Stage 1C scope before implementation
 
 - **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
 - **Feature branch:** feature/bc01-patient-reference-foundation
-- **Base SHA:** 0854943090 (verified from origin/main)
+- **Base SHA:** 085494309090ad79b2be27a68264f74334df207f (verified from origin/main)
+- **Final commit SHA:** 2137dbb49bca2cc65873afa54300912d271d9519
 
 ### Scope
 
@@ -5135,13 +5136,13 @@ BC01 Patient Reference Foundation — minimal canonical patient persistence and 
 
 - **Message:** feat(patient): add tenant-safe patient reference foundation
 - **Branch:** feature/bc01-patient-reference-foundation
-- **SHA:** (see final report)
-- **Status:** (see final report after push)
+- **SHA:** 2137dbb49bca2cc65873afa54300912d271d9519
+- **Status:** Pushed and CI validated
 
 ### Recovery Information
 
-- **Authoritative recovery point:** This commit SHA (see final report)
-- **Parent:** origin/main @ 0854943090
+- **Authoritative recovery point:** 2137dbb49bca2cc65873afa54300912d271d9519
+- **Parent:** origin/main @ 085494309090ad79b2be27a68264f74334df207f
 
 ### Remaining Work
 
