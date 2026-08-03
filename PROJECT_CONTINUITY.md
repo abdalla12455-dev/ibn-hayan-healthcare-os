@@ -5025,3 +5025,127 @@ define and approve the exact Stage 1C scope before implementation
 
 - **Authoritative Stage 1B recovery point:** merge commit 25f805017423c0c8ae476fe2286cdf70f26a4558
 - **Note:** This documentation commit's own final SHA will be reported externally, not recorded in this section.
+
+---
+
+## BC01 Patient Reference Foundation (2026-08-03)
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** feature/bc01-patient-reference-foundation
+- **Base SHA:** 0854943090 (verified from origin/main)
+
+### Scope
+
+BC01 Patient Reference Foundation — minimal canonical patient persistence and repository foundation for verifying patient existence within authenticated tenant scope.
+
+**In scope:**
+- Canonical Patient persistence model (tenant-scoped)
+- Canonical Patient domain types and repository port
+- Prisma repository implementation
+- Database migration
+- Unit and integration tests
+
+**Out of scope:**
+- Patient demographics (name, DOB, contact info)
+- Clinical records, diagnoses, prescriptions
+- Insurance, billing, consent
+- Patient registration workflow
+- Frontend UI
+
+### Architecture Decisions
+
+| Decision | Source | Value |
+|----------|--------|-------|
+| Patient scoping | ADR-015 + PATIENTS.md | Tenant-isolated |
+| Cross-facility identity | PATIENTS.md | Patient visible across all facilities within tenant |
+| MRN uniqueness | PATIENTS.md | Tenant-wide unique |
+| Status values | PATIENTS.md | active, inactive, archived |
+| Sensitive fields excluded | Minimal foundation rule | Demographics, contact, insurance not included |
+
+### Patient Model Fields
+
+**Implemented:**
+- `id` (UUID, primary key)
+- `tenantId` (UUID, tenant isolation)
+- `medicalRecordNumber` (VARCHAR(50), tenant-wide unique)
+- `status` (enum: active, inactive, archived)
+- `createdAt` (timestamptz)
+- `updatedAt` (timestamptz)
+
+**Excluded:**
+- Demographics (name, DOB, sex, gender, language)
+- Contact information (address, phone, email)
+- Insurance details
+- Consent records
+- Medical history
+- Family/payer relationships
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `packages/domain/src/patient/patient.ts` | Patient domain model, PatientId, PatientStatus, CreatePatientInput |
+| `packages/domain/src/patient/patient.repositories.ts` | PatientRepository port interface |
+| `packages/domain/src/patient/index.ts` | Patient module barrel export |
+| `packages/domain/src/patient/patient.spec.ts` | Domain unit tests (8 tests) |
+| `apps/api/src/infrastructure/database/mappers/patient.mapper.ts` | Prisma-to-domain mapper |
+| `apps/api/src/infrastructure/database/repositories/prisma-patient.repository.ts` | Prisma repository implementation |
+| `apps/api/test/database/patient.db-spec.ts` | Integration tests |
+| `apps/api/prisma/migrations/20260803000000_bc01_patient_reference_foundation/migration.sql` | Database migration |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/api/prisma/schema.prisma` | Added Patient model and PatientStatus enum |
+| `apps/api/src/infrastructure/database/database.module.ts` | Added PATIENT_REPOSITORY provider and exports |
+| `packages/domain/src/index.ts` | Added patient module exports |
+| `packages/domain/src/scheduling/index.ts` | Re-exported PatientId for scheduling compatibility |
+| `PROJECT_CONTINUITY.md` | This entry |
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Typecheck (domain) | PASS |
+| Typecheck (api) | PASS |
+| Unit tests (domain) | PASS (8/8 patient tests) |
+| Lint (patient files) | PASS |
+| Production build | PASS |
+| Pre-existing failures | @ibn-hayan/observability module errors (unrelated to BC01) |
+
+### Tenant Isolation Behavior
+
+- Patient lookup with correct tenantId returns patient
+- Patient lookup with wrong tenantId returns null (not an error)
+- MRN uniqueness enforced only within tenant boundary
+- existsInTenant uses count query with tenantId filter
+
+### Compatibility
+
+- Compatible with `feature/appointments-stage-1c-booking` PatientRepository interface
+- No conflicting or competing contracts created
+- Scheduling module can continue using PatientId re-export
+
+### Commit
+
+- **Message:** feat(patient): add tenant-safe patient reference foundation
+- **Branch:** feature/bc01-patient-reference-foundation
+- **SHA:** (see final report)
+- **Status:** (see final report after push)
+
+### Recovery Information
+
+- **Authoritative recovery point:** This commit SHA (see final report)
+- **Parent:** origin/main @ 0854943090
+
+### Remaining Work
+
+- Patient demographics and contact information (future BC01 batch)
+- Patient registration workflow (future BC01 batch)
+- Patient consent management (future BC01 batch)
+- Clinical records, diagnoses, prescriptions (separate bounded contexts)

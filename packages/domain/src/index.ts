@@ -37,10 +37,15 @@
  * - scheduling: Appointment domain model and AppointmentRepository port.
  *   The Scheduling bounded context (BC06) owns appointment lifecycle,
  *   slot templates, and resource scheduling.
+ * - patient: Patient domain model and PatientRepository port.
+ *   The Patient bounded context (BC01) owns patient identity, demographics,
+ *   consent, and medical record lifecycle. This export provides the minimal
+ *   canonical patient reference foundation required for other bounded contexts
+ *   to verify that a patient reference genuinely exists within the
+ *   authenticated tenant scope.
  *
- * Additional bounded contexts (patients, audit, billing,
- * inventory, configuration, etc.) arrive in subsequent batches alongside
- * their respective vertical slices.
+ * Additional bounded contexts (audit, billing, inventory, configuration, etc.)
+ * arrive in subsequent batches alongside their respective vertical slices.
  */
 
 export const DOMAIN_PACKAGE_VERSION = '0.0.0' as const;
@@ -51,3 +56,4 @@ export * from './tenancy/index.js';
 export * from './identity/index.js';
 export * from './authorization/index.js';
 export * from './scheduling/index.js';
+export * from './patient/index.js';

@@ -779,3 +779,50 @@ model Appointment {
   @@index([tenantId, facilityId, scheduledStart], map: "appointments_tenant_id_facility_id_scheduled_start_idx")
   @@map("appointments")
 }
+
+// ---------------------------------------------------------------------------
+// Patient
+// ---------------------------------------------------------------------------
+
+/// Patient lifecycle status.
+enum PatientStatus {
+  active
+  inactive
+  archived
+}
+
+/// The canonical patient identity for the Ibn Hayan Healthcare Operating System.
+///
+/// Per download/docs/07_MODULES/PATIENTS.md:
+/// - Patient records are tenant-isolated by default
+/// - A patient created in tenant A is not visible to tenant B
+/// - Cross-facility identity resolution means a patient identity is visible
+///   across all facilities within a tenant
+/// - MRN (Medical Record Number) is tenant-wide and unique
+///
+/// This model implements the minimal canonical Patient persistence foundation
+/// required for other bounded contexts to verify that a patient reference
+/// genuinely exists within the authenticated tenant scope.
+///
+/// Deliberately excluded (not in this minimal foundation):
+/// - Demographics (name, date of birth, sex, gender, language)
+/// - Contact information (address, telephone, email, emergency contact)
+/// - Insurance coverage details
+/// - Consent records
+/// - Medical history
+/// - Family/payer relationships
+///
+/// These fields will be added in subsequent batches as patient registration
+/// and demographics are implemented.
+model Patient {
+  id                     String       @id @default(uuid()) @db.Uuid
+  tenantId               String       @map("tenant_id") @db.Uuid
+  medicalRecordNumber    String       @map("medical_record_number") @db.VarChar(50)
+  status                 PatientStatus @default(active)
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, medicalRecordNumber], map: "patients_tenant_id_medical_record_number_key")
+  @@index([tenantId], map: "patients_tenant_id_idx")
+  @@map("patients")
+}
