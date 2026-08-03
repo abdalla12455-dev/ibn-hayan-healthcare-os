@@ -283,6 +283,161 @@ This is the primary feature under development. It adds multi-tenant scoping to t
 
 **Validation strategy:** A Docker-based GitHub Actions workflow runs the full test suite against PostgreSQL 17 (the production target), since the development environment only has PostgreSQL 15/16 available locally.
 
+---
+
+## BC10 Workforce Reference Foundation (2026-08-03)
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** feature/bc10-workforce-reference-foundation
+- **Pull request:** (pending)
+- **Base SHA:** 7e5457044266e14690d0ef5c09fc0c614ce7e9c8
+
+### Scope
+
+BC10 Workforce Reference Foundation — minimal canonical provider persistence and repository foundation for verifying provider existence within authenticated tenant scope and eligibility for specific facilities.
+
+**In scope:**
+- Canonical Provider persistence model (tenant-scoped)
+- Canonical ProviderFacilityAssignment model for multi-facility support
+- Canonical Provider domain types and repository port
+- Prisma repository implementation with tenant isolation and facility assignment validation
+- Database migration
+- Unit and integration tests
+
+**Out of scope:**
+- Provider demographics (name, contact information)
+- Professional identity (license number, NPI, certifications)
+- Credentials and privileging data
+- Schedules and availability
+- Patient panel assignments
+- Productivity and performance metrics
+- Compensation data
+
+### Architecture Decisions
+
+| Decision | Source | Value |
+|----------|--------|-------|
+| Provider scoping | DOCTORS.md Section 4.1 | Tenant-isolated |
+| Facility assignment | DOCTORS.md Section 4.2 | Multi-facility supported via ProviderFacilityAssignment |
+| Lifecycle values | DOCTORS.md Section 11 | candidate, onboarded, active, suspended, separated |
+| Eligibility | DOCTORS.md Section 4.2, Section 11 | Active status AND valid facility assignment |
+| Sensitive fields excluded | Minimal foundation rule | Demographics, credentials, compensation not included |
+
+### Provider Model Fields
+
+**Implemented:**
+- `id` (UUID, primary key)
+- `tenantId` (UUID, tenant isolation)
+- `status` (enum: candidate, onboarded, active, suspended, separated)
+- `createdAt` (timestamptz)
+- `updatedAt` (timestamptz)
+
+**ProviderFacilityAssignment Fields:**
+- `id` (UUID, primary key)
+- `providerId` (UUID, FK to Provider)
+- `tenantId` (UUID, tenant isolation)
+- `organisationId` (UUID, organisation scope)
+- `facilityId` (UUID, FK to Facility)
+- `assignedAt` (timestamptz)
+- `revokedAt` (timestamptz, nullable)
+
+**Excluded:**
+- Provider demographics (name, contact)
+- Professional identity (license, NPI, certifications)
+- Credentials and privileging data
+- Schedules and availability
+- Patient panel assignments
+- Productivity metrics
+- Compensation data
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `packages/domain/src/workforce/provider.ts` | Provider domain model, ProviderId, ProviderFacilityAssignmentId, ProviderLifecycleStatus, CreateProviderInput |
+| `packages/domain/src/workforce/workforce.repositories.ts` | ProviderRepository and ProviderFacilityAssignmentRepository port interfaces |
+| `packages/domain/src/workforce/index.ts` | Workforce module barrel export |
+| `packages/domain/src/workforce/provider.spec.ts` | Domain unit tests (9 tests) |
+| `apps/api/src/infrastructure/database/mappers/provider.mapper.ts` | Prisma-to-domain mapper |
+| `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` | Prisma repository implementation |
+| `apps/api/test/database/provider.db-spec.ts` | Integration tests (20 tests) |
+| `apps/api/prisma/migrations/20260803010000_bc10_workforce_reference_foundation/migration.sql` | Database migration |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/api/prisma/schema.prisma` | Added ProviderStatus enum, Provider model, ProviderFacilityAssignment model, Facility.providerAssignments relation |
+| `apps/api/src/infrastructure/database/database.module.ts` | Added WORKFORCE_REPOSITORY token, PrismaProviderRepository provider and exports |
+| `packages/domain/src/index.ts` | Added workforce module exports |
+| `packages/domain/src/scheduling/index.ts` | Added ProviderId re-export for backwards compatibility |
+| `PROJECT_CONTINUITY.md` | This entry |
+
+### Repository Contract
+
+**ProviderRepository methods:**
+- `existsInTenant(tenantId, providerId)`: Returns true if provider exists in tenant
+- `findById(tenantId, providerId)`: Returns Provider or null
+- `isEligibleForFacility(tenantId, providerId, facilityId)`: Returns true if provider is active AND has active facility assignment
+- `findActiveFacilityAssignments(tenantId, providerId)`: Returns array of active assignments
+
+### Tenant Isolation Behavior
+
+- Provider lookup with correct tenantId returns provider
+- Provider lookup with wrong tenantId returns null (not an error)
+- isEligibleForFacility returns false for cross-tenant queries
+- findActiveFacilityAssignments returns empty array for cross-tenant queries
+
+### Facility Assignment Behavior
+
+- A provider must be assigned to a facility via ProviderFacilityAssignment
+- Assignment must be active (revokedAt is null)
+- Provider must be in 'active' status
+- isEligibleForFacility checks all three conditions
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Typecheck (domain) | PASS |
+| Typecheck (api) | PASS |
+| Unit tests (domain) | PASS (9/9 provider tests) |
+| Unit tests (api) | PASS (419/419 tests) |
+| Lint | PASS |
+| Production build | PASS |
+| Pre-existing failures | @ibn-hayan/observability module errors (unrelated to BC10) |
+
+### PostgreSQL 17 Validation
+
+- PostgreSQL 17 is not available locally (per AGENTS.md environment constraints)
+- Migration SQL reviewed for forward-only, non-destructive operations
+- All constraints and indexes use PostgreSQL 17-compatible syntax
+- Validation requires GitHub Actions CI run
+
+### Commit
+
+- **Message:** feat(workforce): add tenant-safe provider reference foundation
+- **Branch:** feature/bc10-workforce-reference-foundation
+- **SHA:** (pending - to be reported after push)
+- **Status:** LOCAL ONLY - awaiting push verification
+
+### Recovery Information
+
+- **Authoritative recovery point:** 7e5457044266e14690d0ef5c09fc0c614ce7e9c8 (main before BC10)
+- **Feature branch:** feature/bc10-workforce-reference-foundation (local)
+
+### Remaining Work
+
+- Provider profiles and contact information (future BC10 batch)
+- Provider credentialing and privileging (future BC10 batch)
+- Provider scheduling and availability (future BC10 batch)
+- Appointment booking integration with provider validation (BC06)
+
+
 ## Standard Main CI Workflow (branch `ci/main-standard-workflow-v1`)
 
 This branch was created on 2026-07-24 to prepare an official standard CI workflow for the canonical `main` branch. It was pushed to `origin/ci/main-standard-workflow-v1` at SHA `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6`, merged into `main` via Pull Request #1 (merge commit `e610635956a4a406305aca2b0b6a12a84b7f32a6`), and is now live on `main`. Both the PR-triggered and the `main`-push-triggered `main-ci` workflow runs passed (operator-verified 2026-07-24).
