@@ -21,7 +21,6 @@ import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import { sessionRequired } from '../auth/auth.errors.js';
 import type {
   TodayAppointmentsResponse,
-  BookAppointmentRequest,
   BookAppointmentResponse,
 } from '@ibn-hayan/contracts';
 import { AppointmentsTodayService } from './appointments-today.service.js';
@@ -227,7 +226,8 @@ export class AppointmentsController {
   })
   @ApiSecurity('session')
   @ApiOperation({
-    summary: 'Book a new appointment for the active tenant, organisation, and facility context',
+    summary:
+      'Book a new appointment for the active tenant, organisation, and facility context',
   })
   @ApiResponse({
     status: 201,
@@ -235,7 +235,15 @@ export class AppointmentsController {
       'The created appointment. Returns the appointment with all persisted fields.',
     schema: {
       type: 'object',
-      required: ['id', 'patientId', 'providerId', 'scheduledStart', 'scheduledEnd', 'status', 'typeCode'],
+      required: [
+        'id',
+        'patientId',
+        'providerId',
+        'scheduledStart',
+        'scheduledEnd',
+        'status',
+        'typeCode',
+      ],
       properties: {
         id: { type: 'string', format: 'uuid' },
         patientId: { type: 'string', format: 'uuid' },
@@ -244,7 +252,15 @@ export class AppointmentsController {
         scheduledEnd: { type: 'string', format: 'date-time' },
         status: {
           type: 'string',
-          enum: ['booked', 'confirmed', 'arrived', 'in_progress', 'completed', 'cancelled', 'no_show'],
+          enum: [
+            'booked',
+            'confirmed',
+            'arrived',
+            'in_progress',
+            'completed',
+            'cancelled',
+            'no_show',
+          ],
         },
         typeCode: { type: 'string', minLength: 1, maxLength: 80 },
       },
@@ -265,8 +281,7 @@ export class AppointmentsController {
   })
   @ApiResponse({
     status: 422,
-    description:
-      'Unprocessable entity: past time or appointment overlap.',
+    description: 'Unprocessable entity: past time or appointment overlap.',
   })
   async bookAppointment(
     @Req() req: Request,
@@ -275,15 +290,14 @@ export class AppointmentsController {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
 
     // Parse and validate the request body using Zod
-    const { BookAppointmentRequestSchema } = await import('@ibn-hayan/contracts');
+    const { BookAppointmentRequestSchema } =
+      await import('@ibn-hayan/contracts');
     const parseResult = BookAppointmentRequestSchema.safeParse(body);
 
     if (!parseResult.success) {
       // Return 400 with validation errors
       const { BadRequestException } = await import('@nestjs/common');
-      const issues = parseResult.error.issues
-        .map((i) => i.message)
-        .join('; ');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
       throw new BadRequestException({
         error: {
           code: 'APPOINTMENT_VALIDATION_ERROR',

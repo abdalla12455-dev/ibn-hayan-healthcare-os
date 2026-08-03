@@ -4,6 +4,8 @@ import type {
   TenantRepository,
   OrganisationRepository,
   FacilityRepository,
+  PatientId,
+  ProviderId,
 } from '@ibn-hayan/domain';
 import {
   TENANT_REPOSITORY,
@@ -163,10 +165,7 @@ export class AppointmentsBookingService {
     const scheduledStart = new Date(request.scheduledStart);
     const scheduledEnd = new Date(request.scheduledEnd);
 
-    if (
-      isNaN(scheduledStart.getTime()) ||
-      isNaN(scheduledEnd.getTime())
-    ) {
+    if (isNaN(scheduledStart.getTime()) || isNaN(scheduledEnd.getTime())) {
       throw appointmentValidationError(
         'Invalid timestamp format. Use ISO 8601 with UTC offset.',
       );
@@ -200,15 +199,22 @@ export class AppointmentsBookingService {
     //   if (!providerExists) throw appointmentProviderNotFound();
 
     // Create the appointment (overlap detection is handled by the repository)
+    // NOTE: patientId and providerId are validated as UUIDs by Zod parsing in the
+    // controller. We cast them to branded types to satisfy the domain type signatures.
     let created;
     try {
-      created = await this.appointments.create(tenantId, organisationId, facilityId, {
-        patientId: request.patientId,
-        providerId: request.providerId,
-        scheduledStart,
-        scheduledEnd,
-        typeCode: request.typeCode,
-      });
+      created = await this.appointments.create(
+        tenantId,
+        organisationId,
+        facilityId,
+        {
+          patientId: request.patientId as PatientId,
+          providerId: request.providerId as ProviderId,
+          scheduledStart,
+          scheduledEnd,
+          typeCode: request.typeCode,
+        },
+      );
     } catch (error) {
       if (error instanceof AppointmentOverlapError) {
         throw appointmentOverlap();
