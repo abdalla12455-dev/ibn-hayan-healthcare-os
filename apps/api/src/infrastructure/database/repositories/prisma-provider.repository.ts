@@ -6,6 +6,7 @@ import type {
   ProviderFacilityAssignment,
   TenantId,
 } from '@ibn-hayan/domain';
+import type { FacilityId } from '@ibn-hayan/domain';
 import { PrismaService } from '../prisma.service.js';
 import {
   providerFromPrisma,
@@ -69,7 +70,7 @@ export class PrismaProviderRepository implements ProviderRepository {
   async isEligibleForFacility(
     tenantId: TenantId,
     providerId: ProviderId,
-    facilityId: string,
+    facilityId: FacilityId,
   ): Promise<boolean> {
     // A provider is eligible for a facility if:
     // 1. They exist in the tenant (existsInTenant check)

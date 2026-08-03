@@ -19,6 +19,7 @@ import type {
   ProviderFacilityAssignmentId,
 } from './provider.js';
 import type { TenantId } from '../tenancy/tenant.js';
+import type { FacilityId } from '../tenancy/facility.js';
 
 /**
  * Repository port for the Workforce bounded context (BC10).
@@ -98,7 +99,7 @@ export interface ProviderRepository {
   isEligibleForFacility(
     tenantId: TenantId,
     providerId: ProviderId,
-    facilityId: string,
+    facilityId: FacilityId,
   ): Promise<boolean>;
 
   /**
@@ -148,7 +149,7 @@ export interface ProviderFacilityAssignmentRepository {
   findByProviderAndFacility(
     tenantId: TenantId,
     providerId: ProviderId,
-    facilityId: string,
+    facilityId: FacilityId,
   ): Promise<ProviderFacilityAssignment | null>;
 
   /**

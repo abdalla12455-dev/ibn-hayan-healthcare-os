@@ -857,6 +857,12 @@ enum ProviderStatus {
 /// a provider reference genuinely exists within the authenticated tenant scope
 /// and is eligible for a specific facility.
 ///
+/// Tenant integrity: Provider is tenant-scoped. All assignment queries must
+/// include tenantId. The database enforces that an assignment's tenantId matches
+/// the provider's tenantId via a composite foreign key constraint added in the
+/// migration. Application-layer tenantId filters provide the primary isolation
+/// guarantee; database constraints provide the defense-in-depth guarantee.
+///
 /// Deliberately excluded (not in this minimal foundation):
 /// - Demographics (name, contact information)
 /// - Professional identity (license number, NPI, certifications)
@@ -892,9 +898,22 @@ model Provider {
 /// An active assignment has `revokedAt` set to null. A revoked assignment
 /// indicates the provider no longer works at that facility.
 ///
-/// The model uses single-column foreign keys for Prisma query-builder
-/// convenience. Application-layer logic enforces tenant isolation by
-/// requiring tenantId on all queries.
+/// Tenant integrity constraints (enforced via raw SQL in migration):
+/// - Composite FK: (tenant_id, provider_id) → providers(tenant_id, id)
+///   Ensures the provider belongs to the same tenant as the assignment.
+/// - Composite FK: (tenant_id, facility_id) → facilities(tenant_id, id)
+///   Ensures the facility belongs to the same tenant as the assignment.
+/// - Composite FK: (organisation_id, facility_id) → facilities(organisation_id, id)
+///   Ensures the organisation owns the facility.
+///
+/// Active assignment uniqueness (enforced via raw SQL partial unique index):
+/// - Only one active (non-revoked) assignment per tenant/provider/facility.
+/// - Historical revoked assignments are preserved for audit purposes.
+/// - A provider may be reassigned to the same facility after revocation.
+///
+/// Application-layer logic: all repository methods require tenantId as a
+/// mandatory parameter. This provides the primary isolation guarantee.
+/// Database constraints provide defense-in-depth.
 ///
 /// Deliberately excluded (not in this minimal foundation):
 /// - Assignment metadata (role at facility, department)
@@ -913,7 +932,8 @@ model ProviderFacilityAssignment {
   provider  Provider  @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   facility  Facility  @relation(fields: [facilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@unique([providerId, facilityId], map: "provider_facility_assignments_provider_id_facility_id_key")
+  // Note: Full unique constraint removed. See migration for partial unique index
+  // that enforces only one active (non-revoked) assignment per tenant/provider/facility.
   @@index([tenantId], map: "provider_facility_assignments_tenant_id_idx")
   @@index([tenantId, providerId], map: "provider_facility_assignments_tenant_id_provider_id_idx")
   @@index([tenantId, facilityId], map: "provider_facility_assignments_tenant_id_facility_id_idx")

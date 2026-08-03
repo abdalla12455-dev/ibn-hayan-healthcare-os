@@ -19,10 +19,16 @@
 -- - Active providers are fully credentialed and authorized for clinical work
 -- - Eligibility for scheduling requires active status AND valid facility assignment
 --
--- Changes:
--- 1. Create ProviderStatus enum with lifecycle values.
--- 2. Create providers table with tenant scoping.
--- 3. Create provider_facility_assignments table for multi-facility support.
+-- Database Integrity Constraints:
+-- - Composite FK: assignment(tenant_id, provider_id) → providers(tenant_id, id)
+--   Ensures the provider belongs to the same tenant as the assignment.
+-- - Composite FK: assignment(tenant_id, facility_id) → facilities(tenant_id, id)
+--   Ensures the facility belongs to the same tenant as the assignment.
+-- - Composite FK: assignment(organisation_id, facility_id) → facilities(organisation_id, id)
+--   Ensures the organisation owns the facility.
+-- - Partial unique index on (tenant_id, provider_id, facility_id) WHERE revoked_at IS NULL
+--   Ensures only one active assignment per provider/facility. Historical revoked
+--   assignments are preserved for audit purposes; reassignment is allowed.
 --
 -- All timestamps use PostgreSQL timestamptz for UTC storage.
 -- All indexes follow the repository naming convention (table_column_idx).
@@ -68,11 +74,6 @@ CREATE TABLE "provider_facility_assignments" (
   CONSTRAINT "provider_facility_assignments_pkey" PRIMARY KEY ("id")
 );
 
--- Unique constraint: a provider can only have one active assignment per facility.
--- A revoked assignment is kept for audit purposes.
-CREATE UNIQUE INDEX "provider_facility_assignments_provider_id_facility_id_key"
-  ON "provider_facility_assignments" ("provider_id", "facility_id");
-
 -- Foreign key: provider must exist and be deleted only when no assignments remain.
 ALTER TABLE "provider_facility_assignments"
   ADD CONSTRAINT "provider_facility_assignments_provider_id_fkey"
@@ -84,6 +85,34 @@ ALTER TABLE "provider_facility_assignments"
   ADD CONSTRAINT "provider_facility_assignments_facility_id_fkey"
   FOREIGN KEY ("facility_id") REFERENCES "facilities"("id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Composite foreign key: tenant integrity for provider.
+-- Ensures the provider's tenant matches the assignment's tenant.
+ALTER TABLE "provider_facility_assignments"
+  ADD CONSTRAINT "provider_facility_assignments_tenant_provider_fkey"
+  FOREIGN KEY ("tenant_id", "provider_id") REFERENCES "providers"("tenant_id", "id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Composite foreign key: tenant integrity for facility.
+-- Ensures the facility's tenant matches the assignment's tenant.
+ALTER TABLE "provider_facility_assignments"
+  ADD CONSTRAINT "provider_facility_assignments_tenant_facility_fkey"
+  FOREIGN KEY ("tenant_id", "facility_id") REFERENCES "facilities"("tenant_id", "id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Composite foreign key: organisation owns facility.
+-- Ensures the organisation owns the facility.
+ALTER TABLE "provider_facility_assignments"
+  ADD CONSTRAINT "provider_facility_assignments_org_facility_fkey"
+  FOREIGN KEY ("organisation_id", "facility_id") REFERENCES "facilities"("organisation_id", "id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Partial unique index: only one active (non-revoked) assignment per provider/facility.
+-- Historical revoked assignments are preserved for audit purposes.
+-- A provider may be reassigned to the same facility after revocation.
+CREATE UNIQUE INDEX "provider_facility_assignments_tenant_provider_facility_active_key"
+  ON "provider_facility_assignments" ("tenant_id", "provider_id", "facility_id")
+  WHERE "revoked_at" IS NULL;
 
 -- Index for tenant-scoped queries.
 CREATE INDEX "provider_facility_assignments_tenant_id_idx"
