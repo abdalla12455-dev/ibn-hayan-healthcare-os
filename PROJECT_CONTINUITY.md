@@ -5163,25 +5163,18 @@ Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the Pati
 - git diff-check: PASS
 - No conflict markers detected
 - All files follow established patterns
-- Targeted lint (modified files): PASS (0 errors)
+- Targeted lint (Stage 1C files): PASS (0 errors)
 - Prisma validate: PASS
 - Production build: PASS (all packages + apps)
-- TypeScript checking: 43 errors (see Pre-Existing Failures)
+- TypeScript checking: 10 errors (see Pre-Existing Failures)
 
-### Pre-Existing Failures (43 TypeScript errors)
+### Pre-Existing Failures (10 TypeScript errors on main baseline)
 
-| Category | Count | Source |
-|----------|-------|--------|
-| @ibn-hayan/observability module not found | 22 | Audit module files |
-| Wrong argument count to makeServiceStub() | 10 | appointments.controller.spec.ts |
-| Test file property mismatches | 4 | appointments-booking.integration.spec.ts |
-| Audit integrity verifier return | 1 | audit-integrity-verifier.service.ts |
-| auth-bootstrap-dev.ts observability | 1 | audit module |
-| audit-verify.ts implicit any | 1 | scripts |
-| audit-store-db-spec implicit any | 1 | tests |
-| Unused seedPrisma (before cleanup) | 11 | appointments-booking.integration.spec.ts |
+| Category | Count | Source | Evidence |
+|----------|-------|--------|----------|
+| Wrong argument count to makeServiceStub() | 10 | appointments.controller.spec.ts | Exists on origin/main |
 
-**Cleanup improved the test file:** Reduced test file errors from 11 (unused variables, wrong property names, assign vs create) to 4 (property type mismatches).
+**Stage 1C file status:** `appointments-booking.integration.spec.ts` now has **0 TypeScript errors** (was 4 before this task).
 
 ### NOT MERGE-READY Status
 
@@ -5209,6 +5202,17 @@ Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the Pati
 | 12 | Fixed audit event query | appointments-booking.integration.spec.ts | count() instead of invalid property |
 | 13 | Applied Prettier formatting | All modified files | Consistent code style |
 
+### Type Error Corrections (2026-08-02)
+
+| # | Error | Root Cause | Correction |
+|---|-------|------------|------------|
+| 1 | `slug` does not exist in `CreateOrganisationInput` | Property name mismatch | Changed to `code` |
+| 2 | `slug` does not exist in `CreateFacilityInput` | Property name mismatch | Changed to `code` |
+| 3 | `timezone` does not exist in `CreateFacilityInput` | Domain contract excludes timezone | Removed parameter from createFacility() |
+| 4 | `displayName` does not exist in `CreateTenantMembershipInput` | Property not in contract | Removed from membership.create() call |
+| 5 | `assignedAt` does not exist in `CreateTenantRoleAssignmentInput` | Property not in contract | Removed from roleAssignments.create() call |
+| 6 | `string` not assignable to `PlatformRoleCode` | Type not cast | Added `as PlatformRoleCode` cast |
+
 ### Feature Branch Status
 
 - **Branch:** `feature/appointments-stage-1c-booking`
@@ -5222,8 +5226,9 @@ Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the Pati
 - **Stage 1C commits:**
   - `005341812ca231a89acd92454f4f9ca284e333bf` — feat(appointments): add secure appointment booking foundation
   - `c3e5825e85a8ec1790c93b01a3847a9aadb1c1da` — fix(appointments): complete booking validation and concurrency safety
-- **Cleanup commit:** (pending this task)
-- **Current HEAD:** `c3e5825e85a8ec1790c93b01a3847a9aadb1c1da`
+  - `e1e1de0dcbf0fd47020133ba8b5babea9d752b5f` — chore(appointments): finalize booking cleanup and validation evidence
+- **Type correction commit:** (pending this task)
+- **Current HEAD:** `e1e1de0dcbf0fd47020133ba8b5babea9d752b5f`
 
 ### Architectural Prerequisites for Full Production Readiness
 

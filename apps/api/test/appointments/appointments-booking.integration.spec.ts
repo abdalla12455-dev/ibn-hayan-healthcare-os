@@ -50,6 +50,7 @@ import type {
   TenantId,
   OrganisationId,
   UserId,
+  PlatformRoleCode,
 } from '@ibn-hayan/domain';
 import {
   USER_REPOSITORY,
@@ -151,12 +152,12 @@ async function createTenant(
 
 async function createOrganisation(
   tenantId: string,
-  slug: string,
+  code: string,
   displayName: string,
 ): Promise<{ organisationId: string }> {
   const organisation = await organisations.create({
     tenantId: tenantId as TenantId,
-    slug,
+    code,
     displayName,
   });
   return { organisationId: organisation.id };
@@ -165,16 +166,14 @@ async function createOrganisation(
 async function createFacility(
   tenantId: string,
   organisationId: string,
-  slug: string,
+  code: string,
   displayName: string,
-  timezone: string,
 ): Promise<{ facilityId: string }> {
   const facility = await facilities.create({
     tenantId: tenantId as TenantId,
     organisationId: organisationId as OrganisationId,
-    slug,
+    code,
     displayName,
-    timezone,
   });
   return { facilityId: facility.id };
 }
@@ -187,12 +186,10 @@ async function createMembership(
   const membership = await memberships.create({
     userId: userId as UserId,
     tenantId: tenantId as TenantId,
-    displayName: 'Test Membership',
   });
   await roleAssignments.create({
     tenantMembershipId: membership.id,
-    roleCode: role,
-    assignedAt: new Date(),
+    roleCode: role as PlatformRoleCode,
   });
   return { membershipId: membership.id };
 }
@@ -327,7 +324,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility',
         'Test Facility',
-        'Asia/Baghdad',
       );
       // R06_RECEPTIONIST role needed for R06 access
       await createMembership(userId, tenantId, 'R06_RECEPTIONIST');
@@ -370,7 +366,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-2',
         'Test Facility 2',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R07_SCHEDULER');
 
@@ -406,7 +401,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-3',
         'Test Facility 3',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -445,7 +439,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-4',
         'Test Facility 4',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -493,7 +486,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-5',
         'Test Facility 5',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -535,7 +527,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-6',
         'Test Facility 6',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -575,7 +566,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-7',
         'Test Facility 7',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -640,7 +630,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-8',
         'Test Facility 8',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R13_SYSTEM_ADMINISTRATOR');
 
@@ -672,7 +661,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-9',
         'Test Facility 9',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R02_NURSE');
 
@@ -714,7 +702,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-10',
         'Test Facility 10',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -750,7 +737,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-11',
         'Test Facility 11',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -785,7 +771,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-12',
         'Test Facility 12',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -824,7 +809,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-13',
         'Test Facility 13',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -868,7 +852,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-14',
         'Test Facility 14',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -910,7 +893,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-15',
         'Test Facility 15',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -963,7 +945,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-16',
         'Test Facility 16',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1016,7 +997,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-17',
         'Test Facility 17',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1069,7 +1049,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-18',
         'Test Facility 18',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1122,7 +1101,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-19',
         'Test Facility 19',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1175,7 +1153,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-20',
         'Test Facility 20',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1248,7 +1225,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-21',
         'Test Facility 21',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
@@ -1328,7 +1304,6 @@ describe('POST /api/v1/appointments', () => {
         organisationId,
         'test-facility-22',
         'Test Facility 22',
-        'Asia/Baghdad',
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
