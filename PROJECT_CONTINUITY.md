@@ -46,23 +46,23 @@ The following table records every commit that has been reviewed, verified, and p
 | `e610635956a4a406305aca2b0b6a12a84b7f32a6` | 2026-07-24 16:57 | Merge pull request #1 from abdalla12455-dev/ci/main-standard-workflow-v1 | Pull Request #1 merge commit (parents: `c7929c0` and `0acb9da`). GitHub merge-commit strategy. PR Main CI and main-push Main CI both passed (operator-verified). Last verified `main` baseline when the post-CI-merge continuity refresh (commit `ed27ce6`) was authored on 2026-07-24. |
 | `ed27ce60f9d5548f088c8657871ebb24cb38f587` | 2026-07-24 14:29 | docs: refresh continuity after PR #1 merge and green main CI | Post-CI-merge continuity refresh (parent: `e610635`). Documentation-only: refreshed `PROJECT_CONTINUITY.md` to record PR #1 merge, green PR/main Main CI runs, v13 deploy-key lifecycle, and recovery-checkpoint additions. No production code, workflow, schema, migration, dependency, or test file changed. Authored on the `docs/post-ci-merge-continuity-update` branch; pushed to `origin` using the v15 deploy key; merged into `main` via PR #2. |
 | `b34c974cd123869bca825fefa5f885a90a879eea` | 2026-07-25 10:51 | Merge pull request #2 from abdalla12455-dev/docs/post-ci-merge-continuity-update | Pull Request #2 merge commit (parents: `e610635` and `ed27ce6`). GitHub merge-commit strategy. PR Main CI and main-push Main CI both passed (operator-verified 2026-07-25, both `static-and-build` and `postgresql17-validation` jobs green). PROJECT_CONTINUITY.md-only merge — the merge result tree is byte-identical to the documentation branch tip `ed27ce6`. Last verified `main` baseline when this housekeeping refresh was authored on 2026-07-25. |
+| `8e4061d7e824cba789358563435f84882b6c9c3c` | 2026-08-03 01:24 | Merge pull request #11 from abdalla12455-dev/feature/bc01-patient-reference-foundation | BC01 Patient Reference Foundation merge (PR #11). Added canonical Patient persistence model, PatientRepository port, PrismaPatientRepository implementation, database migration, unit tests, and integration tests. All CI checks passed. |
 
-### Current State (as of post-PR #2 housekeeping refresh 2026-07-25)
+### Current State (as of BC01 merge 2026-08-03)
 
-> **Authority note:** The SHAs below are the **last verified baseline when this section was authored** (2026-07-25). They are NOT a live claim about the current `main` tip. Any subsequent merge into `main` will advance `main` past `b34c974` and make the "Local `main`" and "`origin/main`" lines below stale. Before acting on any of this information, run `git fetch origin && git rev-parse main origin/main` and trust Git, not this section.
+> **Authority note:** The SHAs below are the **last verified baseline when this section was authored** (2026-08-03). They are NOT a live claim about the current `main` tip. Any subsequent merge into `main` will advance `main` past `8e4061d` and make the "Local `main`" and "`origin/main`" lines below stale. Before acting on any of this information, run `git fetch origin && git rev-parse main origin/main` and trust Git, not this section.
 
-- **Local `main` (last verified 2026-07-25):** `b34c974cd123869bca825fefa5f885a90a879eea`
-- **`origin/main` (last verified 2026-07-25):** `b34c974cd123869bca825fefa5f885a90a879eea`
+- **Local `main` (last verified 2026-08-03):** `8e4061d7e824cba789358563435f84882b6c9c3c`
+- **`origin/main` (last verified 2026-08-03):** `8e4061d7e824cba789358563435f84882b6c9c3c`
 - **Ahead/behind main (last verified):** `0 0` (in sync)
-- **`adr-015-validation` tip (local + remote):** `c05fc323c086603942d6c9ed264367cf450745e9` — unchanged since 2026-07-24
-- **Validation ahead/behind origin:** `0 0` (in sync)
-- **`ci/main-standard-workflow-v1` tip (local + remote):** `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6` — pushed, merged into `main` via PR #1 (merge commit `e610635`). Branch retained on local + remote as historical reference; operator may delete at discretion.
-- **`docs/post-ci-merge-continuity-update` tip (local + remote):** `ed27ce60f9d5548f088c8657871ebb24cb38f587` — pushed using v15 deploy key, merged into `main` via PR #2 (merge commit `b34c974`). Branch retained on local + remote as historical reference; operator may delete at discretion.
-- **`docs/final-post-pr2-housekeeping` tip (local-only):** This is the branch the present refresh is being authored on (2026-07-25). Local-only until pushed.
-- **`integration/adr-015-validated` tip (local-only):** `c7929c0360874b596ae1a62a80511cc78598da3e` — local-only, never pushed
-- **Recovery tag `adr-015-validated-pre-main-v1` (local + remote):** target `c7929c0360874b596ae1a62a80511cc78598da3e` — intact
-- **Working tree (primary worktree `/home/z/my-project`):** clean
-- **Safety skill installed:** added at `e046e0dac9334ec8a5b919140ca9eefe53df64c0` (AGENTS.md, PROJECT_CONTINUITY.md, docs/AI_AGENT_SAFETY_SKILL.md) and remains intact at the current `main` baseline `b34c974`. Note: `e046e0d` is no longer the `main` tip — it is the commit where the safety skill was first introduced.
+- **`feature/bc01-patient-reference-foundation` tip (remote):** `0b106ec07ee371d02167c08b015a119ddd2860ef` — merged into main via PR #11 (merge commit `8e4061d`). Branch preserved on remote.
+- **`feature/appointments-stage-1c-booking` tip (remote):** `1a231d2a46ada73e76c86ec4c20b8583e119ee88` — unchanged
+- **Working tree:** clean
+- **Safety skill installed:** added at `e046e0dac9334ec8a5b919140ca9eefe53df64c0` (AGENTS.md, PROJECT_CONTINUITY.md, docs/AI_AGENT_SAFETY_SKILL.md) and remains intact at the current `main` baseline `8e4061d`.
+
+### Post-BC01 merge record (2026-08-03)
+
+PR #11 (BC01 Patient Reference Foundation) was merged into `main` at commit `8e4061d7e824cba789358563435f84882b6c9c3c`. All CI checks passed. PROJECT_CONTINUITY.md updated to reflect the merge. BC01 feature branch preserved on remote.
 
 ### Post-PR #2 synchronization record (2026-07-25)
 
@@ -5034,8 +5034,10 @@ define and approve the exact Stage 1C scope before implementation
 
 - **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
 - **Feature branch:** feature/bc01-patient-reference-foundation
+- **Pull request:** #11 (MERGED)
+- **Merge commit SHA:** 8e4061d7e824cba789358563435f84882b6c9c3c
 - **Base SHA:** 085494309090ad79b2be27a68264f74334df207f (verified from origin/main)
-- **Final commit SHA:** 2137dbb49bca2cc65873afa54300912d271d9519
+- **Final feature commit SHA:** 0b106ec07ee371d02167c08b015a119ddd2860ef
 
 ### Scope
 
@@ -5136,12 +5138,13 @@ BC01 Patient Reference Foundation — minimal canonical patient persistence and 
 
 - **Message:** feat(patient): add tenant-safe patient reference foundation
 - **Branch:** feature/bc01-patient-reference-foundation
-- **SHA:** 2137dbb49bca2cc65873afa54300912d271d9519
-- **Status:** Pushed and CI validated
+- **SHA:** 0b106ec07ee371d02167c08b015a119ddd2860ef
+- **Status:** MERGED into main
 
 ### Recovery Information
 
-- **Authoritative recovery point:** 2137dbb49bca2cc65873afa54300912d271d9519
+- **Authoritative recovery point:** 8e4061d7e824cba789358563435f84882b6c9c3c (merge commit on main)
+- **Feature commit:** 0b106ec07ee371d02167c08b015a119ddd2860ef
 - **Parent:** origin/main @ 085494309090ad79b2be27a68264f74334df207f
 
 ### Remaining Work
