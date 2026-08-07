@@ -491,10 +491,11 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - **Initial message:** feat(workforce): add tenant-safe provider reference foundation (f813ac8)
 - **Integrity fix:** fix(workforce): enforce provider assignment integrity (1388a9a)
 - **Type fix:** fix(workforce): correct provider facility test identifiers (111c4bd)
-- **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (pending)
+- **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (36f1c16)
 - **Branch:** feature/bc10-workforce-reference-foundation
-- **Final SHA:** (pending after push)
-- **Status:** Awaiting new CI validation
+- **Final SHA:** 36f1c16f25c63412345152f6258a01c3c03d8519
+- **CI Run:** 31220093225
+- **Status:** ✅ CI PASSED
 
 ### Recovery Information
 
