@@ -118,10 +118,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         });
 
         if (conflicting) {
-          throw new AppointmentOverlapError(
-            input.providerId,
-            conflicting.id,
-          );
+          throw new AppointmentOverlapError(input.providerId, conflicting.id);
         }
 
         // Create the appointment

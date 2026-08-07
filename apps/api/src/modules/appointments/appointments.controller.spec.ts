@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import { AppointmentsController } from './appointments.controller.js';
 import type { AppointmentsTodayService } from './appointments-today.service.js';
+import type { AppointmentsBookingService } from './appointments-booking.service.js';
 import type { TodayAppointmentsResponse } from '@ibn-hayan/contracts';
 
 /**
@@ -93,6 +94,12 @@ function makeServiceStub(
   } as unknown as AppointmentsTodayService;
 }
 
+function makeBookingServiceStub() {
+  return {
+    bookAppointment: vi.fn(),
+  } as unknown as AppointmentsBookingService;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -100,7 +107,10 @@ function makeServiceStub(
 describe('AppointmentsController', () => {
   describe('getTodayAppointments', () => {
     it('returns the service response on valid request', async () => {
-      const controller = new AppointmentsController(makeServiceStub());
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+      );
       const req = makeRequest();
       const result = await controller.getTodayAppointments(req);
       expect(result).toEqual(VALID_RESPONSE);
@@ -108,7 +118,10 @@ describe('AppointmentsController', () => {
 
     it('passes the session cookie to the service', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
       const callArgs = (
@@ -119,7 +132,10 @@ describe('AppointmentsController', () => {
 
     it('passes audit context to the service', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
       const callArgs = (
@@ -132,6 +148,7 @@ describe('AppointmentsController', () => {
     it('throws UnauthorizedException when service returns null', async () => {
       const controller = new AppointmentsController(
         makeServiceStub({ result: null }),
+        makeBookingServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toMatchObject({
@@ -145,7 +162,10 @@ describe('AppointmentsController', () => {
 
     it('does NOT read tenant scope from query parameters', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest({ query: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
       const callArgs = (
@@ -156,7 +176,10 @@ describe('AppointmentsController', () => {
 
     it('does NOT read organisation scope from query parameters', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest({ query: { organisationId: 'evil-org' } });
       await controller.getTodayAppointments(req);
       const mockCalls = (
@@ -167,7 +190,10 @@ describe('AppointmentsController', () => {
 
     it('does NOT read facility scope from query parameters', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest({ query: { facilityId: 'evil-facility' } });
       await controller.getTodayAppointments(req);
       const mockCalls = (
@@ -178,7 +204,10 @@ describe('AppointmentsController', () => {
 
     it('does NOT read scope from custom headers', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest({
         headers: {
           'x-tenant-id': 'evil-tenant',
@@ -195,7 +224,10 @@ describe('AppointmentsController', () => {
 
     it('does NOT read scope from body fields', async () => {
       const service = makeServiceStub();
-      const controller = new AppointmentsController(service);
+      const controller = new AppointmentsController(
+        service,
+        makeBookingServiceStub(),
+      );
       const req = makeRequest({ body: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
       const mockCalls = (
@@ -206,7 +238,10 @@ describe('AppointmentsController', () => {
 
     it('propagates service errors as-is', async () => {
       const error = new Error('Internal error');
-      const controller = new AppointmentsController(makeServiceStub({ error }));
+      const controller = new AppointmentsController(
+        makeServiceStub({ error }),
+        makeBookingServiceStub(),
+      );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toThrow(
         'Internal error',

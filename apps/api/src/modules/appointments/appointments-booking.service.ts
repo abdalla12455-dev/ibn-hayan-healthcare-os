@@ -4,6 +4,8 @@ import type {
   TenantRepository,
   OrganisationRepository,
   FacilityRepository,
+  PatientRepository,
+  ProviderRepository,
   PatientId,
   ProviderId,
 } from '@ibn-hayan/domain';
@@ -12,6 +14,8 @@ import {
   ORGANISATION_REPOSITORY,
   FACILITY_REPOSITORY,
   APPOINTMENT_REPOSITORY,
+  PATIENT_REPOSITORY,
+  WORKFORCE_REPOSITORY,
 } from '../../infrastructure/database/index.js';
 import { CLOCK_SERVICE_TOKEN } from '../../infrastructure/clock/index.js';
 import type { ClockService } from '../../infrastructure/clock/index.js';
@@ -26,6 +30,8 @@ import {
   appointmentValidationError,
   appointmentOverlap,
   appointmentPastTime,
+  appointmentPatientNotFound,
+  appointmentProviderNotFound,
 } from './appointments.errors.js';
 import { AppointmentOverlapError } from '../../infrastructure/database/repositories/prisma-appointment.repository.js';
 
@@ -37,18 +43,20 @@ import { AppointmentOverlapError } from '../../infrastructure/database/repositor
  *
  * - Derives all scope (tenantId, organisationId, facilityId) from the
  *   authenticated session context. The request body does NOT contain scope.
+ * - Validates patient existence using BC01 PatientRepository.existsInTenant()
+ * - Validates provider eligibility using BC10 ProviderRepository.isEligibleForFacility()
+ *   (checks: provider exists in tenant, is active, has active facility assignment)
  * - Validates timestamp constraints (scheduledEnd > scheduledStart,
  *   scheduledStart not in the past).
  * - Prevents provider appointment overlaps using concurrency-safe
  *   transaction with SERIALIZABLE isolation.
  * - Emits the `appointments.booked` audit event after successful creation.
  *
- * NOTE: Patient and provider existence validation is deferred. Per
- * APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries
- * the Patient (BC01) and Workforce (BC10) bounded contexts for existence
- * validation. Those contexts are not yet implemented. The service accepts
- * logical patientId and providerId identifiers without existence
- * verification until those modules are available.
+ * Security guarantees:
+ * - Patient lookup uses session-derived tenantId; cross-tenant lookups return false
+ * - Provider lookup uses session-derived tenantId and facilityId; cross-tenant/cross-facility
+ *   lookups return false
+ * - The request body cannot override scope
  *
  * Audit trail: the service emits an explicit `appointments.booked` audit
  * event via `auditHelper.emitDirect(...)` AFTER the appointment is created
@@ -67,6 +75,10 @@ export class AppointmentsBookingService {
     private readonly facilities: FacilityRepository,
     @Inject(APPOINTMENT_REPOSITORY)
     private readonly appointments: AppointmentRepository,
+    @Inject(PATIENT_REPOSITORY)
+    private readonly patients: PatientRepository,
+    @Inject(WORKFORCE_REPOSITORY)
+    private readonly providers: ProviderRepository,
     private readonly authService: AuthService,
     private readonly auditHelper: AuditHelperService,
     @Inject(CLOCK_SERVICE_TOKEN)
@@ -93,14 +105,19 @@ export class AppointmentsBookingService {
    * Throws `appointmentPastTime()` (HTTP 422) if:
    * - the scheduledStart is in the past (more than a small clock-tolerance).
    *
+   * Throws `appointmentPatientNotFound()` (HTTP 422) if:
+   * - the patient does not exist in the authenticated tenant.
+   * - the patient is in another tenant (safe same error, no existence leak).
+   *
+   * Throws `appointmentProviderNotFound()` (HTTP 422) if:
+   * - the provider does not exist in the authenticated tenant;
+   * - the provider is in another tenant (safe same error, no existence leak);
+   * - the provider is not active;
+   * - the provider is not assigned to the authenticated facility.
+   *
    * Throws `appointmentOverlap()` (HTTP 422) if:
    * - the requested time slot overlaps with an existing appointment
    *   for the same provider in the same tenant, organisation, and facility.
-   *
-   * NOTE: Patient and provider existence validation is NOT performed in this
-   * stage. The patientId and providerId are accepted as logical identifiers.
-   * Patient/provider validation will be added when Patient (BC01) and
-   * Workforce (BC10) bounded contexts are implemented.
    *
    * The authorisation check (R06, R07, or R09 role assignment on the
    * active membership) is performed by the `AuthorizationGuard` before
@@ -185,22 +202,31 @@ export class AppointmentsBookingService {
       throw appointmentPastTime();
     }
 
-    // NOTE: Patient and provider existence validation is deferred to future stages.
-    // Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the
-    // Patient (BC01) and Workforce (BC10) bounded contexts for existence validation.
-    // Those contexts are not yet implemented, so this service accepts the logical
-    // patientId and providerId identifiers without existence verification.
-    //
-    // TODO(Stage 2+): Re-inject PatientRepository and ProviderRepository once
-    // Patient and Workforce bounded contexts are implemented. Add:
-    //   const patientExists = await this.patients.existsInTenant(tenantId, request.patientId);
-    //   if (!patientExists) throw appointmentPatientNotFound();
-    //   const providerExists = await this.providers.existsInTenant(tenantId, request.providerId);
-    //   if (!providerExists) throw appointmentProviderNotFound();
+    // Validate patient exists in the authenticated tenant
+    // Uses session-derived tenantId; cross-tenant lookups return false safely
+    const patientExists = await this.patients.existsInTenant(
+      tenantId,
+      request.patientId as PatientId,
+    );
+    if (!patientExists) {
+      throw appointmentPatientNotFound();
+    }
+
+    // Validate provider is eligible for the authenticated facility
+    // Uses session-derived tenantId and facilityId; checks:
+    // - provider exists in tenant
+    // - provider status is 'active'
+    // - provider has active (non-revoked) assignment to the facility
+    const providerEligible = await this.providers.isEligibleForFacility(
+      tenantId,
+      request.providerId as ProviderId,
+      facilityId,
+    );
+    if (!providerEligible) {
+      throw appointmentProviderNotFound();
+    }
 
     // Create the appointment (overlap detection is handled by the repository)
-    // NOTE: patientId and providerId are validated as UUIDs by Zod parsing in the
-    // controller. We cast them to branded types to satisfy the domain type signatures.
     let created;
     try {
       created = await this.appointments.create(

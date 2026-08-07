@@ -1,4 +1,7 @@
-import { BadRequestException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 
 /**
  * Appointments module error helpers.
@@ -138,8 +141,7 @@ export function appointmentPastTime(): UnprocessableEntityException {
   return new UnprocessableEntityException({
     error: {
       code: 'APPOINTMENT_PAST_TIME',
-      message:
-        'The requested appointment start time is in the past.',
+      message: 'The requested appointment start time is in the past.',
     },
   });
 }
