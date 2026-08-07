@@ -64,13 +64,13 @@ const org2 = {
 };
 
 const facility1 = {
-  id: '00000000-0000-0000-0000-000000003001' as string,
+  id: '00000000-0000-0000-0000-000000003001' as FacilityId,
   code: 'FAC-PROV-1',
   displayName: 'Facility Provider Test 1',
 };
 
 const facility2 = {
-  id: '00000000-0000-0000-0000-000000003002' as string,
+  id: '00000000-0000-0000-0000-000000003002' as FacilityId,
   code: 'FAC-PROV-2',
   displayName: 'Facility Provider Test 2',
 };
@@ -624,7 +624,7 @@ describe('ProviderRepository', () => {
       const exists = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(exists).toBe(true);
     });
@@ -791,7 +791,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(eligible).toBe(false);
     });
@@ -816,7 +816,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(eligible).toBe(false);
     });
@@ -841,7 +841,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(eligible).toBe(false);
     });
@@ -866,7 +866,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(eligible).toBe(false);
     });
@@ -891,7 +891,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility1.id as FacilityId,
+        facility1.id,
       );
       expect(eligible).toBe(true);
     });
@@ -952,7 +952,7 @@ describe('ProviderRepository', () => {
       const eligible = await providerRepo.isEligibleForFacility(
         tenant1.id,
         provider.id as ProviderId,
-        facility2.id as FacilityId,
+        facility2.id,
       );
       expect(eligible).toBe(false);
     });

@@ -440,11 +440,11 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 | Prisma validate | PASS |
 | Prisma generate | PASS |
 | Typecheck (domain) | PASS |
-| Typecheck (api) | PASS |
+| Typecheck (api) | PASS (after fix) |
 | Unit tests (domain) | PASS (9/9 provider tests) |
 | Unit tests (api) | PASS (419/419 tests) |
 | Lint | PASS |
-| Production build | PASS |
+| Production build | Not re-run locally |
 | Pre-existing failures | @ibn-hayan/observability module errors (unrelated to BC10) |
 
 ### PostgreSQL 17 Validation
@@ -465,13 +465,24 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 5. **Domain tests:** Added tests for lifecycle eligibility (candidate, onboarded, suspended, separated all return false)
 6. **Database constraint tests:** Added tests for partial unique index, cross-tenant isolation, organisation owns facility
 
+### CI Correction (2026-08-03)
+
+**Failed CI Run:** 30779266567
+
+**Root cause:** Six TypeScript errors in `apps/api/test/database/provider.db-spec.ts` at lines 276, 291, 316, 341, 368, 395. Error: `Argument of type 'string' is not assignable to parameter of type 'FacilityId'`.
+
+**Cause:** Test fixture `facility1` and `facility2` objects were typed as `string` instead of `FacilityId`, causing type mismatches when calling `isEligibleForFacility`.
+
+**Fix:** Changed fixture type from `string` to `FacilityId` at the source, eliminating the need for repeated casts.
+
 ### Commit
 
 - **Initial message:** feat(workforce): add tenant-safe provider reference foundation (f813ac8)
-- **Correction message:** fix(workforce): enforce provider assignment integrity (pending)
+- **Integrity fix:** fix(workforce): enforce provider assignment integrity (1388a9a)
+- **Type fix:** fix(workforce): correct provider facility test identifiers (pending)
 - **Branch:** feature/bc10-workforce-reference-foundation
 - **Final SHA:** (pending after push)
-- **Status:** Awaiting CI validation
+- **Status:** Awaiting new CI validation
 
 ### Recovery Information
 
