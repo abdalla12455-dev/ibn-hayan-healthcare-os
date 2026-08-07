@@ -278,10 +278,11 @@ model Facility {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  organisation    Organisation           @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  roleAssignments TenantRoleAssignment[] @relation("TenantRoleAssignmentScopeFacility")
-  activeSessions  AuthSession[]          @relation("AuthSessionActiveFacility")
+  organisation    Organisation                   @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roleAssignments TenantRoleAssignment[]       @relation("TenantRoleAssignmentScopeFacility")
+  activeSessions  AuthSession[]              @relation("AuthSessionActiveFacility")
   appointments    Appointment[]
+  providerAssignments ProviderFacilityAssignment[]
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
@@ -825,4 +826,121 @@ model Patient {
   @@unique([tenantId, medicalRecordNumber], map: "patients_tenant_id_medical_record_number_key")
   @@index([tenantId], map: "patients_tenant_id_idx")
   @@map("patients")
+}
+
+// ---------------------------------------------------------------------------
+// Provider (Workforce BC10)
+// ---------------------------------------------------------------------------
+
+/// Provider lifecycle status.
+enum ProviderStatus {
+  candidate
+  onboarded
+  active
+  suspended
+  separated
+}
+
+/// The canonical provider identity for the Ibn Hayan Healthcare Operating System.
+///
+/// Per download/docs/07_MODULES/DOCTORS.md Section 4.1:
+/// - Provider and staff data is tenant-isolated by default
+/// - A provider registered in tenant A is not visible to tenant B
+///
+/// Per DOCTORS.md Section 4.2:
+/// - A provider's schedule may span multiple facilities
+/// - The appointment context must verify that the provider is assigned
+///   to the requested facility
+///
+/// This model implements the minimal canonical Provider persistence foundation
+/// required for other bounded contexts, especially Appointments, to verify that
+/// a provider reference genuinely exists within the authenticated tenant scope
+/// and is eligible for a specific facility.
+///
+/// Tenant integrity: Provider is tenant-scoped. All assignment queries must
+/// include tenantId. The database enforces that an assignment's tenantId matches
+/// the provider's tenantId via a composite foreign key constraint added in the
+/// migration. Application-layer tenantId filters provide the primary isolation
+/// guarantee; database constraints provide the defense-in-depth guarantee.
+///
+/// Deliberately excluded (not in this minimal foundation):
+/// - Demographics (name, contact information)
+/// - Professional identity (license number, NPI, certifications)
+/// - Credentials and privileging data
+/// - Schedules and availability
+/// - Patient panel assignments
+/// - Productivity and performance metrics
+/// - Compensation data
+///
+/// These fields will be added in subsequent batches as provider profiles
+/// and credentialing are implemented.
+model Provider {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @map("tenant_id") @db.Uuid
+  status    ProviderStatus @default(candidate)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  facilityAssignments ProviderFacilityAssignment[]
+
+  // Unique constraint enables composite foreign key from provider_facility_assignments
+  // that enforces tenant integrity: a provider can only be assigned within their tenant.
+  @@unique([tenantId, id], map: "providers_tenant_id_id_key")
+  @@index([tenantId], map: "providers_tenant_id_idx")
+  @@index([tenantId, status], map: "providers_tenant_id_status_idx")
+  @@map("providers")
+}
+
+/// Links a Provider to a Facility, enabling multi-facility provider assignments.
+///
+/// Per DOCTORS.md Section 4.2:
+/// - A provider's schedule may span multiple facilities
+/// - The appointment context must verify that the provider is assigned
+///   to the requested facility
+///
+/// An active assignment has `revokedAt` set to null. A revoked assignment
+/// indicates the provider no longer works at that facility.
+///
+/// Database Integrity Constraints (enforced via raw SQL in migration):
+/// - Simple FK: provider_id → providers.id (Prisma convenience)
+/// - Composite FK: (tenant_id, provider_id) → providers(tenant_id, id)
+///   Ensures the provider belongs to the same tenant as the assignment.
+/// - Simple FK: facility_id → facilities.id (Prisma convenience)
+/// - Composite FK: (tenant_id, organisation_id, facility_id) →
+///   facilities(tenant_id, organisation_id, id)
+///   Enforces BOTH that the facility belongs to the same tenant as the
+///   assignment AND that the facility belongs to the specified organisation.
+/// - Partial unique index on (tenant_id, provider_id, facility_id)
+///   WHERE revoked_at IS NULL: ensures only one active assignment per
+///   tenant/provider/facility. Historical revoked assignments are
+///   preserved for audit purposes. Reassignment after revocation is allowed.
+///
+/// Application-layer logic: all repository methods require tenantId as a
+/// mandatory parameter. This provides the primary isolation guarantee.
+/// Database constraints provide defense-in-depth.
+///
+/// Deliberately excluded (not in this minimal foundation):
+/// - Assignment metadata (role at facility, department)
+/// - Credentialing at facility level
+/// - Privilege tracking
+/// - Schedule templates per facility
+model ProviderFacilityAssignment {
+  id             String    @id @default(uuid()) @db.Uuid
+  providerId     String    @map("provider_id") @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  organisationId String    @map("organisation_id") @db.Uuid
+  facilityId     String    @map("facility_id") @db.Uuid
+  assignedAt     DateTime  @default(now()) @map("assigned_at") @db.Timestamptz
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz
+
+  provider  Provider  @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facility  Facility  @relation(fields: [facilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // Note: Full unique constraint removed. See migration for partial unique index
+  // that enforces only one active (non-revoked) assignment per tenant/provider/facility.
+  @@index([tenantId], map: "provider_facility_assignments_tenant_id_idx")
+  @@index([tenantId, providerId], map: "provider_facility_assignments_tenant_id_provider_id_idx")
+  @@index([tenantId, facilityId], map: "provider_facility_assignments_tenant_id_facility_id_idx")
+  @@index([tenantId, providerId, revokedAt], map: "provider_facility_assignments_tenant_provider_revoked_idx")
+  @@map("provider_facility_assignments")
 }

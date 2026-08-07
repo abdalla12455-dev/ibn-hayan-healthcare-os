@@ -43,6 +43,12 @@
  *   canonical patient reference foundation required for other bounded contexts
  *   to verify that a patient reference genuinely exists within the
  *   authenticated tenant scope.
+ * - workforce: Provider domain model and ProviderRepository port.
+ *   The Workforce bounded context (BC10) owns provider identity, credentials,
+ *   scheduling, and clinical capacity. This export provides the minimal canonical
+ *   provider reference foundation required for other bounded contexts, especially
+ *   Appointments, to verify that a provider reference genuinely exists within
+ *   the authenticated tenant scope and is eligible for a specific facility.
  *
  * Additional bounded contexts (audit, billing, inventory, configuration, etc.)
  * arrive in subsequent batches alongside their respective vertical slices.
@@ -57,3 +63,4 @@ export * from './identity/index.js';
 export * from './authorization/index.js';
 export * from './scheduling/index.js';
 export * from './patient/index.js';
+export * from './workforce/index.js';

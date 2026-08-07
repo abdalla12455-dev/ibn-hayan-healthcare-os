@@ -283,6 +283,248 @@ This is the primary feature under development. It adds multi-tenant scoping to t
 
 **Validation strategy:** A Docker-based GitHub Actions workflow runs the full test suite against PostgreSQL 17 (the production target), since the development environment only has PostgreSQL 15/16 available locally.
 
+---
+
+## BC10 Workforce Reference Foundation (2026-08-03)
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** feature/bc10-workforce-reference-foundation
+- **Pull request:** (pending - to be created)
+- **Base SHA:** 7e5457044266e14690d0ef5c09fc0c614ce7e9c8
+
+### Appointment Branch Compatibility
+
+The appointment-booking branch (`feature/appointments-stage-1c-booking`) exists on remote at SHA `1a231d2a46ada73e76c86ec4c20b8583e119ee88`. This was incorrectly reported as "not available" in earlier documentation.
+
+**Compatibility findings:**
+- Appointment branch defines minimal `ProviderRepository` interface with only `existsInTenant(tenantId, providerId)`
+- BC10 extends this with `findById`, `isEligibleForFacility`, and `findActiveFacilityAssignments`
+- BC10 ProviderId type is compatible (derived from scheduling/appointment.ts in both branches)
+- Appointment booking service NOTE: "Patient and provider existence validation is deferred" until BC10 is available
+- When appointment branch is updated from main (including BC10), the extended ProviderRepository methods will be available
+- No conflicts - BC10 is a superset of the appointment branch's requirements
+
+### Database Integrity Design
+
+**Tenant integrity constraints (via raw SQL in migration):**
+1. Composite FK: `assignment(tenant_id, provider_id)` → `providers(tenant_id, id)`
+   - Ensures provider belongs to same tenant as assignment
+2. Composite FK: `assignment(tenant_id, facility_id)` → `facilities(tenant_id, id)`
+   - Ensures facility belongs to same tenant as assignment
+3. Composite FK: `assignment(organisation_id, facility_id)` → `facilities(organisation_id, id)`
+   - Ensures organisation owns the facility
+
+**Active assignment uniqueness:**
+- Partial unique index on `(tenant_id, provider_id, facility_id) WHERE revoked_at IS NULL`
+- Ensures only one active (non-revoked) assignment per provider/facility
+- Historical revoked assignments preserved for audit purposes
+- Reassignment allowed after revocation
+
+### Scope
+
+BC10 Workforce Reference Foundation — minimal canonical provider persistence and repository foundation for verifying provider existence within authenticated tenant scope and eligibility for specific facilities.
+
+**In scope:**
+- Canonical Provider persistence model (tenant-scoped)
+- Canonical ProviderFacilityAssignment model for multi-facility support
+- Canonical Provider domain types and repository port
+- Prisma repository implementation with tenant isolation and facility assignment validation
+- Database migration with composite foreign keys and partial unique index
+- Unit and integration tests (including database constraint tests)
+
+**Out of scope:**
+- Provider demographics (name, contact information)
+- Professional identity (license number, NPI, certifications)
+- Credentials and privileging data
+- Schedules and availability
+- Patient panel assignments
+- Productivity and performance metrics
+- Compensation data
+
+### Architecture Decisions
+
+| Decision | Source | Value |
+|----------|--------|-------|
+| Provider scoping | DOCTORS.md Section 4.1 | Tenant-isolated |
+| Facility assignment | DOCTORS.md Section 4.2 | Multi-facility supported via ProviderFacilityAssignment |
+| Lifecycle values | DOCTORS.md Section 11 | candidate, onboarded, active, suspended, separated |
+| Eligibility | DOCTORS.md Section 4.2, Section 11 | Active status AND valid facility assignment |
+| Sensitive fields excluded | Minimal foundation rule | Demographics, credentials, compensation not included |
+| Database integrity | Architecture gate | Composite FKs for tenant isolation + partial unique for reassignment |
+
+### Provider Model Fields
+
+**Implemented:**
+- `id` (UUID, primary key)
+- `tenantId` (UUID, tenant isolation)
+- `status` (enum: candidate, onboarded, active, suspended, separated)
+- `createdAt` (timestamptz)
+- `updatedAt` (timestamptz)
+
+**ProviderFacilityAssignment Fields:**
+- `id` (UUID, primary key)
+- `providerId` (UUID, FK to Provider)
+- `tenantId` (UUID, tenant isolation)
+- `organisationId` (UUID, organisation scope)
+- `facilityId` (UUID, FK to Facility)
+- `assignedAt` (timestamptz)
+- `revokedAt` (timestamptz, nullable)
+
+**Excluded:**
+- Provider demographics (name, contact)
+- Professional identity (license, NPI, certifications)
+- Credentials and privileging data
+- Schedules and availability
+- Patient panel assignments
+- Productivity metrics
+- Compensation data
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `packages/domain/src/workforce/provider.ts` | Provider domain model, ProviderId, ProviderFacilityAssignmentId, ProviderLifecycleStatus, CreateProviderInput |
+| `packages/domain/src/workforce/workforce.repositories.ts` | ProviderRepository and ProviderFacilityAssignmentRepository port interfaces (with branded FacilityId) |
+| `packages/domain/src/workforce/index.ts` | Workforce module barrel export |
+| `packages/domain/src/workforce/provider.spec.ts` | Domain unit tests (9 tests) |
+| `apps/api/src/infrastructure/database/mappers/provider.mapper.ts` | Prisma-to-domain mapper |
+| `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` | Prisma repository implementation (with branded FacilityId) |
+| `apps/api/test/database/provider.db-spec.ts` | Integration tests (~45 tests including constraint tests) |
+| `apps/api/prisma/migrations/20260803010000_bc10_workforce_reference_foundation/migration.sql` | Database migration with composite FKs and partial unique index |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/api/prisma/schema.prisma` | Added ProviderStatus enum, Provider model, ProviderFacilityAssignment model with composite FK comments, Facility.providerAssignments relation |
+| `apps/api/src/infrastructure/database/database.module.ts` | Added WORKFORCE_REPOSITORY token, PrismaProviderRepository provider and exports |
+| `packages/domain/src/index.ts` | Added workforce module exports |
+| `packages/domain/src/scheduling/index.ts` | Added ProviderId re-export for backwards compatibility |
+| `PROJECT_CONTINUITY.md` | This entry with corrections |
+
+### Repository Contract
+
+**ProviderRepository methods:**
+- `existsInTenant(tenantId, providerId)`: Returns true if provider exists in tenant
+- `findById(tenantId, providerId)`: Returns Provider or null
+- `isEligibleForFacility(tenantId, providerId, facilityId)`: Returns true if provider is active AND has active facility assignment
+- `findActiveFacilityAssignments(tenantId, providerId)`: Returns array of active assignments
+
+**Branded types used:**
+- `TenantId` from `@ibn-hayan/domain`
+- `ProviderId` from `@ibn-hayan/domain`
+- `FacilityId` from `@ibn-hayan/domain`
+
+### Tenant Isolation Behavior
+
+- Provider lookup with correct tenantId returns provider
+- Provider lookup with wrong tenantId returns null (not an error)
+- isEligibleForFacility returns false for cross-tenant queries
+- findActiveFacilityAssignments returns empty array for cross-tenant queries
+- Tenant isolation enforced at application layer via repository WHERE clauses (per DOCTORS.md)
+- Simple FKs ensure referential integrity only
+
+### Facility Assignment Behavior
+
+- A provider must be assigned to a facility via ProviderFacilityAssignment
+- Assignment must be active (revokedAt is null)
+- Provider must be in 'active' status
+- isEligibleForFacility checks all three conditions
+- Partial unique index allows reassignment after revocation
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Typecheck (domain) | PASS |
+| Typecheck (api) | PASS (after fix) |
+| Unit tests (domain) | PASS (9/9 provider tests) |
+| Unit tests (api) | PASS (419/419 tests) |
+| Lint | PASS |
+| Production build | Not re-run locally |
+| Pre-existing failures | @ibn-hayan/observability module errors (unrelated to BC10) |
+
+### PostgreSQL 17 Validation
+
+- PostgreSQL 17 is not available locally (per AGENTS.md environment constraints)
+- Migration SQL reviewed for forward-only, non-destructive operations
+- All constraints and indexes use PostgreSQL 17-compatible syntax
+- Composite foreign keys use valid PostgreSQL syntax
+- Partial unique index uses PostgreSQL 17-compatible WHERE clause
+- **Validation requires GitHub Actions CI run**
+
+### Corrections Applied
+
+1. **Appointment branch existence correction:** Previously reported as "not available on remote" but the branch EXISTS at SHA `1a231d2a46ada73e76c86ec4c20b8583e119ee88`
+2. **Active assignment uniqueness correction:** Replaced full unique constraint with partial unique index allowing reassignment
+3. **Composite FK removal (insufficient):** Initially removed three composite foreign keys due to PostgreSQL error. This weakened database-level tenant integrity.
+4. **Database-integrity restoration:** Restored proper composite FKs by adding unique constraint on `providers(tenant_id, id)` first, enabling PostgreSQL-safe composite FK references.
+5. **Branded types:** Updated `isEligibleForFacility` to use `FacilityId` branded type
+6. **Domain tests:** Added tests for lifecycle eligibility (candidate, onboarded, suspended, separated all return false)
+7. **Database constraint tests:** Tests for partial unique index, cross-tenant isolation, organisation owns facility, and reassignment after revocation all restored.
+
+### Database Integrity Restoration (2026-08-07)
+
+**Problem identified:** CI was green but database-level tenant integrity was weakened. The migration had only simple foreign keys; schema.prisma comments incorrectly claimed composite FKs existed.
+
+**Root cause:** Composite FKs were removed to fix PostgreSQL error, but the real fix requires adding a unique constraint on `providers(tenant_id, id)` first.
+
+**Solution:**
+- Added unique constraint `@@unique([tenantId, id])` to Provider model
+- Added composite FK: `(tenant_id, provider_id) → providers(tenant_id, id)`
+- Added composite FK: `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)` — enforces BOTH tenant and organisation integrity
+- Kept simple FKs for Prisma convenience
+- Restored all PostgreSQL database constraint tests
+
+### CI Correction (2026-08-03)
+
+**Failed CI Run:** 30779266567
+
+**Root cause:** Six TypeScript errors in `apps/api/test/database/provider.db-spec.ts` at lines 276, 291, 316, 341, 368, 395. Error: `Argument of type 'string' is not assignable to parameter of type 'FacilityId'`.
+
+**Cause:** Test fixture `facility1` and `facility2` objects were typed as `string` instead of `FacilityId`, causing type mismatches when calling `isEligibleForFacility`.
+
+**Fix:** Changed fixture type from `string` to `FacilityId` at the source, eliminating the need for repeated casts.
+
+**Failed CI Run (second attempt):** 31219578758
+
+**Root cause:** PostgreSQL migration error: `ERROR: there is no unique constraint matching given keys for referenced table "providers"`.
+
+**Cause:** The migration attempted to create composite foreign keys referencing `(tenant_id, id)` columns, but PostgreSQL requires unique constraints on referenced columns.
+
+**Fix (insufficient):** Removed the three composite foreign keys. This made CI green but weakened database integrity.
+
+**Database integrity restoration:** Added unique constraint on `providers(tenant_id, id)` and restored composite FKs properly.
+
+### Commit
+
+- **Initial message:** feat(workforce): add tenant-safe provider reference foundation (f813ac8)
+- **Integrity fix:** fix(workforce): enforce provider assignment integrity (1388a9a)
+- **Type fix:** fix(workforce): correct provider facility test identifiers (111c4bd)
+- **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (36f1c16)
+- **DB integrity restoration:** fix(workforce): restore provider assignment tenant integrity (3fb60dd)
+- **Branch:** feature/bc10-workforce-reference-foundation
+- **Final SHA:** 3fb60dd0d6c951bb71a1682f9af2383762e3b293
+- **CI Run:** 31223505321
+- **Status:** ✅ CI PASSED
+
+### Recovery Information
+
+- **Authoritative recovery point:** 7e5457044266e14690d0ef5c09fc0c614ce7e9c8 (main before BC10)
+- **Feature branch:** feature/bc10-workforce-reference-foundation (local and remote)
+
+### Remaining Work
+
+- Provider profiles and contact information (future BC10 batch)
+- Provider credentialing and privileging (future BC10 batch)
+- Provider scheduling and availability (future BC10 batch)
+- Appointment booking integration with provider validation (BC06)
+
+
 ## Standard Main CI Workflow (branch `ci/main-standard-workflow-v1`)
 
 This branch was created on 2026-07-24 to prepare an official standard CI workflow for the canonical `main` branch. It was pushed to `origin/ci/main-standard-workflow-v1` at SHA `0acb9dadc4ce9a0fbfae5a4bb841b34166e35fb6`, merged into `main` via Pull Request #1 (merge commit `e610635956a4a406305aca2b0b6a12a84b7f32a6`), and is now live on `main`. Both the PR-triggered and the `main`-push-triggered `main-ci` workflow runs passed (operator-verified 2026-07-24).
