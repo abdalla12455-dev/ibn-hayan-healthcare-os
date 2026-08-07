@@ -37,10 +37,21 @@
  * - scheduling: Appointment domain model and AppointmentRepository port.
  *   The Scheduling bounded context (BC06) owns appointment lifecycle,
  *   slot templates, and resource scheduling.
+ * - patient: Patient domain model and PatientRepository port.
+ *   The Patient bounded context (BC01) owns patient identity, demographics,
+ *   consent, and medical record lifecycle. This export provides the minimal
+ *   canonical patient reference foundation required for other bounded contexts
+ *   to verify that a patient reference genuinely exists within the
+ *   authenticated tenant scope.
+ * - workforce: Provider domain model and ProviderRepository port.
+ *   The Workforce bounded context (BC10) owns provider identity, credentials,
+ *   scheduling, and clinical capacity. This export provides the minimal canonical
+ *   provider reference foundation required for other bounded contexts, especially
+ *   Appointments, to verify that a provider reference genuinely exists within
+ *   the authenticated tenant scope and is eligible for a specific facility.
  *
- * Additional bounded contexts (patients, audit, billing,
- * inventory, configuration, etc.) arrive in subsequent batches alongside
- * their respective vertical slices.
+ * Additional bounded contexts (audit, billing, inventory, configuration, etc.)
+ * arrive in subsequent batches alongside their respective vertical slices.
  */
 
 export const DOMAIN_PACKAGE_VERSION = '0.0.0' as const;
