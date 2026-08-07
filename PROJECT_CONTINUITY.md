@@ -461,10 +461,24 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 
 1. **Appointment branch existence correction:** Previously reported as "not available on remote" but the branch EXISTS at SHA `1a231d2a46ada73e76c86ec4c20b8583e119ee88`
 2. **Active assignment uniqueness correction:** Replaced full unique constraint with partial unique index allowing reassignment
-3. **Composite FK removal:** Removed three composite foreign keys that required non-existent unique constraints in PostgreSQL. Tenant isolation is enforced at application layer via repository WHERE clauses.
-4. **Branded types:** Updated `isEligibleForFacility` to use `FacilityId` branded type
-5. **Domain tests:** Added tests for lifecycle eligibility (candidate, onboarded, suspended, separated all return false)
-6. **Database constraint tests:** Added tests for partial unique index; removed tests for composite FK enforcement (now application-enforced)
+3. **Composite FK removal (insufficient):** Initially removed three composite foreign keys due to PostgreSQL error. This weakened database-level tenant integrity.
+4. **Database-integrity restoration:** Restored proper composite FKs by adding unique constraint on `providers(tenant_id, id)` first, enabling PostgreSQL-safe composite FK references.
+5. **Branded types:** Updated `isEligibleForFacility` to use `FacilityId` branded type
+6. **Domain tests:** Added tests for lifecycle eligibility (candidate, onboarded, suspended, separated all return false)
+7. **Database constraint tests:** Tests for partial unique index, cross-tenant isolation, organisation owns facility, and reassignment after revocation all restored.
+
+### Database Integrity Restoration (2026-08-07)
+
+**Problem identified:** CI was green but database-level tenant integrity was weakened. The migration had only simple foreign keys; schema.prisma comments incorrectly claimed composite FKs existed.
+
+**Root cause:** Composite FKs were removed to fix PostgreSQL error, but the real fix requires adding a unique constraint on `providers(tenant_id, id)` first.
+
+**Solution:**
+- Added unique constraint `@@unique([tenantId, id])` to Provider model
+- Added composite FK: `(tenant_id, provider_id) → providers(tenant_id, id)`
+- Added composite FK: `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)` — enforces BOTH tenant and organisation integrity
+- Kept simple FKs for Prisma convenience
+- Restored all PostgreSQL database constraint tests
 
 ### CI Correction (2026-08-03)
 
@@ -480,11 +494,11 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 
 **Root cause:** PostgreSQL migration error: `ERROR: there is no unique constraint matching given keys for referenced table "providers"`.
 
-**Cause:** The migration attempted to create composite foreign keys referencing `(tenant_id, id)` columns, but PostgreSQL requires unique constraints on referenced columns. The `providers` table only has a primary key on `id`, not a unique constraint on `(tenant_id, id)`.
+**Cause:** The migration attempted to create composite foreign keys referencing `(tenant_id, id)` columns, but PostgreSQL requires unique constraints on referenced columns.
 
-**Fix:** Removed the three composite foreign keys that required non-existent unique constraints. Tenant isolation is now enforced at the application layer through repository WHERE clauses (as documented in DOCTORS.md). Simple foreign keys for referential integrity are retained.
+**Fix (insufficient):** Removed the three composite foreign keys. This made CI green but weakened database integrity.
 
-**Tests removed:** Database constraint tests that relied on composite FK enforcement (cross-tenant and organisation ownership) were removed since those constraints are now application-enforced.
+**Database integrity restoration:** Added unique constraint on `providers(tenant_id, id)` and restored composite FKs properly.
 
 ### Commit
 
@@ -492,10 +506,11 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - **Integrity fix:** fix(workforce): enforce provider assignment integrity (1388a9a)
 - **Type fix:** fix(workforce): correct provider facility test identifiers (111c4bd)
 - **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (36f1c16)
+- **DB integrity restoration:** fix(workforce): restore provider assignment tenant integrity (pending)
 - **Branch:** feature/bc10-workforce-reference-foundation
-- **Final SHA:** 36f1c16f25c63412345152f6258a01c3c03d8519
-- **CI Run:** 31220093225
-- **Status:** ✅ CI PASSED
+- **Final SHA:** (pending after push)
+- **CI Run:** (pending)
+- **Status:** Awaiting new CI validation
 
 ### Recovery Information
 

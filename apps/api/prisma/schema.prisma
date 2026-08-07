@@ -883,6 +883,9 @@ model Provider {
 
   facilityAssignments ProviderFacilityAssignment[]
 
+  // Unique constraint enables composite foreign key from provider_facility_assignments
+  // that enforces tenant integrity: a provider can only be assigned within their tenant.
+  @@unique([tenantId, id], map: "providers_tenant_id_id_key")
   @@index([tenantId], map: "providers_tenant_id_idx")
   @@index([tenantId, status], map: "providers_tenant_id_status_idx")
   @@map("providers")
@@ -898,18 +901,19 @@ model Provider {
 /// An active assignment has `revokedAt` set to null. A revoked assignment
 /// indicates the provider no longer works at that facility.
 ///
-/// Tenant integrity constraints (enforced via raw SQL in migration):
+/// Database Integrity Constraints (enforced via raw SQL in migration):
+/// - Simple FK: provider_id → providers.id (Prisma convenience)
 /// - Composite FK: (tenant_id, provider_id) → providers(tenant_id, id)
 ///   Ensures the provider belongs to the same tenant as the assignment.
-/// - Composite FK: (tenant_id, facility_id) → facilities(tenant_id, id)
-///   Ensures the facility belongs to the same tenant as the assignment.
-/// - Composite FK: (organisation_id, facility_id) → facilities(organisation_id, id)
-///   Ensures the organisation owns the facility.
-///
-/// Active assignment uniqueness (enforced via raw SQL partial unique index):
-/// - Only one active (non-revoked) assignment per tenant/provider/facility.
-/// - Historical revoked assignments are preserved for audit purposes.
-/// - A provider may be reassigned to the same facility after revocation.
+/// - Simple FK: facility_id → facilities.id (Prisma convenience)
+/// - Composite FK: (tenant_id, organisation_id, facility_id) →
+///   facilities(tenant_id, organisation_id, id)
+///   Enforces BOTH that the facility belongs to the same tenant as the
+///   assignment AND that the facility belongs to the specified organisation.
+/// - Partial unique index on (tenant_id, provider_id, facility_id)
+///   WHERE revoked_at IS NULL: ensures only one active assignment per
+///   tenant/provider/facility. Historical revoked assignments are
+///   preserved for audit purposes. Reassignment after revocation is allowed.
 ///
 /// Application-layer logic: all repository methods require tenantId as a
 /// mandatory parameter. This provides the primary isolation guarantee.

@@ -19,17 +19,17 @@
 -- - Active providers are fully credentialed and authorized for clinical work
 -- - Eligibility for scheduling requires active status AND valid facility assignment
 --
--- Tenant Isolation:
--- - Tenant isolation is enforced at the application layer through the repository's
---   WHERE clauses. Every repository query includes tenantId as a required filter.
--- - The repository validates that the provider belongs to the correct tenant
---   before returning results.
---
 -- Database Integrity Constraints:
--- - Simple FK: assignment.provider_id → providers.id
---   Ensures referential integrity; a provider must exist before assignment.
--- - Simple FK: assignment.facility_id → facilities.id
---   Ensures referential integrity; a facility must exist before assignment.
+-- - Composite unique: providers(tenant_id, id) — required for composite FK target
+-- - Simple FK: assignment.provider_id → providers.id (Prisma convenience)
+-- - Composite FK: assignment(tenant_id, provider_id) → providers(tenant_id, id)
+--   Ensures the provider belongs to the same tenant as the assignment.
+-- - Simple FK: assignment.facility_id → facilities.id (Prisma convenience)
+-- - Composite FK: assignment(tenant_id, organisation_id, facility_id) →
+--   facilities(tenant_id, organisation_id, id)
+--   This single triple-column FK enforces:
+--   - The facility belongs to the same tenant as the assignment
+--   - The facility belongs to the specified organisation
 -- - Partial unique index on (tenant_id, provider_id, facility_id) WHERE revoked_at IS NULL
 --   Ensures only one active assignment per provider/facility. Historical revoked
 --   assignments are preserved for audit purposes; reassignment is allowed.
@@ -59,6 +59,10 @@ CREATE TABLE "providers" (
   CONSTRAINT "providers_pkey" PRIMARY KEY ("id")
 );
 
+-- Unique constraint: enables composite foreign key from provider_facility_assignments
+CREATE UNIQUE INDEX "providers_tenant_id_id_key"
+  ON "providers" ("tenant_id", "id");
+
 -- Index for tenant-scoped queries (findById, existsInTenant).
 CREATE INDEX "providers_tenant_id_idx" ON "providers" ("tenant_id");
 
@@ -78,16 +82,32 @@ CREATE TABLE "provider_facility_assignments" (
   CONSTRAINT "provider_facility_assignments_pkey" PRIMARY KEY ("id")
 );
 
--- Foreign key: provider must exist and be deleted only when no assignments remain.
+-- Simple FK: provider must exist (Prisma convenience).
 ALTER TABLE "provider_facility_assignments"
   ADD CONSTRAINT "provider_facility_assignments_provider_id_fkey"
   FOREIGN KEY ("provider_id") REFERENCES "providers"("id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
 
--- Foreign key: facility must exist and be deleted only when no assignments reference it.
+-- Composite FK: tenant integrity for provider.
+-- Ensures the provider's tenant matches the assignment's tenant.
+ALTER TABLE "provider_facility_assignments"
+  ADD CONSTRAINT "provider_facility_assignments_tenant_provider_fkey"
+  FOREIGN KEY ("tenant_id", "provider_id") REFERENCES "providers"("tenant_id", "id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Simple FK: facility must exist (Prisma convenience).
 ALTER TABLE "provider_facility_assignments"
   ADD CONSTRAINT "provider_facility_assignments_facility_id_fkey"
   FOREIGN KEY ("facility_id") REFERENCES "facilities"("id")
+  ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+-- Composite FK: tenant + organisation integrity for facility.
+-- Ensures the facility belongs to the same tenant as the assignment
+-- AND that the facility belongs to the specified organisation.
+ALTER TABLE "provider_facility_assignments"
+  ADD CONSTRAINT "provider_facility_assignments_tenant_org_facility_fkey"
+  FOREIGN KEY ("tenant_id", "organisation_id", "facility_id")
+  REFERENCES "facilities"("tenant_id", "organisation_id", "id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- Partial unique index: only one active (non-revoked) assignment per provider/facility.

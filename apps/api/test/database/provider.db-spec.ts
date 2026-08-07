@@ -699,6 +699,161 @@ describe('ProviderRepository', () => {
     });
   });
 
+  describe('database constraint: cross-tenant isolation', () => {
+    it('rejects assignment where provider tenant differs from assignment tenant', async () => {
+      await setupTenant1Data();
+      await setupTenant2Data();
+
+      // Provider belongs to tenant1
+      const provider = await prisma.provider.create({
+        data: { tenantId: tenant1.id, status: 'active' },
+      });
+
+      // Attempting to create assignment with different tenant should fail
+      // due to composite FK constraint (tenant_id, provider_id) -> providers(tenant_id, id)
+      await expect(
+        prisma.providerFacilityAssignment.create({
+          data: {
+            providerId: provider.id,
+            tenantId: tenant2.id, // Wrong tenant
+            organisationId: org2.id,
+            facilityId: facility1.id,
+            revokedAt: null,
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects assignment where facility tenant differs from assignment tenant', async () => {
+      await setupTenant1Data();
+      await setupTenant2Data();
+
+      const provider = await prisma.provider.create({
+        data: { tenantId: tenant1.id, status: 'active' },
+      });
+
+      // facility1 belongs to tenant1, attempting to assign with tenant2 should fail
+      // due to composite FK constraint (tenant_id, organisation_id, facility_id) ->
+      // facilities(tenant_id, organisation_id, id)
+      await expect(
+        prisma.providerFacilityAssignment.create({
+          data: {
+            providerId: provider.id,
+            tenantId: tenant2.id,
+            organisationId: org1.id,
+            facilityId: facility1.id,
+            revokedAt: null,
+          },
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('database constraint: organisation owns facility', () => {
+    it('rejects assignment where organisation does not own facility', async () => {
+      await setupTenant1Data();
+
+      const provider = await prisma.provider.create({
+        data: { tenantId: tenant1.id, status: 'active' },
+      });
+
+      // org2 does not own facility1 (facility1 belongs to org1)
+      // This is rejected by the composite FK:
+      // (tenant_id, organisation_id, facility_id) -> facilities(tenant_id, organisation_id, id)
+      await expect(
+        prisma.providerFacilityAssignment.create({
+          data: {
+            providerId: provider.id,
+            tenantId: tenant1.id,
+            organisationId: org2.id,
+            facilityId: facility1.id,
+            revokedAt: null,
+          },
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('database constraint: reassignment after revocation', () => {
+    it('allows reassignment after revocation', async () => {
+      await setupTenant1Data();
+
+      const provider = await prisma.provider.create({
+        data: { tenantId: tenant1.id, status: 'active' },
+      });
+
+      // First assignment (active)
+      await prisma.providerFacilityAssignment.create({
+        data: {
+          providerId: provider.id,
+          tenantId: tenant1.id,
+          organisationId: org1.id,
+          facilityId: facility1.id,
+          revokedAt: null,
+        },
+      });
+
+      // Revoke the assignment
+      await prisma.providerFacilityAssignment.updateMany({
+        where: {
+          providerId: provider.id,
+          facilityId: facility1.id,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+
+      // Now reassign to the same facility - should succeed
+      await expect(
+        prisma.providerFacilityAssignment.create({
+          data: {
+            providerId: provider.id,
+            tenantId: tenant1.id,
+            organisationId: org1.id,
+            facilityId: facility1.id,
+            revokedAt: null,
+          },
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('preserves historical revoked assignments', async () => {
+      await setupTenant1Data();
+
+      const provider = await prisma.provider.create({
+        data: { tenantId: tenant1.id, status: 'active' },
+      });
+
+      // Create first assignment
+      await prisma.providerFacilityAssignment.create({
+        data: {
+          providerId: provider.id,
+          tenantId: tenant1.id,
+          organisationId: org1.id,
+          facilityId: facility1.id,
+          revokedAt: null,
+        },
+      });
+
+      // Revoke it
+      await prisma.providerFacilityAssignment.updateMany({
+        where: { providerId: provider.id, facilityId: facility1.id },
+        data: { revokedAt: new Date('2024-01-01') },
+      });
+
+      // Both historical and new assignment exist
+      const assignments = await prisma.providerFacilityAssignment.findMany({
+        where: { providerId: provider.id, facilityId: facility1.id },
+      });
+
+      expect(assignments).toHaveLength(2);
+      expect(assignments.filter((a) => a.revokedAt !== null)).toHaveLength(1);
+      expect(assignments.filter((a) => a.revokedAt === null)).toHaveLength(1);
+    });
+  });
+
   describe('provider lifecycle eligibility', () => {
     it('candidate provider is not eligible', async () => {
       await setupTenant1Data();
