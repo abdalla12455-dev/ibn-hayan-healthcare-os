@@ -291,7 +291,7 @@ This is the primary feature under development. It adds multi-tenant scoping to t
 
 - **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
 - **Feature branch:** feature/bc10-workforce-reference-foundation
-- **Pull request:** (pending - to be created)
+- **Pull request:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/13 (MERGED)
 - **Base SHA:** 7e5457044266e14690d0ef5c09fc0c614ce7e9c8
 
 ### Appointment Branch Compatibility
@@ -308,13 +308,17 @@ The appointment-booking branch (`feature/appointments-stage-1c-booking`) exists 
 
 ### Database Integrity Design
 
+**Provider composite unique key:**
+- `providers(tenant_id, id)` — enables composite FK targeting
+
 **Tenant integrity constraints (via raw SQL in migration):**
-1. Composite FK: `assignment(tenant_id, provider_id)` → `providers(tenant_id, id)`
+1. Composite FK: `(tenant_id, provider_id)` → `providers(tenant_id, id)`
    - Ensures provider belongs to same tenant as assignment
-2. Composite FK: `assignment(tenant_id, facility_id)` → `facilities(tenant_id, id)`
-   - Ensures facility belongs to same tenant as assignment
-3. Composite FK: `assignment(organisation_id, facility_id)` → `facilities(organisation_id, id)`
-   - Ensures organisation owns the facility
+2. Canonical triple-column FK: `(tenant_id, organisation_id, facility_id)` → `facilities(tenant_id, organisation_id, id)`
+   - This single constraint enforces BOTH:
+     - The facility belongs to the same tenant as the assignment
+     - The facility belongs to the specified organisation
+   - (Note: two separate facility FKs are NOT used; the triple-column FK is the canonical design)
 
 **Active assignment uniqueness:**
 - Partial unique index on `(tenant_id, provider_id, facility_id) WHERE revoked_at IS NULL`
@@ -423,8 +427,9 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - Provider lookup with wrong tenantId returns null (not an error)
 - isEligibleForFacility returns false for cross-tenant queries
 - findActiveFacilityAssignments returns empty array for cross-tenant queries
-- Tenant isolation enforced at application layer via repository WHERE clauses (per DOCTORS.md)
-- Simple FKs ensure referential integrity only
+- **Database-level enforcement:** Composite FKs ensure cross-tenant inserts are rejected at the database level
+- **Application-layer defense:** Repository WHERE clauses provide additional tenant filtering
+- **Prisma convenience FKs:** Simple FKs for Prisma query-building compatibility (do not replace composite FKs)
 
 ### Facility Assignment Behavior
 
@@ -507,10 +512,14 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - **Type fix:** fix(workforce): correct provider facility test identifiers (111c4bd)
 - **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (36f1c16)
 - **DB integrity restoration:** fix(workforce): restore provider assignment tenant integrity (3fb60dd)
+- **Documentation:** docs: update PROJECT_CONTINUITY.md with successful CI confirmation (7caa77a)
 - **Branch:** feature/bc10-workforce-reference-foundation
-- **Final SHA:** 3fb60dd0d6c951bb71a1682f9af2383762e3b293
-- **CI Run:** 31223505321
-- **Status:** ✅ CI PASSED
+- **Feature branch SHA:** 7caa77a0d6c951bb71a1682f9af2383762e3b293
+- **PR #13:** 13
+- **PR #13 merge commit SHA:** 0c1cad201de39cf4d2e105a630e998841c28807a
+- **Latest CI Run:** 31223879316
+- **Latest CI Result:** ✅ SUCCESS
+- **Status:** ✅ MERGED INTO MAIN
 
 ### Recovery Information
 
@@ -522,7 +531,14 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - Provider profiles and contact information (future BC10 batch)
 - Provider credentialing and privileging (future BC10 batch)
 - Provider scheduling and availability (future BC10 batch)
-- Appointment booking integration with provider validation (BC06)
+- **Appointment booking integration with provider validation (BC06)** — Update feature/appointments-stage-1c-booking from main to use BC10 ProviderRepository
+
+### Next Steps
+
+1. Update `feature/appointments-stage-1c-booking` from main (which now includes BC10)
+2. Integrate BC10 `ProviderRepository.isEligibleForFacility` into appointment booking flow
+3. Remove deferred provider existence validation from appointments service
+4. Continue appointment booking implementation on feature/appointments-stage-1c-booking
 
 
 ## Standard Main CI Workflow (branch `ci/main-standard-workflow-v1`)
