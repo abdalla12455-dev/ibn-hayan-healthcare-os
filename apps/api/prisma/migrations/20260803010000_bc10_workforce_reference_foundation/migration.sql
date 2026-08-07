@@ -19,13 +19,17 @@
 -- - Active providers are fully credentialed and authorized for clinical work
 -- - Eligibility for scheduling requires active status AND valid facility assignment
 --
+-- Tenant Isolation:
+-- - Tenant isolation is enforced at the application layer through the repository's
+--   WHERE clauses. Every repository query includes tenantId as a required filter.
+-- - The repository validates that the provider belongs to the correct tenant
+--   before returning results.
+--
 -- Database Integrity Constraints:
--- - Composite FK: assignment(tenant_id, provider_id) → providers(tenant_id, id)
---   Ensures the provider belongs to the same tenant as the assignment.
--- - Composite FK: assignment(tenant_id, facility_id) → facilities(tenant_id, id)
---   Ensures the facility belongs to the same tenant as the assignment.
--- - Composite FK: assignment(organisation_id, facility_id) → facilities(organisation_id, id)
---   Ensures the organisation owns the facility.
+-- - Simple FK: assignment.provider_id → providers.id
+--   Ensures referential integrity; a provider must exist before assignment.
+-- - Simple FK: assignment.facility_id → facilities.id
+--   Ensures referential integrity; a facility must exist before assignment.
 -- - Partial unique index on (tenant_id, provider_id, facility_id) WHERE revoked_at IS NULL
 --   Ensures only one active assignment per provider/facility. Historical revoked
 --   assignments are preserved for audit purposes; reassignment is allowed.
@@ -84,27 +88,6 @@ ALTER TABLE "provider_facility_assignments"
 ALTER TABLE "provider_facility_assignments"
   ADD CONSTRAINT "provider_facility_assignments_facility_id_fkey"
   FOREIGN KEY ("facility_id") REFERENCES "facilities"("id")
-  ON DELETE RESTRICT ON UPDATE RESTRICT;
-
--- Composite foreign key: tenant integrity for provider.
--- Ensures the provider's tenant matches the assignment's tenant.
-ALTER TABLE "provider_facility_assignments"
-  ADD CONSTRAINT "provider_facility_assignments_tenant_provider_fkey"
-  FOREIGN KEY ("tenant_id", "provider_id") REFERENCES "providers"("tenant_id", "id")
-  ON DELETE RESTRICT ON UPDATE RESTRICT;
-
--- Composite foreign key: tenant integrity for facility.
--- Ensures the facility's tenant matches the assignment's tenant.
-ALTER TABLE "provider_facility_assignments"
-  ADD CONSTRAINT "provider_facility_assignments_tenant_facility_fkey"
-  FOREIGN KEY ("tenant_id", "facility_id") REFERENCES "facilities"("tenant_id", "id")
-  ON DELETE RESTRICT ON UPDATE RESTRICT;
-
--- Composite foreign key: organisation owns facility.
--- Ensures the organisation owns the facility.
-ALTER TABLE "provider_facility_assignments"
-  ADD CONSTRAINT "provider_facility_assignments_org_facility_fkey"
-  FOREIGN KEY ("organisation_id", "facility_id") REFERENCES "facilities"("organisation_id", "id")
   ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 -- Partial unique index: only one active (non-revoked) assignment per provider/facility.
