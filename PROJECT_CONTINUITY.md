@@ -506,11 +506,11 @@ BC10 Workforce Reference Foundation — minimal canonical provider persistence a
 - **Integrity fix:** fix(workforce): enforce provider assignment integrity (1388a9a)
 - **Type fix:** fix(workforce): correct provider facility test identifiers (111c4bd)
 - **Migration fix:** fix(workforce): remove composite FKs requiring non-existent unique constraints (36f1c16)
-- **DB integrity restoration:** fix(workforce): restore provider assignment tenant integrity (pending)
+- **DB integrity restoration:** fix(workforce): restore provider assignment tenant integrity (3fb60dd)
 - **Branch:** feature/bc10-workforce-reference-foundation
-- **Final SHA:** (pending after push)
-- **CI Run:** (pending)
-- **Status:** Awaiting new CI validation
+- **Final SHA:** 3fb60dd0d6c951bb71a1682f9af2383762e3b293
+- **CI Run:** 31223505321
+- **Status:** ✅ CI PASSED
 
 ### Recovery Information
 
