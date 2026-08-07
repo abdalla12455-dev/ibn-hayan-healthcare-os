@@ -843,6 +843,17 @@ describe('ProviderRepository', () => {
         data: { revokedAt: new Date('2024-01-01') },
       });
 
+      // Create a new assignment (simulating reassignment)
+      await prisma.providerFacilityAssignment.create({
+        data: {
+          providerId: provider.id,
+          tenantId: tenant1.id,
+          organisationId: org1.id,
+          facilityId: facility1.id,
+          revokedAt: null,
+        },
+      });
+
       // Both historical and new assignment exist
       const assignments = await prisma.providerFacilityAssignment.findMany({
         where: { providerId: provider.id, facilityId: facility1.id },
