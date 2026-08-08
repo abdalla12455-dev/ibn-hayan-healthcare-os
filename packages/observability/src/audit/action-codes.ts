@@ -338,29 +338,38 @@ export type ClinicAdminActionCode =
 /**
  * Appointments action codes.
  *
- * Emitted by the Appointments module after successful read operations.
+ * Emitted by the Appointments module after successful read and write
+ * operations.
+ *
  * The `appointments.schedule.viewed` event is emitted after the
  * "Today's Appointments" query completes successfully (including empty
- * results). The action is mapped to the `facility_context` category
- * (see `inferCategoryFromAction`).
+ * results). Per the Stage 1B implementation specification, the event
+ * metadata carries only `{ endpoint: 'appointments_today_view' }` —
+ * no patient IDs, provider IDs, appointment details, names, medical
+ * data, or other sensitive payload.
  *
- * Per the Stage 1B implementation specification, the event metadata
- * carries only `{ endpoint: 'appointments_today_view' }` — no patient
- * IDs, provider IDs, appointment details, names, medical data, or
- * other sensitive payload. The standard actor/session/tenant fields
- * are populated from the authenticated session.
+ * The `appointments.booked` event is emitted after a successful
+ * appointment creation via `POST /api/v1/appointments`. Per the
+ * Stage 1C implementation specification, the event metadata carries
+ * `{ endpoint: 'appointments_book', appointmentId: string }` — the
+ * appointment ID for traceability, but no patient details, provider
+ * details, or appointment timing information.
+ *
+ * Both actions are mapped to the `facility_context` category
+ * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
  *
- * The event is emitted via `auditHelper.emitDirect(...)` (best-effort,
+ * Events are emitted via `auditHelper.emitDirect(...)` (best-effort,
  * non-transactional), matching the existing pattern for read-only view
  * events (`tenant_context.viewed`, `clinic_admin.overview.viewed`).
- * The event is emitted ONLY after the appointments query succeeds; it
- * is NOT emitted when configuration is required (null timezone) or when
- * the service throws. The event does NOT recursively audit itself.
+ * Events are emitted ONLY after the operation succeeds; they are NOT
+ * emitted when validation fails or when the service throws. Events do
+ * NOT recursively audit themselves.
  */
 export const APPOINTMENTS_ACTION_CODES = [
   'appointments.schedule.viewed',
+  'appointments.booked',
 ] as const;
 
 export type AppointmentsActionCode =

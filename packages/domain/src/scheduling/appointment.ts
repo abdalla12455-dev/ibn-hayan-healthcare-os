@@ -103,3 +103,38 @@ export interface AppointmentReadProjection {
   readonly status: AppointmentStatus;
   readonly typeCode: string;
 }
+
+/**
+ * Input type for creating a new appointment.
+ *
+ * All scope (tenantId, organisationId, facilityId) is derived from
+ * the authenticated session context, NOT from the request body.
+ * The caller supplies only the patient, provider, timing, and type.
+ *
+ * Per the Stage 1C specification:
+ * - `patientId`: the patient for the appointment. Must exist in the
+ *   authenticated tenant.
+ * - `providerId`: the provider for the appointment. Must exist in the
+ *   authenticated tenant.
+ * - `scheduledStart`: the appointment start time in UTC.
+ * - `scheduledEnd`: the appointment end time in UTC. Must be after
+ *   scheduledStart.
+ * - `typeCode`: the appointment type code (e.g. 'consultation',
+ *   'follow-up', 'procedure').
+ */
+export interface AppointmentCreateInput {
+  readonly patientId: PatientId;
+  readonly providerId: ProviderId;
+  readonly scheduledStart: Date;
+  readonly scheduledEnd: Date;
+  readonly typeCode: string;
+}
+
+/**
+ * Result of a successful appointment creation.
+ *
+ * Contains the created appointment's persistent state.
+ */
+export interface AppointmentCreated {
+  readonly appointment: Appointment;
+}
