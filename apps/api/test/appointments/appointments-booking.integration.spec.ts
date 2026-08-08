@@ -193,15 +193,29 @@ async function createMembership(
   userId: string,
   tenantId: string,
   role: string,
+  organisationId?: string,
 ): Promise<{ membershipId: string }> {
   const membership = await memberships.create({
     userId: userId as UserId,
     tenantId: tenantId as TenantId,
   });
-  await roleAssignments.create({
+  const roleData: {
+    tenantMembershipId: string;
+    roleCode: PlatformRoleCode;
+    scopeLevel?: 'tenant' | 'organisation' | 'facility';
+    scopeOrganisationId?: string;
+    scopeFacilityId?: string;
+  } = {
     tenantMembershipId: membership.id,
     roleCode: role as PlatformRoleCode,
-  });
+  };
+  if (organisationId) {
+    roleData.scopeLevel = 'organisation';
+    roleData.scopeOrganisationId = organisationId;
+  }
+  await roleAssignments.create(
+    roleData as Parameters<typeof roleAssignments.create>[0],
+  );
   return { membershipId: membership.id };
 }
 
@@ -463,6 +477,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R06_RECEPTIONIST',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -512,6 +527,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R07_SCHEDULER',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -556,6 +572,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -603,6 +620,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -659,6 +677,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -709,6 +728,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -757,6 +777,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -830,6 +851,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R13_SYSTEM_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser('r13@example.com', TEST_PASSWORD);
@@ -865,6 +887,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R02_NURSE',
+        organisationId,
       );
 
       const cookie = await loginUser('r02@example.com', TEST_PASSWORD);
@@ -910,6 +933,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser('end-start@example.com', TEST_PASSWORD);
@@ -949,6 +973,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser('equal@example.com', TEST_PASSWORD);
@@ -987,6 +1012,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser('past@example.com', TEST_PASSWORD);
@@ -1029,6 +1055,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser(
@@ -1076,6 +1103,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       const cookie = await loginUser('missing@example.com', TEST_PASSWORD);
@@ -1121,6 +1149,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1182,6 +1211,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1243,6 +1273,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1304,6 +1335,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1365,6 +1397,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1426,6 +1459,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures (two providers)
@@ -1511,6 +1545,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1599,6 +1634,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient and BC10 Provider fixtures
@@ -1680,6 +1716,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -1731,6 +1768,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC10 Provider fixture (but NOT patient)
@@ -1786,6 +1824,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create a different tenant with a patient
@@ -1861,6 +1900,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -1912,6 +1952,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture (but NOT provider)
@@ -1963,6 +2004,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2035,6 +2077,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2093,6 +2136,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2151,6 +2195,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2209,6 +2254,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2267,6 +2313,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2325,6 +2372,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
@@ -2383,6 +2431,7 @@ describe('POST /api/v1/appointments', () => {
         userId,
         tenantId,
         'R09_ADMINISTRATOR',
+        organisationId,
       );
 
       // Create BC01 Patient fixture
