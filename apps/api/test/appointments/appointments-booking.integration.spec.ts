@@ -309,9 +309,8 @@ async function selectContext(
   // Fetch CSRF token first
   const csrfResponse = await request(server)
     .get('/api/v1/auth/csrf')
-    .set('Origin', ORIGIN)
     .set('Cookie', cookie);
-  const csrf = csrfResponse.headers['x-csrf-token'] as string;
+  const csrf = (csrfResponse.body as { token: string }).token;
   if (!csrf) {
     throw new Error('No CSRF token returned');
   }
