@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 
@@ -142,6 +143,48 @@ export function appointmentPastTime(): UnprocessableEntityException {
     error: {
       code: 'APPOINTMENT_PAST_TIME',
       message: 'The requested appointment start time is in the past.',
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cancellation errors (Stage 1D)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a 404 when an appointment cannot be found in the
+ * authenticated tenant, organisation, or facility.
+ *
+ * Per the Stage 1D specification, the cancellation endpoint must not
+ * reveal whether an appointment exists in another tenant, organisation,
+ * or facility. The same error is returned regardless of whether the
+ * appointment does not exist or exists outside the authenticated scope
+ * (no existence leak).
+ */
+export function appointmentNotFound(): NotFoundException {
+  return new NotFoundException({
+    error: {
+      code: 'APPOINTMENT_NOT_FOUND',
+      message:
+        'The appointment was not found or is not accessible in the current context.',
+    },
+  });
+}
+
+/**
+ * Return a 422 when an appointment is in a source state that is not
+ * canonically cancellable in this stage.
+ *
+ * Per STATUS_CODES.md §4.1 and the Stage 1D specification, only
+ * `booked` is cancellable. `cancelled` is idempotent success (not an
+ * error). Any other source state (confirmed, arrived, in_progress,
+ * completed, no_show) is an invalid transition and is rejected.
+ */
+export function appointmentInvalidTransition(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'APPOINTMENT_INVALID_TRANSITION',
+      message: 'The appointment cannot be cancelled from its current state.',
     },
   });
 }

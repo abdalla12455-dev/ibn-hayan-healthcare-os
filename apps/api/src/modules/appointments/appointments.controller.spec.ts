@@ -3,7 +3,11 @@ import type { Request } from 'express';
 import { AppointmentsController } from './appointments.controller.js';
 import type { AppointmentsTodayService } from './appointments-today.service.js';
 import type { AppointmentsBookingService } from './appointments-booking.service.js';
-import type { TodayAppointmentsResponse } from '@ibn-hayan/contracts';
+import type { AppointmentsCancellationService } from './appointments-cancellation.service.js';
+import type {
+  TodayAppointmentsResponse,
+  CancelAppointmentResponse,
+} from '@ibn-hayan/contracts';
 
 /**
  * Focused unit tests for the AppointmentsController.
@@ -69,6 +73,16 @@ function makeRequest(overrides: Partial<Request> = {}): Request {
   } as Request;
 }
 
+const VALID_CANCEL_RESPONSE: CancelAppointmentResponse = {
+  id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+  patientId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  providerId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  scheduledStart: '2026-08-01T09:00:00.000Z',
+  scheduledEnd: '2026-08-01T09:30:00.000Z',
+  status: 'cancelled',
+  typeCode: 'consultation',
+};
+
 function makeServiceStub(
   overrides: {
     result?: TodayAppointmentsResponse | null;
@@ -100,6 +114,30 @@ function makeBookingServiceStub() {
   } as unknown as AppointmentsBookingService;
 }
 
+function makeCancellationServiceStub(
+  overrides: {
+    result?: CancelAppointmentResponse | null;
+    error?: Error;
+  } = {},
+) {
+  const result = overrides.result === undefined ? null : overrides.result;
+  const error = overrides.error;
+  const cancelAppointment = vi.fn(
+    (
+      _appointmentId: string,
+      _reason: string,
+      _cookieValue: string | undefined,
+      _auditContext?: unknown,
+    ): Promise<CancelAppointmentResponse | null> => {
+      if (error !== undefined) {
+        return Promise.reject(error);
+      }
+      return Promise.resolve(result);
+    },
+  );
+  return { cancelAppointment } as unknown as AppointmentsCancellationService;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -110,6 +148,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         makeServiceStub(),
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest();
       const result = await controller.getTodayAppointments(req);
@@ -121,6 +160,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -135,6 +175,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -149,6 +190,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         makeServiceStub({ result: null }),
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toMatchObject({
@@ -165,6 +207,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest({ query: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -179,6 +222,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest({ query: { organisationId: 'evil-org' } });
       await controller.getTodayAppointments(req);
@@ -193,6 +237,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest({ query: { facilityId: 'evil-facility' } });
       await controller.getTodayAppointments(req);
@@ -207,6 +252,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest({
         headers: {
@@ -227,6 +273,7 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         service,
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest({ body: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -241,11 +288,100 @@ describe('AppointmentsController', () => {
       const controller = new AppointmentsController(
         makeServiceStub({ error }),
         makeBookingServiceStub(),
+        makeCancellationServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toThrow(
         'Internal error',
       );
+    });
+  });
+
+  describe('cancelAppointment', () => {
+    it('returns the service response on valid request', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      const result = await controller.cancelAppointment(
+        req,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        { reason: 'Patient requested cancellation.' },
+      );
+      expect(result).toEqual(VALID_CANCEL_RESPONSE);
+    });
+
+    it('throws UnauthorizedException when service returns null', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub({ result: null }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      await expect(
+        controller.cancelAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          { reason: 'Patient requested cancellation.' },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'AUTH_SESSION_REQUIRED',
+          },
+        },
+      });
+    });
+
+    it('rejects a body that does not match the strict contract', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      await expect(
+        controller.cancelAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          // missing required `reason`
+          {},
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'APPOINTMENT_VALIDATION_ERROR',
+          },
+        },
+      });
+    });
+
+    it('does NOT accept caller-supplied scope or status in the body', async () => {
+      const cancellationService = makeCancellationServiceStub({
+        result: VALID_CANCEL_RESPONSE,
+      });
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        cancellationService,
+      );
+      const req = makeRequest({ method: 'POST' });
+      // The strict schema rejects unknown keys (tenantId, status, etc.)
+      await expect(
+        controller.cancelAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          { reason: 'ok', tenantId: 'evil', status: 'cancelled' },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'APPOINTMENT_VALIDATION_ERROR',
+          },
+        },
+      });
     });
   });
 });

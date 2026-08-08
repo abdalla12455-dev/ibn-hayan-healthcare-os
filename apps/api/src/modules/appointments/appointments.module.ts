@@ -7,6 +7,7 @@ import { ClockModule } from '../../infrastructure/clock/index.js';
 import { AppointmentsController } from './appointments.controller.js';
 import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
+import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 
 /**
  * Appointments module.
@@ -17,6 +18,9 @@ import { AppointmentsBookingService } from './appointments-booking.service.js';
  * - `POST /api/v1/appointments` for creating appointments, authorized for
  *   R06 Receptionist, R07 Scheduler, and R09 Clinic Administrator roles
  *   (requires `appointments:book` permission).
+ * - `POST /api/v1/appointments/:id/cancel` for cancelling appointments,
+ *   authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+ *   Administrator roles (requires `appointments:cancel` permission).
  *
  * The module depends on:
  * - {@link DatabaseModule} for the AppointmentRepository,
@@ -35,6 +39,10 @@ import { AppointmentsBookingService } from './appointments-booking.service.js';
     ClockModule,
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsTodayService, AppointmentsBookingService],
+  providers: [
+    AppointmentsTodayService,
+    AppointmentsBookingService,
+    AppointmentsCancellationService,
+  ],
 })
 export class AppointmentsModule {}
