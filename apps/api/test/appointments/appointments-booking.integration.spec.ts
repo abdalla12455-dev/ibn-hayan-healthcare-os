@@ -117,6 +117,8 @@ async function truncateAll(): Promise<void> {
   await prisma.provider.deleteMany();
   // BC01: Patients must be deleted before tenants
   await prisma.patient.deleteMany();
+  // auth_sessions references tenant_memberships via active_tenant_membership_id FK
+  // so delete sessions BEFORE memberships
   await prisma.authSession.deleteMany();
   await prisma.tenantRoleAssignment.deleteMany();
   await prisma.tenantMembership.deleteMany();
@@ -360,6 +362,7 @@ beforeAll(async () => {
     .compile();
 
   app = moduleRef.createNestApplication();
+  app.setGlobalPrefix('api/v1');
   await app.init();
 
   // Get server instance
