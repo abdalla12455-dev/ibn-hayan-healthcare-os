@@ -290,7 +290,9 @@ async function loginUser(email: string, password: string): Promise<string> {
   const cookie = response.headers['set-cookie'];
   if (!cookie || !cookie[0]) {
     // Log error details for debugging
-    const error = new Error(`No cookie returned from login: status=${response.status}, body=${JSON.stringify(response.body)}`);
+    const error = new Error(
+      `No cookie returned from login: status=${response.status}, body=${JSON.stringify(response.body)}`,
+    );
     throw error;
   }
   return cookie[0];
