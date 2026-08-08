@@ -5757,8 +5757,9 @@ await prisma.tenant.deleteMany();
 | Typecheck | PASS |
 | Lint | PASS |
 | Production build | PASS |
-| PostgreSQL 17 | NOT RUN locally (requires PostgreSQL 17) |
-| Integration tests | NOT RUN locally (requires PostgreSQL 17) |
+| Unit tests | PASS (126 tests across all packages) |
+| PostgreSQL 17 | PASS (GitHub Actions CI, PR #15) |
+| Integration tests | PASS (GitHub Actions CI, PR #15) |
 
 ### Post-BC01/BC10 Integration
 
@@ -5769,17 +5770,32 @@ After merging origin/main (BC01 + BC10) into feature/appointments-stage-1c-booki
 3. Both validations use session-derived scope (cannot be overridden by request body)
 4. Cross-tenant lookups return false safely (no existence leak)
 
+### CI Test Fixes Applied
+
+During PostgreSQL 17 validation, several test infrastructure issues were discovered and fixed:
+
+1. **Authorization tests:** Updated `authorization.spec.ts` to include `appointments:book` permission in the permission catalogue and role matrices (R06, R07, R09 each gained 1 permission)
+
+2. **API route prefix:** Added `app.setGlobalPrefix('api/v1')` to match the production API structure
+
+3. **CSRF token:** Fixed CSRF token extraction to use `response.body.token` instead of headers
+
+4. **Context selection routes:** Updated `selectContext()` to use the correct multi-step context API:
+   - `PUT /api/v1/context/tenant` (with CSRF)
+   - `PUT /api/v1/context/organisation` (with CSRF)
+   - `PUT /api/v1/context/facility` (with CSRF)
+
+5. **Role scope:** Updated `createMembership()` to optionally include `organisationId` scope, enabling context selection to work correctly
+
 ### Immediate Next Step
 
-1. Push feature branch with test corrections
-2. Create pull request targeting main
-3. Wait for authoritative GitHub Actions CI (PostgreSQL 17 validation)
-4. Operator review and merge
+1. Create pull request targeting main
+2. Operator review and merge
 
 ### Recovery Information
 
 - **Authoritative feature branch:** feature/appointments-stage-1c-booking
 - **Pre-integration base:** 1a231d2a46ada73e76c86ec4c20b8583e119ee88
 - **After BC01/BC10 merge:** becb17660302550ee9b320a4a79d67027752084f
-- **After test corrections:** (pending commit)
-- **Main:** origin/main @ c7ddda1101eff266ff1cbceeb90eeea4efc0b782
+- **After test corrections:** 61b9efa (fix(appointments): add organisation scope to role assignments)
+- **Main:** origin/main @ c7ddda1101eff266ff1cbceeb90eeea4efc0b782 (BC10 merged via PR #14)
