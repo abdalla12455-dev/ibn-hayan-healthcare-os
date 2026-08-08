@@ -5385,30 +5385,65 @@ A provider is eligible for booking at a facility if:
 
 - **Branch:** `feature/appointments-stage-1c-booking`
 - **Base:** `main` at commit `085494309090ad79b2be27a68264f74334df207f`
-- **Status:** MERGE-READY after BC01 and BC10 integration
+- **Status:** ✅ MERGED into main via PR #15
+- **Pull request:** [#15](https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/15) — feat(appointments): complete tenant-safe appointment booking
+- **Merge commit SHA:** `01da944a59d5092e8c2ebd67c528da02efea9f0c`
+- **Merged by:** abdalla12455-dev (2026-08-08T22:21:39Z)
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| TypeScript typecheck | ✅ PASS |
+| ESLint | ✅ PASS |
+| Production build | ✅ PASS |
+| PostgreSQL 17 tests | ✅ PASS |
+| Main CI Run | [31233689911](https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/actions/runs/31233689911) (SUCCESS) |
+| Static analysis / lint / unit tests / build | SUCCESS |
+| PostgreSQL 17 validation suites | SUCCESS |
+
+**Concurrency validation verified:**
+- Overlapping concurrent requests: exactly one HTTP 201, one HTTP 422 APPOINTMENT_OVERLAP, zero HTTP 500, exactly one appointment persisted
+- Adjacent concurrent requests: both succeed
+- SERIALIZABLE transaction with bounded P2034 retry (max 3 attempts, 50ms delay)
+
+### Completed Integration
+
+- ✅ BC01 Patient validation via `PatientRepository.existsInTenant()`
+- ✅ BC10 Provider validation via `ProviderRepository.isEligibleForFacility()`
+- ✅ R06/R07/R09 authorization with `appointments:book` permission
+- ✅ Session-derived tenant/organisation/facility scope
+- ✅ Timestamp validation (end > start, no past times)
+- ✅ Overlap prevention (SERIALIZABLE + P2034 retry)
+- ✅ `appointments.booked` audit action
+- ✅ PostgreSQL 17 integration tests
 
 ### Known Risks
 
-- Integration tests require PostgreSQL 17 (not available in current environment)
-- Full validation must be performed in CI environment
+- None — all validation completed successfully
 
 ### Immediate Next Step
 
-1. Run full validation in CI environment with PostgreSQL 17
-2. Create pull request targeting main
-3. Operator review and merge
+~~1. Run full validation in CI environment with PostgreSQL 17~~ ✅ COMPLETED
+~~2. Create pull request targeting main~~ ✅ COMPLETED (PR #15)
+~~3. Operator review and merge~~ ✅ COMPLETED (merged 2026-08-08T22:21:39Z)
+
+**Next substantive project stage:** Not defined — requires operator decision.
 
 ### Recovery Information
 
 - **Authoritative Stage 1C base point:** commit `085494309090ad79b2be27a68264f74334df207f` (main HEAD at task start)
-- **Feature branch:** `feature/appointments-stage-1c-booking`
-- **Stage 1C commits:**
+- **Feature branch:** `feature/appointments-stage-1c-booking` (preserved after merge)
+- **Stage 1C commits on feature branch:**
   - `005341812ca231a89acd92454f4f9ca284e333bf` — feat(appointments): add secure appointment booking foundation
   - `c3e5825e85a8ec1790c93b01a3847a9aadb1c1da` — fix(appointments): complete booking validation and concurrency safety
   - `e1e1de0dcbf0fd47020133ba8b5babea9d752b5f` — chore(appointments): finalize booking cleanup and validation evidence
   - `1a231d2a46ada73e76c86ec4c20b8583e119ee88` — fix(appointments): resolve remaining booking type errors
-- **Integration commit:** (pending this task)
-- **Current HEAD before merge:** `1a231d2a46ada73e76c86ec4c20b8583e119ee88`
+  - `6b3ca4bbf22a86efb2dc3cabbcb4a6d684fa017c` — docs(continuity): update BC10 appointments integration validation results
+  - `a78b7cf0dded1ffc1c31413103bbb5b03acd6ec9` — fix(appointments): retry serializable booking conflicts
+- **PR #15 merge commit:** `01da944a59d5092e8c2ebd67c528da02efea9f0c`
+- **Authoritative main baseline when this section was authored:** `01da944a59d5092e8c2ebd67c528da02efea9f0c`
+- **Documentation-only closeout commit SHA:** reported externally
 
 ## BC01 Patient Reference Foundation (2026-08-03)
 
