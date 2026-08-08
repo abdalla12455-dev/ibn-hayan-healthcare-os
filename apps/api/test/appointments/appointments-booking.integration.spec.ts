@@ -302,22 +302,56 @@ async function loginUser(email: string, password: string): Promise<string> {
 
 async function selectContext(
   cookie: string,
-  _tenantId: string,
+  tenantMembershipId: string,
   organisationId: string,
   facilityId: string,
 ): Promise<void> {
-  const response = await request(server)
-    .post('/api/v1/context/select')
+  // Fetch CSRF token first
+  const csrfResponse = await request(server)
+    .get('/api/v1/auth/csrf')
+    .set('Origin', ORIGIN)
+    .set('Cookie', cookie);
+  const csrf = csrfResponse.headers['x-csrf-token'] as string;
+  if (!csrf) {
+    throw new Error('No CSRF token returned');
+  }
+
+  // Select tenant membership
+  const tenantResponse = await request(server)
+    .put('/api/v1/context/tenant')
     .set('Origin', ORIGIN)
     .set('Cookie', cookie)
-    .send({
-      activeTenantMembershipId: null,
-      activeOrganisationId: organisationId,
-      activeFacilityId: facilityId,
-    });
-  if (response.status >= 400) {
+    .set('X-CSRF-Token', csrf)
+    .send({ membershipId: tenantMembershipId });
+  if (tenantResponse.status >= 400) {
     throw new Error(
-      `selectContext failed: status=${response.status}, body=${JSON.stringify(response.body)}`,
+      `selectContext tenant failed: status=${tenantResponse.status}, body=${JSON.stringify(tenantResponse.body)}`,
+    );
+  }
+
+  // Select organisation
+  const orgResponse = await request(server)
+    .put('/api/v1/context/organisation')
+    .set('Origin', ORIGIN)
+    .set('Cookie', cookie)
+    .set('X-CSRF-Token', csrf)
+    .send({ organisationId });
+  if (orgResponse.status >= 400) {
+    throw new Error(
+      `selectContext organisation failed: status=${orgResponse.status}, body=${JSON.stringify(orgResponse.body)}`,
+    );
+  }
+
+  // Select facility
+  const facilityResponse = await request(server)
+    .put('/api/v1/context/facility')
+    .set('Origin', ORIGIN)
+    .set('Cookie', cookie)
+    .set('X-CSRF-Token', csrf)
+    .send({ facilityId });
+  if (facilityResponse.status >= 400) {
+    throw new Error(
+      `selectContext facility failed: status=${facilityResponse.status}, body=${JSON.stringify(facilityResponse.body)}`,
     );
   }
 }
@@ -426,7 +460,11 @@ describe('POST /api/v1/appointments', () => {
         'Test Facility',
       );
       // R06_RECEPTIONIST role needed for R06 access
-      await createMembership(userId, tenantId, 'R06_RECEPTIONIST');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R06_RECEPTIONIST',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-001', 'active');
@@ -438,7 +476,7 @@ describe('POST /api/v1/appointments', () => {
 
       // Login and select context
       const cookie = await loginUser('r06@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -471,7 +509,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-2',
         'Test Facility 2',
       );
-      await createMembership(userId, tenantId, 'R07_SCHEDULER');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R07_SCHEDULER',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-002', 'active');
@@ -482,7 +524,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('r07@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -511,7 +553,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-3',
         'Test Facility 3',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-003', 'active');
@@ -522,7 +568,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('r09@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -554,7 +600,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-4',
         'Test Facility 4',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-004', 'active');
@@ -565,7 +615,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('persist@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -606,7 +656,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-5',
         'Test Facility 5',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-005', 'active');
@@ -617,7 +671,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('contract@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -652,7 +706,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-6',
         'Test Facility 6',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-006', 'active');
@@ -663,7 +721,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('audit@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       await bookAppointment(
         cookie,
@@ -696,7 +754,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-7',
         'Test Facility 7',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-007', 'active');
@@ -707,7 +769,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('adjacent@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment 09:00-09:30
       const response1 = await bookAppointment(
@@ -765,10 +827,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-8',
         'Test Facility 8',
       );
-      await createMembership(userId, tenantId, 'R13_SYSTEM_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R13_SYSTEM_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser('r13@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -796,10 +862,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-9',
         'Test Facility 9',
       );
-      await createMembership(userId, tenantId, 'R02_NURSE');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R02_NURSE',
+      );
 
       const cookie = await loginUser('r02@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -837,10 +907,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-10',
         'Test Facility 10',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser('end-start@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // End before start
       const response = await bookAppointment(
@@ -872,10 +946,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-11',
         'Test Facility 11',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser('equal@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -906,10 +984,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-12',
         'Test Facility 12',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser('past@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -944,13 +1026,17 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-13',
         'Test Facility 13',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser(
         'invalid-patient@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await request(server)
         .post('/api/v1/appointments')
@@ -987,10 +1073,14 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-14',
         'Test Facility 14',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       const cookie = await loginUser('missing@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await request(server)
         .post('/api/v1/appointments')
@@ -1028,7 +1118,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-15',
         'Test Facility 15',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-015', 'active');
@@ -1039,7 +1133,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('overlap1@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment
       await bookAppointment(
@@ -1085,7 +1179,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-16',
         'Test Facility 16',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-016', 'active');
@@ -1096,7 +1194,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('overlap2@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1142,7 +1240,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-17',
         'Test Facility 17',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-017', 'active');
@@ -1153,7 +1255,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('overlap3@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1199,7 +1301,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-18',
         'Test Facility 18',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-018', 'active');
@@ -1210,7 +1316,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('overlap4@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1256,7 +1362,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-19',
         'Test Facility 19',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-019', 'active');
@@ -1267,7 +1377,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('overlap5@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book first appointment 08:30-10:00
       await bookAppointment(
@@ -1313,7 +1423,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-20',
         'Test Facility 20',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures (two providers)
       const { patientId } = await createPatient(tenantId, 'MRN-020', 'active');
@@ -1332,7 +1446,7 @@ describe('POST /api/v1/appointments', () => {
         'diff-provider@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Book with provider 1
       const response1 = await bookAppointment(
@@ -1394,7 +1508,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-21',
         'Test Facility 21',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-021', 'active');
@@ -1405,7 +1523,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('concurrent@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Send two concurrent overlapping booking requests
       const [response1, response2] = await Promise.all([
@@ -1478,7 +1596,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-22',
         'Test Facility 22',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient and BC10 Provider fixtures
       const { patientId } = await createPatient(tenantId, 'MRN-022', 'active');
@@ -1492,7 +1614,7 @@ describe('POST /api/v1/appointments', () => {
         'concurrent-adjacent@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Send two concurrent non-overlapping booking requests
       // First: 09:00-09:30, Second: 09:30-10:00
@@ -1555,7 +1677,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-p1',
         'Test Facility P1',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-P1', 'active');
@@ -1568,7 +1694,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('patient-ok@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -1602,7 +1728,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-p2',
         'Test Facility P2',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC10 Provider fixture (but NOT patient)
       const { providerId } = await createEligibleProvider(
@@ -1615,7 +1745,7 @@ describe('POST /api/v1/appointments', () => {
         'patient-missing@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Use arbitrary UUID that has no corresponding Patient row
       const nonExistentPatientId = '00000000-0000-0000-0000-000000000099';
@@ -1653,7 +1783,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-p3',
         'Test Facility P3',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create a different tenant with a patient
       const { tenantId: otherTenantId } = await createTenant(
@@ -1677,7 +1811,7 @@ describe('POST /api/v1/appointments', () => {
         'patient-cross-tenant@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Patient belongs to different tenant - should be rejected
       const response = await bookAppointment(
@@ -1724,7 +1858,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr1',
         'Test Facility PR1',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR1', 'active');
@@ -1737,7 +1875,7 @@ describe('POST /api/v1/appointments', () => {
       );
 
       const cookie = await loginUser('provider-ok@example.com', TEST_PASSWORD);
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -1771,7 +1909,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr2',
         'Test Facility PR2',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture (but NOT provider)
       const { patientId } = await createPatient(tenantId, 'MRN-PR2', 'active');
@@ -1780,7 +1922,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-missing@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Use arbitrary UUID that has no corresponding Provider row
       const nonExistentProviderId = '00000000-0000-0000-0000-000000000098';
@@ -1818,7 +1960,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr3',
         'Test Facility PR3',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR3', 'active');
@@ -1849,7 +1995,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-cross-tenant@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       // Provider belongs to different tenant - should be rejected
       const response = await bookAppointment(
@@ -1886,7 +2032,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr4',
         'Test Facility PR4',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR4', 'active');
@@ -1905,7 +2055,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-candidate@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -1940,7 +2090,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr5',
         'Test Facility PR5',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR5', 'active');
@@ -1959,7 +2113,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-onboarded@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -1994,7 +2148,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr6',
         'Test Facility PR6',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR6', 'active');
@@ -2013,7 +2171,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-suspended@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -2048,7 +2206,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr7',
         'Test Facility PR7',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR7', 'active');
@@ -2067,7 +2229,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-separated@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -2102,7 +2264,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr8',
         'Test Facility PR8',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR8', 'active');
@@ -2115,7 +2281,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-no-assignment@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -2156,7 +2322,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr9-other',
         'Test Facility PR9 Other',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR9', 'active');
@@ -2175,7 +2345,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-other-facility@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
@@ -2210,7 +2380,11 @@ describe('POST /api/v1/appointments', () => {
         'test-facility-pr10',
         'Test Facility PR10',
       );
-      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R09_ADMINISTRATOR',
+      );
 
       // Create BC01 Patient fixture
       const { patientId } = await createPatient(tenantId, 'MRN-PR10', 'active');
@@ -2229,7 +2403,7 @@ describe('POST /api/v1/appointments', () => {
         'provider-revoked@example.com',
         TEST_PASSWORD,
       );
-      await selectContext(cookie, tenantId, organisationId, facilityId);
+      await selectContext(cookie, membershipId, organisationId, facilityId);
 
       const response = await bookAppointment(
         cookie,
