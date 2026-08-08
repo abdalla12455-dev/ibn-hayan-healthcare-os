@@ -80,13 +80,30 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
- * The nine permissions granted to R09 Clinic Administrator: the
- * seven context permissions plus `clinic_admin_overview:view` and
- * `appointments:view`. This list is EXPLICIT: it does NOT use
- * `PERMISSION_CODES` directly. Adding a future permission to
- * `PERMISSION_CODES` does NOT automatically grant it to R09 —
- * the new permission must be explicitly added to this list to be
- * granted.
+ * The eight permissions granted to R06 Receptionist and R07 Scheduler:
+ * the seven context permissions plus `appointments:book`. This list is
+ * EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
+ *
+ * Per the Stage 1C implementation specification, R06 and R07 are the
+ * clinic-side roles authorized to create appointments via
+ * `POST /api/v1/appointments`. The `appointments:book` permission
+ * is NOT granted to R13_SYSTEM_ADMINISTRATOR — platform-level identity
+ * must not accidentally gain clinic-booking access through a global
+ * permission.
+ */
+const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'appointments:book',
+] as const;
+
+/**
+ * The ten permissions granted to R09 Clinic Administrator: the
+ * seven context permissions plus `clinic_admin_overview:view`,
+ * `appointments:view`, and `appointments:book`. This list is
+ * EXPLICIT: it does NOT use `PERMISSION_CODES` directly. Adding
+ * a future permission to `PERMISSION_CODES` does NOT automatically
+ * grant it to R09 — the new permission must be explicitly added to
+ * this list to be granted.
  *
  * Per the audit-semantics restoration task Phase 5, this explicit
  * list is the smallest coherent least-privilege correction that
@@ -101,6 +118,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   ...HUMAN_CONTEXT_PERMISSIONS,
   'clinic_admin_overview:view',
   'appointments:view',
+  'appointments:book',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -176,16 +194,23 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   R03_PHARMACIST: HUMAN_CONTEXT_PERMISSIONS,
   R04_TECHNICIAN: HUMAN_CONTEXT_PERMISSIONS,
   R05_ALLIED_HEALTH_PROFESSIONAL: HUMAN_CONTEXT_PERMISSIONS,
-  R06_RECEPTIONIST: HUMAN_CONTEXT_PERMISSIONS,
-  R07_SCHEDULER: HUMAN_CONTEXT_PERMISSIONS,
+  // R06 Receptionist is authorized to create appointments via
+  // `POST /api/v1/appointments`. Per the Stage 1C specification,
+  // R06 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
+  R06_RECEPTIONIST: CLINIC_BOOKING_PERMISSIONS,
+  // R07 Scheduler is authorized to create appointments via
+  // `POST /api/v1/appointments`. Per the Stage 1C specification,
+  // R07 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
+  R07_SCHEDULER: CLINIC_BOOKING_PERMISSIONS,
   R08_BILLER: HUMAN_CONTEXT_PERMISSIONS,
   // R09 Clinic Administrator is the SOLE holder of the
-  // `clinic_admin_overview:view` and `appointments:view` permissions.
-  // The Clinic Admin Overview surface at `/clinic-admin` is the
-  // canonical application route for this role (per DESIGN_BIBLE.md §17.1).
-  // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 9 permissions),
-  // NOT `PERMISSION_CODES` (which would grant ALL future
-  // permissions automatically).
+  // `clinic_admin_overview:view` and `appointments:view` permissions,
+  // and also receives `appointments:book` for creating appointments
+  // via `POST /api/v1/appointments`. The Clinic Admin Overview surface
+  // at `/clinic-admin` is the canonical application route for this role
+  // (per DESIGN_BIBLE.md §17.1). R09 receives CLINIC_ADMIN_PERMISSIONS
+  // (explicit 10 permissions), NOT `PERMISSION_CODES` (which would
+  // grant ALL future permissions automatically).
   R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,
   R10_COMPLIANCE_OFFICER: HUMAN_CONTEXT_PERMISSIONS,
   R11_HR_MANAGER: HUMAN_CONTEXT_PERMISSIONS,

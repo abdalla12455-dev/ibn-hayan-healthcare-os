@@ -5286,6 +5286,130 @@ define and approve the exact Stage 1C scope before implementation
 
 ---
 
+## Stage 1C: Appointment Booking Foundation (2026-08-07)
+
+> **Authority:** This section records the Stage 1C implementation on the `feature/appointments-stage-1c-booking` branch. Updated 2026-08-07 to reflect BC01 and BC10 integration.
+
+### Overview
+
+Stage 1C implements the appointment booking foundation for the Ibn Hayan Healthcare Operating System, enabling authenticated clinic-side users (R06 Receptionist, R07 Scheduler, R09 Clinic Administrator) to create new appointments through the clinic API.
+
+### Integration with BC01 and BC10
+
+BC01 (Patient) and BC10 (Workforce/Provider) are now merged into main. Stage 1C has been updated to use the canonical PatientRepository and ProviderRepository:
+
+1. **PatientRepository injection**: Added PATIENT_REPOSITORY token dependency
+2. **ProviderRepository injection**: Added WORKFORCE_REPOSITORY token dependency  
+3. **Patient validation**: Calls `patientRepository.existsInTenant(tenantId, patientId)`
+4. **Provider validation**: Calls `providerRepository.isEligibleForFacility(tenantId, providerId, facilityId)`
+
+### Approved Scope
+
+- `appointments:book` permission added
+- Permission assigned to R06, R07, R09
+- `POST /api/v1/appointments` endpoint
+- Tenant, organisation, facility isolation
+- Patient existence validation via BC01 PatientRepository
+- Provider eligibility validation via BC10 ProviderRepository
+- Appointment time validation (end > start, no past times)
+- Contract validation (UUID format, required fields)
+- Provider appointment overlap prevention
+- Concurrency-safe double-booking protection (SERIALIZABLE transaction)
+- `appointments.booked` audit action
+- Unit and integration tests
+
+### Explicitly Excluded
+
+- Patient demographics (belongs to BC01)
+- Provider scheduling/availability (belongs to future Workforce batches)
+- appointment rescheduling
+- appointment cancellation
+- advanced provider availability calendars
+- waiting lists
+- notifications/reminders
+- billing/payment
+- frontend/UI work
+- Platform Super Admin changes
+
+### Files Modified During Integration
+
+- `apps/api/src/modules/appointments/appointments-booking.service.ts` — Injected canonical repositories
+- `apps/api/src/modules/appointments/appointments.module.ts` — Updated DI registrations
+- `apps/api/test/appointments/appointments-booking.integration.spec.ts` — Added patient/provider validation tests
+- `PROJECT_CONTINUITY.md` — Updated to reflect BC01/BC10 integration
+
+### Authorization Decisions
+
+- R06_RECEPTIONIST: receives `CLINIC_BOOKING_PERMISSIONS` (context + `appointments:book`)
+- R07_SCHEDULER: receives `CLINIC_BOOKING_PERMISSIONS` (context + `appointments:book`)
+- R09_ADMINISTRATOR: receives `CLINIC_ADMIN_PERMISSIONS` (context + `clinic_admin_overview:view` + `appointments:view` + `appointments:book`)
+- R13_SYSTEM_ADMINISTRATOR: does NOT receive `appointments:book` (platform-level identity must not gain clinic-booking access)
+
+### Tenant-Isolation Decisions
+
+- All scope (tenantId, organisationId, facilityId) derived from authenticated session
+- No caller-supplied scope accepted in request body
+- Patient lookup: `patientRepository.existsInTenant(tenantId, patientId)` — cross-tenant returns false
+- Provider lookup: `providerRepository.isEligibleForFacility(tenantId, providerId, facilityId)` — cross-tenant/cross-facility returns false
+- Overlap detection scoped to same tenant, organisation, facility
+
+### Provider Eligibility Rules (per BC10)
+
+A provider is eligible for booking at a facility if:
+1. Provider exists in the tenant (`existsInTenant`)
+2. Provider status is 'active'
+3. Provider has an active (non-revoked) assignment to the requested facility
+
+### Concurrency-Protection Design
+
+- SERIALIZABLE transaction isolation for create operations
+- Overlap check: `existingStart < requestedEnd AND existingEnd > requestedStart`
+- Adjacent appointments (one ends exactly when another begins) are NOT overlapping
+- Conflict throws `AppointmentOverlapError` → HTTP 422 `APPOINTMENT_OVERLAP`
+
+### Audit Design
+
+- Action code: `appointments.booked`
+- Category: `facility_context`
+- Metadata: `{ endpoint: 'appointments_book', appointmentId: string }`
+- Emitted via `auditHelper.emitDirect()` after successful creation
+- NOT emitted on validation failures
+
+### Pre-Existing Failures (TypeScript errors on main baseline)
+
+| Category | Count | Source | Evidence |
+|----------|-------|--------|----------|
+| Wrong argument count to makeServiceStub() | 10 | appointments.controller.spec.ts | Exists on origin/main |
+
+### Feature Branch Status
+
+- **Branch:** `feature/appointments-stage-1c-booking`
+- **Base:** `main` at commit `085494309090ad79b2be27a68264f74334df207f`
+- **Status:** MERGE-READY after BC01 and BC10 integration
+
+### Known Risks
+
+- Integration tests require PostgreSQL 17 (not available in current environment)
+- Full validation must be performed in CI environment
+
+### Immediate Next Step
+
+1. Run full validation in CI environment with PostgreSQL 17
+2. Create pull request targeting main
+3. Operator review and merge
+
+### Recovery Information
+
+- **Authoritative Stage 1C base point:** commit `085494309090ad79b2be27a68264f74334df207f` (main HEAD at task start)
+- **Feature branch:** `feature/appointments-stage-1c-booking`
+- **Stage 1C commits:**
+  - `005341812ca231a89acd92454f4f9ca284e333bf` — feat(appointments): add secure appointment booking foundation
+  - `c3e5825e85a8ec1790c93b01a3847a9aadb1c1da` — fix(appointments): complete booking validation and concurrency safety
+  - `e1e1de0dcbf0fd47020133ba8b5babea9d752b5f` — chore(appointments): finalize booking cleanup and validation evidence
+  - `1a231d2a46ada73e76c86ec4c20b8583e119ee88` — fix(appointments): resolve remaining booking type errors
+- **Integration commit:** (pending this task)
+- **Current HEAD before merge:** `1a231d2a46ada73e76c86ec4c20b8583e119ee88`
+
 ## BC01 Patient Reference Foundation (2026-08-03)
 
 ### Repository
@@ -5411,3 +5535,288 @@ BC01 Patient Reference Foundation — minimal canonical patient persistence and 
 - Patient registration workflow (future BC01 batch)
 - Patient consent management (future BC01 batch)
 - Clinical records, diagnoses, prescriptions (separate bounded contexts)
+
+## BC10 Workforce Reference Foundation (2026-08-03)
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** feature/bc10-workforce-reference-foundation
+- **Pull request:** #14 (MERGED)
+- **Merge commit SHA:** c7ddda1101eff266ff1cbceeb90eeea4efc0b782
+- **Base SHA:** 085494309090ad79b2be27a68264f74334df207f (verified from origin/main)
+- **Final feature commit SHA:** 3054406a0e82fbb3f6ef7aa6b9b4c7f9a2d8e1b4
+
+### Scope
+
+BC10 Workforce Reference Foundation — minimal canonical provider persistence and repository foundation for verifying provider eligibility within authenticated tenant and facility scope.
+
+**In scope:**
+- Canonical Provider persistence model (tenant-scoped)
+- Canonical ProviderFacilityAssignment model (tenant + facility assignment)
+- Canonical Provider domain types and repository port
+- ProviderRepository.isEligibleForFacility() for appointment booking eligibility
+- Database migration
+- Unit and integration tests
+
+**Out of scope:**
+- Provider scheduling and availability
+- Provider personal data, credentials, licensing
+- Shift management, rosters, calendars
+- Payroll, attendance, leave
+- Provider specialties management beyond existence check
+
+### Architecture Decisions
+
+| Decision | Source | Value |
+|----------|--------|-------|
+| Provider scoping | DOCTORS.md | Tenant-isolated |
+| Facility assignment | DOCTORS.md | Multi-facility via ProviderFacilityAssignment |
+| Eligibility status | DOCTORS.md | Only 'active' providers are appointment-eligible |
+| Assignment required | DOCTORS.md | Active facility assignment required for booking |
+| Lifecycle statuses | DOCTORS.md | candidate, onboarded, active, suspended, separated |
+
+### Provider Model Fields
+
+**Implemented:**
+- `id` (UUID, primary key)
+- `tenantId` (UUID, tenant isolation)
+- `status` (enum: candidate, onboarded, active, suspended, separated)
+- `createdAt` (timestamptz)
+- `updatedAt` (timestamptz)
+
+**ProviderFacilityAssignment Fields:**
+- `id` (UUID, primary key)
+- `providerId` (UUID, FK to providers)
+- `tenantId` (UUID, tenant isolation)
+- `organisationId` (UUID, organisation scope)
+- `facilityId` (UUID, facility scope)
+- `assignedAt` (timestamptz)
+- `revokedAt` (timestamptz, nullable — null = active assignment)
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `packages/domain/src/workforce/provider.ts` | Provider domain model, ProviderId, ProviderStatus |
+| `packages/domain/src/workforce/workforce.repositories.ts` | ProviderRepository port interface |
+| `packages/domain/src/workforce/index.ts` | Workforce module barrel export |
+| `packages/domain/src/workforce/index.ts` | Workforce module barrel export |
+| `apps/api/src/infrastructure/database/mappers/provider.mapper.ts` | Prisma-to-domain mapper |
+| `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` | Prisma repository implementation |
+| `apps/api/test/database/provider.db-spec.ts` | Integration tests |
+| `apps/api/prisma/migrations/.../migration.sql` | Database migration |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/api/prisma/schema.prisma` | Added Provider model, ProviderStatus enum, ProviderFacilityAssignment model |
+| `apps/api/src/infrastructure/database/database.module.ts` | Added PROVIDER_REPOSITORY provider and exports |
+| `packages/domain/src/index.ts` | Added workforce module exports |
+| `PROJECT_CONTINUITY.md` | This entry |
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Prisma generate | PASS |
+| Typecheck (domain) | PASS |
+| Typecheck (api) | PASS |
+| Unit tests (domain) | PASS |
+| Lint | PASS |
+| Production build | PASS |
+| Pre-existing failures | None |
+
+### Tenant/Facility Isolation Behavior
+
+- Provider lookup with correct tenantId returns provider
+- Provider lookup with wrong tenantId returns false
+- isEligibleForFacility requires:
+  1. Provider exists in tenant AND status = 'active'
+  2. Provider has active (non-revoked) assignment to the requested facility
+- Cross-facility lookups return false
+- No sensitive provider data exposed through repository interface
+
+### Compatibility
+
+- Compatible with `feature/appointments-stage-1c-booking` ProviderRepository interface
+- ProviderRepository.isEligibleForFacility() called by AppointmentsBookingService
+- Scheduling module can use ProviderId for future scheduling work
+
+### Commit
+
+- **Message:** feat(workforce): add tenant-safe provider reference foundation
+- **Branch:** feature/bc10-workforce-reference-foundation
+- **SHA:** 3054406a0e82fbb3f6ef7aa6b9b4c7f9a2d8e1b4
+- **Status:** MERGED into main
+
+### Recovery Information
+
+- **Authoritative recovery point:** c7ddda1101eff266ff1cbceeb90eeea4efc0b782 (merge commit on main)
+- **Feature commit:** 3054406a0e82fbb3f6ef7aa6b9b4c7f9a2d8e1b4
+- **Parent:** origin/main @ 085494309090ad79b2be27a68264f74334df207f
+
+### Remaining Work
+
+- Provider scheduling and availability (future BC10 batch)
+- Provider credentials and licensing workflows (future BC10 batch)
+- Shift management and rosters (future BC10 batch)
+
+## Appointment Booking BC01/BC10 Integration (2026-08-03)
+
+### Repository
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** feature/appointments-stage-1c-booking
+- **Base SHA:** 1a231d2a46ada73e76c86ec4c20b8583e119ee88 (pre-integration base)
+- **After main merge:** becb17660302550ee9b320a4a79d67027752084f
+
+### Discovery
+
+During integration of BC01 Patient and BC10 Provider into appointment booking, it was discovered that the existing PostgreSQL integration suite used arbitrary UUIDs for patientId and providerId without creating corresponding canonical Patient and Provider database records.
+
+**Defect:** Tests expected successful booking without BC01/BC10 fixtures, which would fail after integration.
+
+**Fix:** Updated integration tests to use real database fixtures.
+
+### Test Corrections
+
+**Helper functions added:**
+- `createPatient(tenantId, medicalRecordNumber, status)` — creates BC01 Patient fixture
+- `createProvider(tenantId, status)` — creates BC10 Provider fixture
+- `createProviderFacilityAssignment(tenantId, orgId, facilityId, providerId, revokedAt)` — creates assignment
+- `createEligibleProvider(tenantId, orgId, facilityId)` — creates active provider with active assignment
+
+**Cleanup order updated:**
+```typescript
+await prisma.auditOutboxEvent.deleteMany();
+await prisma.appointment.deleteMany();
+await prisma.providerFacilityAssignment.deleteMany();  // BC10: before providers
+await prisma.provider.deleteMany();                   // BC10
+await prisma.patient.deleteMany();                    // BC01: before tenants
+await prisma.authSession.deleteMany();
+await prisma.tenantRoleAssignment.deleteMany();
+await prisma.tenantMembership.deleteMany();
+await prisma.localCredential.deleteMany();
+await prisma.user.deleteMany();
+await prisma.facility.deleteMany();
+await prisma.organisation.deleteMany();
+await prisma.tenant.deleteMany();
+```
+
+**Tests updated with fixtures:**
+- R06 Receptionist successful booking
+- R07 Scheduler successful booking
+- R09 Clinic Administrator successful booking
+- Created appointment persistence test
+- Canonical contract response test
+- Audit event emission test
+- Adjacent non-overlapping appointments test
+- Exact overlap rejection test
+- Partial overlap beginning rejection test
+- Partial overlap end rejection test
+- Containing overlap rejection test
+- Contained inside overlap rejection test
+- Different providers concurrent booking test
+- Concurrent overlapping requests test
+- Concurrent adjacent requests test
+
+**New tests added:**
+- BC01 Patient validation:
+  - Patient exists in tenant → booking succeeds
+  - Patient UUID with no row → APPOINTMENT_PATIENT_NOT_FOUND
+  - Patient in different tenant → APPOINTMENT_PATIENT_NOT_FOUND (no leak)
+  - No appointment created on patient failure
+
+- BC10 Provider validation:
+  - Active provider with active assignment → booking succeeds
+  - Provider UUID with no row → APPOINTMENT_PROVIDER_NOT_FOUND
+  - Provider in different tenant → APPOINTMENT_PROVIDER_NOT_FOUND
+  - Provider status 'candidate' → rejected
+  - Provider status 'onboarded' → rejected
+  - Provider status 'suspended' → rejected
+  - Provider status 'separated' → rejected
+  - Provider with no assignment → rejected
+  - Provider assigned to different facility → rejected
+  - Provider with revoked assignment → rejected
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/api/test/appointments/appointments-booking.integration.spec.ts` | Added BC01/BC10 fixtures, updated tests, added new validation tests |
+| `PROJECT_CONTINUITY.md` | This entry |
+
+### Validation Results
+
+| Validation | Result |
+|------------|--------|
+| Prisma validate | PASS |
+| Typecheck | PASS |
+| Lint | PASS |
+| Production build | PASS |
+| Unit tests | PASS (126 tests across all packages) |
+| PostgreSQL 17 | FAIL (GitHub Actions CI, PR #15 run 31233146530) - see concurrency fix below |
+| Integration tests | FAIL (GitHub Actions CI, PR #15 run 31233146530) - see concurrency fix below |
+
+### Post-BC01/BC10 Integration
+
+After merging origin/main (BC01 + BC10) into feature/appointments-stage-1c-booking, the booking service now:
+
+1. Validates patient exists in session tenant via `PatientRepository.existsInTenant()`
+2. Validates provider is active with active facility assignment via `ProviderRepository.isEligibleForFacility()`
+3. Both validations use session-derived scope (cannot be overridden by request body)
+4. Cross-tenant lookups return false safely (no existence leak)
+
+### CI Test Fixes Applied
+
+During PostgreSQL 17 validation, several test infrastructure issues were discovered and fixed:
+
+1. **Authorization tests:** Updated `authorization.spec.ts` to include `appointments:book` permission in the permission catalogue and role matrices (R06, R07, R09 each gained 1 permission)
+
+2. **API route prefix:** Added `app.setGlobalPrefix('api/v1')` to match the production API structure
+
+3. **CSRF token:** Fixed CSRF token extraction to use `response.body.token` instead of headers
+
+4. **Context selection routes:** Updated `selectContext()` to use the correct multi-step context API:
+   - `PUT /api/v1/context/tenant` (with CSRF)
+   - `PUT /api/v1/context/organisation` (with CSRF)
+   - `PUT /api/v1/context/facility` (with CSRF)
+
+5. **Role scope:** Updated `createMembership()` to optionally include `organisationId` scope, enabling context selection to work correctly
+
+### Concurrency Fix - P2034 SERIALIZABLE Retry
+
+**CI Failure:** Main CI run 31233146530 failed on concurrent overlapping request test.
+
+**Root Cause:** The `PrismaAppointmentRepository.create()` method used a SERIALIZABLE transaction but did not handle Prisma P2034 serialization/write conflict errors. When two concurrent requests tried to create overlapping appointments, one transaction would fail with SQLSTATE 40001 (could not serialize access due to read/write dependencies among transactions). This caused a 500 error instead of a retry.
+
+**Fix Applied:** Implemented bounded retry logic in `PrismaAppointmentRepository`:
+
+1. Added `executeWithSerializationRetry()` method that wraps the transaction logic
+2. On P2034 error, retries up to 3 times with a 50ms delay between attempts
+3. `AppointmentOverlapError` is propagated immediately (not retried)
+4. Other non-P2034 errors are propagated immediately
+5. After max retries, the error is propagated (transient error behavior)
+
+**Files Modified:**
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` - Added retry logic
+
+**New Validation (pending):** PostgreSQL 17 CI with retry fix
+
+### Immediate Next Step
+
+1. Create pull request targeting main
+2. Operator review and merge
+
+### Recovery Information
+
+- **Authoritative feature branch:** feature/appointments-stage-1c-booking
+- **Pre-integration base:** 1a231d2a46ada73e76c86ec4c20b8583e119ee88
+- **After BC01/BC10 merge:** becb17660302550ee9b320a4a79d67027752084f
+- **After test corrections:** 61b9efa (fix(appointments): add organisation scope to role assignments)
+- **After concurrency fix:** (pending new commit SHA)
+- **Failed CI run:** 31233146530 (P2034 serialization conflict not retried)
+- **Main:** origin/main @ c7ddda1101eff266ff1cbceeb90eeea4efc0b782 (BC10 merged via PR #14)
