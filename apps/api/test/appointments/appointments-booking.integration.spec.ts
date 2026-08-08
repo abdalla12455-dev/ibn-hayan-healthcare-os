@@ -10,6 +10,9 @@
  * - Authorization (R06, R07, R09 allowed; R13 denied; other roles denied)
  * - Authentication (session cookie validation)
  * - Tenant/organisation/facility context resolution
+ * - BC01 PatientRepository existence validation (Patient must exist in tenant)
+ * - BC10 ProviderRepository eligibility validation (Provider must be active
+ *   and have active facility assignment)
  * - Timestamp validation (end > start, no past times)
  * - Contract validation (UUID format, required fields)
  * - Provider overlap prevention
@@ -17,11 +20,11 @@
  * - Tenant isolation
  * - Concurrent overlap prevention
  *
- * NOTE: Patient and provider existence validation is NOT implemented in Stage 1C.
- * Per APPOINTMENTS.md Section 2.2, the Appointments module (BC06) queries the
- * Patient (BC01) and Workforce (BC10) bounded contexts for existence validation.
- * Those contexts are not yet implemented. This test suite accepts logical
- * patientId and providerId identifiers without existence verification.
+ * Per APPOINTMENTS.md Section 2.2 and the BC01/BC10 implementations:
+ * - Patient existence is verified via PatientRepository.existsInTenant()
+ * - Provider eligibility is verified via ProviderRepository.isEligibleForFacility()
+ * - Both use session-derived tenantId; cross-tenant lookups return null/false
+ * - No caller-controlled tenant scope is accepted
  *
  * Per the task specification, these tests require PostgreSQL 17.
  * They are NOT run locally without PostgreSQL 17.
@@ -106,8 +109,14 @@ const ORIGIN = 'http://localhost:3000';
 // ---------------------------------------------------------------------------
 
 async function truncateAll(): Promise<void> {
+  // Delete in dependency order: children before parents
   await prisma.auditOutboxEvent.deleteMany();
   await prisma.appointment.deleteMany();
+  // BC10: Provider facility assignments must be deleted before providers
+  await prisma.providerFacilityAssignment.deleteMany();
+  await prisma.provider.deleteMany();
+  // BC01: Patients must be deleted before tenants
+  await prisma.patient.deleteMany();
   await prisma.authSession.deleteMany();
   await prisma.tenantRoleAssignment.deleteMany();
   await prisma.tenantMembership.deleteMany();
@@ -192,6 +201,85 @@ async function createMembership(
     roleCode: role as PlatformRoleCode,
   });
   return { membershipId: membership.id };
+}
+
+// ---------------------------------------------------------------------------
+// BC01 Patient helpers
+// ---------------------------------------------------------------------------
+
+async function createPatient(
+  tenantId: string,
+  medicalRecordNumber: string,
+  status: 'active' | 'inactive' | 'archived' = 'active',
+): Promise<{ patientId: string }> {
+  const patient = await prisma.patient.create({
+    data: {
+      tenantId,
+      medicalRecordNumber,
+      status,
+    },
+  });
+  return { patientId: patient.id };
+}
+
+// ---------------------------------------------------------------------------
+// BC10 Provider helpers
+// ---------------------------------------------------------------------------
+
+type ProviderStatus =
+  'candidate' | 'onboarded' | 'active' | 'suspended' | 'separated';
+
+async function createProvider(
+  tenantId: string,
+  status: ProviderStatus = 'active',
+): Promise<{ providerId: string }> {
+  const provider = await prisma.provider.create({
+    data: {
+      tenantId,
+      status,
+    },
+  });
+  return { providerId: provider.id };
+}
+
+async function createProviderFacilityAssignment(
+  tenantId: string,
+  organisationId: string,
+  facilityId: string,
+  providerId: string,
+  revokedAt: Date | null = null,
+): Promise<{ assignmentId: string }> {
+  const assignment = await prisma.providerFacilityAssignment.create({
+    data: {
+      tenantId,
+      organisationId,
+      facilityId,
+      providerId,
+      revokedAt,
+    },
+  });
+  return { assignmentId: assignment.id };
+}
+
+/**
+ * Creates a fully eligible provider for booking tests:
+ * - Active provider
+ * - Active (non-revoked) facility assignment
+ */
+async function createEligibleProvider(
+  tenantId: string,
+  organisationId: string,
+  facilityId: string,
+): Promise<{ providerId: string }> {
+  const { providerId } = await createProvider(tenantId, 'active');
+  await createProviderFacilityAssignment(
+    tenantId,
+    organisationId,
+    facilityId,
+    providerId,
+    null, // active assignment
+  );
+  return { providerId };
 }
 
 async function loginUser(email: string, password: string): Promise<string> {
@@ -328,13 +416,17 @@ describe('POST /api/v1/appointments', () => {
       // R06_RECEPTIONIST role needed for R06 access
       await createMembership(userId, tenantId, 'R06_RECEPTIONIST');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-001', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       // Login and select context
       const cookie = await loginUser('r06@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      // Book appointment
-      const patientId = '00000000-0000-0000-0000-000000000001';
-      const providerId = '00000000-0000-0000-0000-000000000002';
 
       const response = await bookAppointment(
         cookie,
@@ -369,11 +461,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R07_SCHEDULER');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-002', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('r07@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000003';
-      const providerId = '00000000-0000-0000-0000-000000000004';
 
       const response = await bookAppointment(
         cookie,
@@ -404,11 +501,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-003', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('r09@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000005';
-      const providerId = '00000000-0000-0000-0000-000000000006';
 
       const response = await bookAppointment(
         cookie,
@@ -442,11 +544,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-004', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('persist@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000007';
-      const providerId = '00000000-0000-0000-0000-000000000008';
 
       const response = await bookAppointment(
         cookie,
@@ -489,11 +596,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-005', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('contract@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000009';
-      const providerId = '00000000-0000-0000-0000-000000000010';
 
       const response = await bookAppointment(
         cookie,
@@ -530,11 +642,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-006', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('audit@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000011';
-      const providerId = '00000000-0000-0000-0000-000000000012';
 
       await bookAppointment(
         cookie,
@@ -569,11 +686,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-007', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('adjacent@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000013';
-      const providerId = '00000000-0000-0000-0000-000000000014';
 
       // Book first appointment 09:00-09:30
       const response1 = await bookAppointment(
@@ -896,11 +1018,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-015', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('overlap1@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000030';
-      const providerId = '00000000-0000-0000-0000-000000000031';
 
       // Book first appointment
       await bookAppointment(
@@ -948,11 +1075,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-016', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('overlap2@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000032';
-      const providerId = '00000000-0000-0000-0000-000000000033';
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1000,11 +1132,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-017', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('overlap3@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000034';
-      const providerId = '00000000-0000-0000-0000-000000000035';
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1052,11 +1189,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-018', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('overlap4@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000036';
-      const providerId = '00000000-0000-0000-0000-000000000037';
 
       // Book first appointment 09:00-09:30
       await bookAppointment(
@@ -1104,11 +1246,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-019', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('overlap5@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000038';
-      const providerId = '00000000-0000-0000-0000-000000000039';
 
       // Book first appointment 08:30-10:00
       await bookAppointment(
@@ -1156,15 +1303,24 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures (two providers)
+      const { patientId } = await createPatient(tenantId, 'MRN-020', 'active');
+      const { providerId: providerId1 } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+      const { providerId: providerId2 } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser(
         'diff-provider@example.com',
         TEST_PASSWORD,
       );
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000040';
-      const providerId1 = '00000000-0000-0000-0000-000000000041';
-      const providerId2 = '00000000-0000-0000-0000-000000000042';
 
       // Book with provider 1
       const response1 = await bookAppointment(
@@ -1228,11 +1384,16 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-021', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser('concurrent@example.com', TEST_PASSWORD);
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000050';
-      const providerId = '00000000-0000-0000-0000-000000000051';
 
       // Send two concurrent overlapping booking requests
       const [response1, response2] = await Promise.all([
@@ -1307,14 +1468,19 @@ describe('POST /api/v1/appointments', () => {
       );
       await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
 
+      // Create BC01 Patient and BC10 Provider fixtures
+      const { patientId } = await createPatient(tenantId, 'MRN-022', 'active');
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
       const cookie = await loginUser(
         'concurrent-adjacent@example.com',
         TEST_PASSWORD,
       );
       await selectContext(cookie, tenantId, organisationId, facilityId);
-
-      const patientId = '00000000-0000-0000-0000-000000000052';
-      const providerId = '00000000-0000-0000-0000-000000000053';
 
       // Send two concurrent non-overlapping booking requests
       // First: 09:00-09:30, Second: 09:30-10:00
@@ -1351,6 +1517,719 @@ describe('POST /api/v1/appointments', () => {
         },
       });
       expect(appointments.length).toBe(2);
+    });
+  });
+
+  // ===== BC01 Patient validation tests =====
+
+  describe('BC01 Patient validation', () => {
+    it('Booking succeeds when patient exists in authenticated tenant', async () => {
+      const { userId } = await createUser(
+        'patient-ok@example.com',
+        'Patient OK User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-p1',
+        'Test Tenant P1',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-p1',
+        'Test Organisation P1',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-p1',
+        'Test Facility P1',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-P1', 'active');
+
+      // Create BC10 Provider fixture
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
+      const cookie = await loginUser('patient-ok@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(201);
+    });
+
+    it('Booking fails when patient UUID has no corresponding row', async () => {
+      const { userId } = await createUser(
+        'patient-missing@example.com',
+        'Patient Missing User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-p2',
+        'Test Tenant P2',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-p2',
+        'Test Organisation P2',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-p2',
+        'Test Facility P2',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC10 Provider fixture (but NOT patient)
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
+      const cookie = await loginUser(
+        'patient-missing@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // Use arbitrary UUID that has no corresponding Patient row
+      const nonExistentPatientId = '00000000-0000-0000-0000-000000000099';
+
+      const response = await bookAppointment(
+        cookie,
+        nonExistentPatientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PATIENT_NOT_FOUND');
+    });
+
+    it('Booking fails when patient belongs to different tenant', async () => {
+      const { userId } = await createUser(
+        'patient-cross-tenant@example.com',
+        'Patient Cross Tenant User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-p3',
+        'Test Tenant P3',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-p3',
+        'Test Organisation P3',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-p3',
+        'Test Facility P3',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create a different tenant with a patient
+      const { tenantId: otherTenantId } = await createTenant(
+        'test-tenant-p3-other',
+        'Test Tenant P3 Other',
+      );
+      const { patientId } = await createPatient(
+        otherTenantId,
+        'MRN-P3-OTHER',
+        'active',
+      );
+
+      // Create BC10 Provider fixture in the authenticated tenant
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
+      const cookie = await loginUser(
+        'patient-cross-tenant@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // Patient belongs to different tenant - should be rejected
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Returns same error as missing patient (no existence leak)
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PATIENT_NOT_FOUND');
+
+      // Verify no appointment was created
+      const appointmentCount = await prisma.appointment.count({
+        where: { tenantId },
+      });
+      expect(appointmentCount).toBe(0);
+    });
+  });
+
+  // ===== BC10 Provider validation tests =====
+
+  describe('BC10 Provider validation', () => {
+    it('Booking succeeds when provider is active and has active facility assignment', async () => {
+      const { userId } = await createUser(
+        'provider-ok@example.com',
+        'Provider OK User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr1',
+        'Test Tenant PR1',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr1',
+        'Test Organisation PR1',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr1',
+        'Test Facility PR1',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR1', 'active');
+
+      // Create fully eligible BC10 Provider (active + active assignment)
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        organisationId,
+        facilityId,
+      );
+
+      const cookie = await loginUser('provider-ok@example.com', TEST_PASSWORD);
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(201);
+    });
+
+    it('Booking fails when provider UUID has no corresponding row', async () => {
+      const { userId } = await createUser(
+        'provider-missing@example.com',
+        'Provider Missing User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr2',
+        'Test Tenant PR2',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr2',
+        'Test Organisation PR2',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr2',
+        'Test Facility PR2',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture (but NOT provider)
+      const { patientId } = await createPatient(tenantId, 'MRN-PR2', 'active');
+
+      const cookie = await loginUser(
+        'provider-missing@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // Use arbitrary UUID that has no corresponding Provider row
+      const nonExistentProviderId = '00000000-0000-0000-0000-000000000098';
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        nonExistentProviderId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider belongs to different tenant', async () => {
+      const { userId } = await createUser(
+        'provider-cross-tenant@example.com',
+        'Provider Cross Tenant User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr3',
+        'Test Tenant PR3',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr3',
+        'Test Organisation PR3',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr3',
+        'Test Facility PR3',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR3', 'active');
+
+      // Create a different tenant with an active provider
+      const { tenantId: otherTenantId } = await createTenant(
+        'test-tenant-pr3-other',
+        'Test Tenant PR3 Other',
+      );
+      const { organisationId: otherOrgId } = await createOrganisation(
+        otherTenantId,
+        'test-org-pr3-other',
+        'Test Org PR3 Other',
+      );
+      const { facilityId: otherFacilityId } = await createFacility(
+        otherTenantId,
+        otherOrgId,
+        'test-facility-pr3-other',
+        'Test Facility PR3 Other',
+      );
+      const { providerId } = await createEligibleProvider(
+        otherTenantId,
+        otherOrgId,
+        otherFacilityId,
+      );
+
+      const cookie = await loginUser(
+        'provider-cross-tenant@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      // Provider belongs to different tenant - should be rejected
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      // Returns same error as missing provider (no existence leak)
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider status is candidate', async () => {
+      const { userId } = await createUser(
+        'provider-candidate@example.com',
+        'Provider Candidate User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr4',
+        'Test Tenant PR4',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr4',
+        'Test Organisation PR4',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr4',
+        'Test Facility PR4',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR4', 'active');
+
+      // Create provider with candidate status (not eligible)
+      const { providerId } = await createProvider(tenantId, 'candidate');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        null, // active assignment but candidate status
+      );
+
+      const cookie = await loginUser(
+        'provider-candidate@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider status is onboarded', async () => {
+      const { userId } = await createUser(
+        'provider-onboarded@example.com',
+        'Provider Onboarded User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr5',
+        'Test Tenant PR5',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr5',
+        'Test Organisation PR5',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr5',
+        'Test Facility PR5',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR5', 'active');
+
+      // Create provider with onboarded status (not eligible)
+      const { providerId } = await createProvider(tenantId, 'onboarded');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        null,
+      );
+
+      const cookie = await loginUser(
+        'provider-onboarded@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider status is suspended', async () => {
+      const { userId } = await createUser(
+        'provider-suspended@example.com',
+        'Provider Suspended User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr6',
+        'Test Tenant PR6',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr6',
+        'Test Organisation PR6',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr6',
+        'Test Facility PR6',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR6', 'active');
+
+      // Create provider with suspended status
+      const { providerId } = await createProvider(tenantId, 'suspended');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        null,
+      );
+
+      const cookie = await loginUser(
+        'provider-suspended@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider status is separated', async () => {
+      const { userId } = await createUser(
+        'provider-separated@example.com',
+        'Provider Separated User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr7',
+        'Test Tenant PR7',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr7',
+        'Test Organisation PR7',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr7',
+        'Test Facility PR7',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR7', 'active');
+
+      // Create provider with separated status
+      const { providerId } = await createProvider(tenantId, 'separated');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        null,
+      );
+
+      const cookie = await loginUser(
+        'provider-separated@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider has no facility assignment', async () => {
+      const { userId } = await createUser(
+        'provider-no-assignment@example.com',
+        'Provider No Assignment User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr8',
+        'Test Tenant PR8',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr8',
+        'Test Organisation PR8',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr8',
+        'Test Facility PR8',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR8', 'active');
+
+      // Create active provider but NO facility assignment
+      const { providerId } = await createProvider(tenantId, 'active');
+      // Note: NO createProviderFacilityAssignment call
+
+      const cookie = await loginUser(
+        'provider-no-assignment@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider is assigned to different facility', async () => {
+      const { userId } = await createUser(
+        'provider-other-facility@example.com',
+        'Provider Other Facility User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr9',
+        'Test Tenant PR9',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr9',
+        'Test Organisation PR9',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr9',
+        'Test Facility PR9',
+      );
+      const { facilityId: otherFacilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr9-other',
+        'Test Facility PR9 Other',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR9', 'active');
+
+      // Create active provider assigned to OTHER facility (not the authenticated one)
+      const { providerId } = await createProvider(tenantId, 'active');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        otherFacilityId, // assigned to different facility
+        providerId,
+        null,
+      );
+
+      const cookie = await loginUser(
+        'provider-other-facility@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
+    });
+
+    it('Booking fails when provider assignment is revoked', async () => {
+      const { userId } = await createUser(
+        'provider-revoked@example.com',
+        'Provider Revoked User',
+      );
+      const { tenantId } = await createTenant(
+        'test-tenant-pr10',
+        'Test Tenant PR10',
+      );
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'test-org-pr10',
+        'Test Organisation PR10',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'test-facility-pr10',
+        'Test Facility PR10',
+      );
+      await createMembership(userId, tenantId, 'R09_ADMINISTRATOR');
+
+      // Create BC01 Patient fixture
+      const { patientId } = await createPatient(tenantId, 'MRN-PR10', 'active');
+
+      // Create active provider with REVOKED assignment
+      const { providerId } = await createProvider(tenantId, 'active');
+      await createProviderFacilityAssignment(
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        new Date('2025-01-01T00:00:00.000Z'), // revokedAt in the past
+      );
+
+      const cookie = await loginUser(
+        'provider-revoked@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, tenantId, organisationId, facilityId);
+
+      const response = await bookAppointment(
+        cookie,
+        patientId,
+        providerId,
+        FUTURE_START,
+        FUTURE_END,
+        'consultation',
+      );
+
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe('APPOINTMENT_PROVIDER_NOT_FOUND');
     });
   });
 });
