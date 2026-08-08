@@ -306,7 +306,7 @@ async function selectContext(
   organisationId: string,
   facilityId: string,
 ): Promise<void> {
-  await request(server)
+  const response = await request(server)
     .post('/api/v1/context/select')
     .set('Origin', ORIGIN)
     .set('Cookie', cookie)
@@ -315,6 +315,11 @@ async function selectContext(
       activeOrganisationId: organisationId,
       activeFacilityId: facilityId,
     });
+  if (response.status >= 400) {
+    throw new Error(
+      `selectContext failed: status=${response.status}, body=${JSON.stringify(response.body)}`,
+    );
+  }
 }
 
 async function bookAppointment(
