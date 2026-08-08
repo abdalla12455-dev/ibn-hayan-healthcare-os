@@ -5758,8 +5758,8 @@ await prisma.tenant.deleteMany();
 | Lint | PASS |
 | Production build | PASS |
 | Unit tests | PASS (126 tests across all packages) |
-| PostgreSQL 17 | PASS (GitHub Actions CI, PR #15) |
-| Integration tests | PASS (GitHub Actions CI, PR #15) |
+| PostgreSQL 17 | FAIL (GitHub Actions CI, PR #15 run 31233146530) - see concurrency fix below |
+| Integration tests | FAIL (GitHub Actions CI, PR #15 run 31233146530) - see concurrency fix below |
 
 ### Post-BC01/BC10 Integration
 
@@ -5787,6 +5787,25 @@ During PostgreSQL 17 validation, several test infrastructure issues were discove
 
 5. **Role scope:** Updated `createMembership()` to optionally include `organisationId` scope, enabling context selection to work correctly
 
+### Concurrency Fix - P2034 SERIALIZABLE Retry
+
+**CI Failure:** Main CI run 31233146530 failed on concurrent overlapping request test.
+
+**Root Cause:** The `PrismaAppointmentRepository.create()` method used a SERIALIZABLE transaction but did not handle Prisma P2034 serialization/write conflict errors. When two concurrent requests tried to create overlapping appointments, one transaction would fail with SQLSTATE 40001 (could not serialize access due to read/write dependencies among transactions). This caused a 500 error instead of a retry.
+
+**Fix Applied:** Implemented bounded retry logic in `PrismaAppointmentRepository`:
+
+1. Added `executeWithSerializationRetry()` method that wraps the transaction logic
+2. On P2034 error, retries up to 3 times with a 50ms delay between attempts
+3. `AppointmentOverlapError` is propagated immediately (not retried)
+4. Other non-P2034 errors are propagated immediately
+5. After max retries, the error is propagated (transient error behavior)
+
+**Files Modified:**
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` - Added retry logic
+
+**New Validation (pending):** PostgreSQL 17 CI with retry fix
+
 ### Immediate Next Step
 
 1. Create pull request targeting main
@@ -5798,4 +5817,6 @@ During PostgreSQL 17 validation, several test infrastructure issues were discove
 - **Pre-integration base:** 1a231d2a46ada73e76c86ec4c20b8583e119ee88
 - **After BC01/BC10 merge:** becb17660302550ee9b320a4a79d67027752084f
 - **After test corrections:** 61b9efa (fix(appointments): add organisation scope to role assignments)
+- **After concurrency fix:** (pending new commit SHA)
+- **Failed CI run:** 31233146530 (P2034 serialization conflict not retried)
 - **Main:** origin/main @ c7ddda1101eff266ff1cbceeb90eeea4efc0b782 (BC10 merged via PR #14)
