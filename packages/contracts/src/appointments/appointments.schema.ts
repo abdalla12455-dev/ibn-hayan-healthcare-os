@@ -422,3 +422,137 @@ export const CancellationErrorResponseSchema = z
 export type CancellationErrorResponse = z.infer<
   typeof CancellationErrorResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// RescheduleAppointmentRequest
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical request schema for rescheduling an appointment via
+ * `POST /api/v1/appointments/:id/reschedule`.
+ *
+ * All scope (tenantId, organisationId, facilityId) is derived from
+ * the authenticated session context. The request body contains ONLY
+ * the replacement slot (scheduledStart, scheduledEnd) and the
+ * reschedule reason.
+ *
+ * Per STATUS_CODES.md §4.1, a reschedule is "recorded with old slot,
+ * new slot, reason". The reason is a required free-text string (no
+ * canonical reschedule-reason enum exists in ENUMS.md). The actor is
+ * derived from the authenticated session and recorded in the audit
+ * event, NOT in the request body.
+ *
+ * Stage 1E rescheduling is a time-only operation: the replacement
+ * appointment inherits patientId, providerId, typeCode, tenantId,
+ * organisationId, and facilityId from the original appointment. The
+ * request does NOT permit changing the patient, provider, type,
+ * facility, or status. This is the safest minimum consistent with
+ * canonical documentation ("old slot, new slot, reason").
+ *
+ * The request does NOT include:
+ * - tenantId, organisationId, or facilityId (derived from session)
+ * - status (callers cannot supply arbitrary status values; the
+ *   transition is always booked → cancelled + new booked)
+ * - patientId, providerId, or typeCode (inherited from the original)
+ * - actorId (derived from the authenticated session)
+ *
+ * The schema is `.strict()` so that adding an unexpected field at
+ * the boundary is rejected by the Zod parse.
+ */
+export const RescheduleAppointmentRequestSchema = z
+  .object({
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    reason: z.string().min(1).max(500),
+  })
+  .strict()
+  .refine(
+    (data) => {
+      const start = new Date(data.scheduledStart);
+      const end = new Date(data.scheduledEnd);
+      return end > start;
+    },
+    {
+      message: 'scheduledEnd must be strictly after scheduledStart',
+      path: ['scheduledEnd'],
+    },
+  );
+
+export type RescheduleAppointmentRequest = z.infer<
+  typeof RescheduleAppointmentRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// RescheduleAppointmentResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical response schema for a successful appointment
+ * reschedule via `POST /api/v1/appointments/:id/reschedule`.
+ *
+ * Returns the replacement (new) appointment with all persisted fields.
+ * The replacement's `status` is always `booked` (the canonical
+ * "Scheduled" status in the implemented lifecycle). The original
+ * appointment is transitioned to `cancelled` but is NOT returned in
+ * the response body; its id is carried in the audit event metadata
+ * for traceability.
+ */
+export const RescheduleAppointmentResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict();
+
+export type RescheduleAppointmentResponse = z.infer<
+  typeof RescheduleAppointmentResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// ReschedulingErrorResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical error response schema for the appointment reschedule
+ * endpoint.
+ *
+ * Error codes:
+ * - `APPOINTMENT_VALIDATION_ERROR`: invalid request body (e.g. missing
+ *   or too-long reason, end not after start, invalid timestamp format).
+ * - `APPOINTMENT_NOT_FOUND`: the appointment does not exist or is not
+ *   accessible in the authenticated tenant, organisation, or facility.
+ *   The same error is returned regardless of whether the appointment
+ *   does not exist or exists in another scope (no existence leak).
+ * - `APPOINTMENT_INVALID_TRANSITION`: the appointment is in a source
+ *   state that is not canonically reschedulable in this stage (only
+ *   `booked` is reschedulable).
+ * - `APPOINTMENT_OVERLAP`: the requested replacement slot overlaps
+ *   with an existing blocking appointment for the same provider.
+ * - `APPOINTMENT_PAST_TIME`: the requested replacement start time is
+ *   in the past.
+ */
+export const ReschedulingErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum([
+          'APPOINTMENT_VALIDATION_ERROR',
+          'APPOINTMENT_NOT_FOUND',
+          'APPOINTMENT_INVALID_TRANSITION',
+          'APPOINTMENT_OVERLAP',
+          'APPOINTMENT_PAST_TIME',
+        ]),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type ReschedulingErrorResponse = z.infer<
+  typeof ReschedulingErrorResponseSchema
+>;

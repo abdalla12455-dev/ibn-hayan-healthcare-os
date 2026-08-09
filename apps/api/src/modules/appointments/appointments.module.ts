@@ -8,6 +8,7 @@ import { AppointmentsController } from './appointments.controller.js';
 import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
+import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 
 /**
  * Appointments module.
@@ -21,6 +22,10 @@ import { AppointmentsCancellationService } from './appointments-cancellation.ser
  * - `POST /api/v1/appointments/:id/cancel` for cancelling appointments,
  *   authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
  *   Administrator roles (requires `appointments:cancel` permission).
+ * - `POST /api/v1/appointments/:id/reschedule` for rescheduling
+ *   appointments, authorized for R06 Receptionist, R07 Scheduler, and
+ *   R09 Clinic Administrator roles (requires `appointments:reschedule`
+ *   permission).
  *
  * The module depends on:
  * - {@link DatabaseModule} for the AppointmentRepository,
@@ -43,6 +48,7 @@ import { AppointmentsCancellationService } from './appointments-cancellation.ser
     AppointmentsTodayService,
     AppointmentsBookingService,
     AppointmentsCancellationService,
+    AppointmentsReschedulingService,
   ],
 })
 export class AppointmentsModule {}

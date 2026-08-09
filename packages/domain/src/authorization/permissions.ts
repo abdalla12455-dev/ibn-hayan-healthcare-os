@@ -80,7 +80,8 @@ export type PermissionCode =
   | 'clinic_admin_overview:view'
   | 'appointments:view'
   | 'appointments:book'
-  | 'appointments:cancel';
+  | 'appointments:cancel'
+  | 'appointments:reschedule';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -114,6 +115,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'appointments:view',
   'appointments:book',
   'appointments:cancel',
+  'appointments:reschedule',
 ] as const;
 
 /**

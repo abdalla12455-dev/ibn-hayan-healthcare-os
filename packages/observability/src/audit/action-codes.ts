@@ -369,7 +369,23 @@ export type ClinicAdminActionCode =
  * `cancelled`; an idempotent re-cancellation of an already-cancelled
  * appointment does NOT emit a duplicate event.
  *
- * All three actions are mapped to the `facility_context` category
+ * The `appointments.rescheduled` event is emitted after a successful
+ * appointment reschedule via
+ * `POST /api/v1/appointments/:id/reschedule`. Per the Stage 1E
+ * implementation specification and STATUS_CODES.md §4.1 ("Reschedule
+ * recorded with old slot, new slot, reason"), the event metadata
+ * carries
+ * `{ endpoint: 'appointments_reschedule', originalAppointmentId: string,
+ * replacementAppointmentId: string, reason: string }` — the original
+ * and replacement appointment IDs for traceability and the
+ * caller-supplied reschedule reason. No patient details, provider
+ * details, or appointment timing information are carried. The event
+ * is emitted ONLY after the repository commits the atomic reschedule
+ * (original → cancelled, replacement → booked); a failed reschedule
+ * does NOT emit the event. Exactly one event is emitted per
+ * successful reschedule.
+ *
+ * All four actions are mapped to the `facility_context` category
  * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
@@ -385,6 +401,7 @@ export const APPOINTMENTS_ACTION_CODES = [
   'appointments.schedule.viewed',
   'appointments.booked',
   'appointments.cancelled',
+  'appointments.rescheduled',
 ] as const;
 
 export type AppointmentsActionCode =

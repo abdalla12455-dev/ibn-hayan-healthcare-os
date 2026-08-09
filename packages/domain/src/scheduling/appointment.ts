@@ -182,3 +182,67 @@ export type AppointmentCancelResult =
       readonly appointment: Appointment;
       readonly transitioned: boolean;
     };
+
+/**
+ * Input type for rescheduling an existing appointment.
+ *
+ * Stage 1E rescheduling is a time-only operation: the replacement
+ * appointment inherits patientId, providerId, typeCode, tenantId,
+ * organisationId, and facilityId from the original appointment. Only
+ * the scheduled slot (scheduledStart, scheduledEnd) changes. The
+ * reschedule reason is carried in the audit event metadata, not in
+ * this input (mirroring the cancellation-reason persistence decision).
+ *
+ * Per STATUS_CODES.md §4.1, the canonical reschedule transition is:
+ * "New appointment created with Scheduled status; original marked
+ * Cancelled." In the implemented lifecycle the `booked` status is the
+ * canonical "Scheduled" status (the implemented enum does not contain
+ * a literal `scheduled` value), so the replacement is created as
+ * `booked` and the original transitions to `cancelled`.
+ */
+export interface AppointmentRescheduleInput {
+  readonly scheduledStart: Date;
+  readonly scheduledEnd: Date;
+}
+
+/**
+ * The outcome of an appointment reschedule attempt.
+ *
+ * Per STATUS_CODES.md §4.1, rescheduling transitions the original
+ * appointment out of its active slot and creates a replacement
+ * appointment for the new slot: "New appointment created with
+ * Scheduled status; original marked Cancelled." The operation is
+ * atomic: a failure in creating the replacement MUST NOT leave the
+ * original cancelled.
+ *
+ * The result is discriminated by `outcome`:
+ *
+ * - `not_found`: no appointment matches the supplied scoped
+ *   identifiers. The caller MUST treat this identically to a
+ *   nonexistent appointment (no cross-tenant/organisation/facility
+ *   existence leak).
+ * - `invalid_source_state`: the appointment exists in scope but is in
+ *   a source state that is not canonically reschedulable in this
+ *   stage (only `booked` is reschedulable). The appointment is
+ *   returned so the service can map the error without a second read.
+ * - `rescheduled`: the original appointment is now `cancelled` and a
+ *   new replacement appointment has been created as `booked`. Both
+ *   appointments are returned for the response and audit correlation.
+ *
+ * The repository performs the lookup, source-state validation, overlap
+ * check, replacement creation, and original transition atomically
+ * within a single SERIALIZABLE transaction with bounded P2034 /
+ * DriverAdapterError retry, so a failure in any step leaves the
+ * original appointment unchanged and no replacement exists.
+ */
+export type AppointmentRescheduleResult =
+  | { readonly outcome: 'not_found' }
+  | {
+      readonly outcome: 'invalid_source_state';
+      readonly appointment: Appointment;
+    }
+  | {
+      readonly outcome: 'rescheduled';
+      readonly original: Appointment;
+      readonly replacement: Appointment;
+    };
