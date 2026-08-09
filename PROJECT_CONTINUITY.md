@@ -6189,6 +6189,33 @@ disposable PG17 cluster and passed. Authoritative CI (GitHub Actions
 - **BC01 / BC10 / Stage 1C historical branches:** unchanged.
 - **No direct `main` push; no force operation occurred.**
 
+#### Follow-up fix PR #19 (2026-08-09)
+
+During the documentation-only closeout, the authoritative Main CI for the
+docs head SHA surfaced a **pre-existing Stage 1C concurrency defect**: the
+SERIALIZABLE retry predicate `isSerializationConflict` only recognised
+Prisma's standard `P2034` code and missed the `@prisma/adapter-pg`
+driver-adapter form (`DriverAdapterError` with `cause.kind =
+'TransactionWriteConflict'`, PostgreSQL `SQLSTATE 40001`). Under concurrent
+booking/cancellation load this caused serialization conflicts to escape as
+HTTP 500 instead of being retried.
+
+- **Fix PR:** #19 — `fix(appointments): retry driver-adapter serialization
+  conflicts` — https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/19
+- **PR state:** MERGED (merged 2026-08-09T00:49:56Z).
+- **Fix branch head SHA (merged):** `93e3acff92a86ad01251c71d7b6d1c3bb87a471b`
+- **PR #19 merge commit SHA (current main tip, last verified 2026-08-09):**
+  `d845ae1554a78881550e5d2ab0abb438af889070`
+- **Changed file:** ONLY
+  `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts`
+  (the `isSerializationConflict` function). No schema, migration, API
+  contract, authorization, audit, test, dependency, lockfile, or workflow
+  changes.
+- **Authoritative Main CI run:** `31286775829` for head SHA `93e3acf...`
+  — completed/success (both static/build and PostgreSQL 17 validation
+  suites jobs green, including all concurrency tests).
+- **No direct `main` push; no force operation occurred.**
+
 ### Canonical Decisions (verified on merged main)
 
 - **Cancellation endpoint:** `POST /api/v1/appointments/:id/cancel`.
@@ -6232,8 +6259,9 @@ externally; no further continuity commit is required to avoid recursion.)
 
 - **Feature branch tip (merged into main via PR #17):**
   `e6aa1d1b4293f64989901e291acfd835993aabf3`
-- **PR #17 merge commit (current main tip, last verified 2026-08-09):**
-  `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
+- **PR #17 merge commit:** `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
+- **PR #19 merge commit (current main tip, last verified 2026-08-09):**
+  `d845ae1554a78881550e5d2ab0abb438af889070`
 
 ### Recovery Information
 
@@ -6241,11 +6269,12 @@ externally; no further continuity commit is required to avoid recursion.)
   (preserved on remote at `e6aa1d1b...`).
 - **Pre-task base (origin/main):** `136831b8612dd2f62382508f362bb9c0fc6ebeaf`
 - **PR #17 merge commit:** `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
+- **PR #19 merge commit (current main tip):** `d845ae1554a78881550e5d2ab0abb438af889070`
 - **BC01 branch:** not modified.
 - **BC10 branch:** not modified.
 - **Stage 1C historical branch (`feature/appointments-stage-1c-booking`):**
   not modified.
-- **main:** advanced only via the PR #17 merge commit (no direct push).
+- **main:** advanced only via the PR #17 and PR #19 merge commits (no direct push).
 
 ### Immediate Next Step
 
