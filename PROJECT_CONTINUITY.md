@@ -6160,32 +6160,100 @@ disposable PG17 cluster and passed. Authoritative CI (GitHub Actions
   canonical decision requires a dedicated cancellation-reason column or
   cancellation-record table, a forward-only migration will be needed.
 
+### Stage 1D Merge Record (2026-08-09)
+
+**Stage 1D status: MERGED.**
+
+- **Pull Request:** #17 — `feat(appointments): add tenant-safe appointment
+  cancellation` — https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/17
+- **PR state:** MERGED (merged 2026-08-09T00:21:28Z).
+- **Merge strategy:** normal GitHub merge-commit (not squash, not rebase).
+- **Feature branch head SHA (merged):** `e6aa1d1b4293f64989901e291acfd835993aabf3`
+- **PR #17 merge commit SHA:** `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
+- **Merge commit is the direct remote `main` tip (last verified
+  2026-08-09):** `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`.
+- **Pre-merge base (origin/main):** `136831b8612dd2f62382508f362bb9c0fc6ebeaf`.
+- **Successful authoritative Main CI run:** `31284792269` for head SHA
+  `e6aa1d1b...` — completed/success. Static/build job SUCCESS (Node.js 24,
+  pnpm 11.14.0, frozen lockfile, Prisma validate/generate, typecheck,
+  lint, unit tests, production build). PostgreSQL 17 validation suites job
+  SUCCESS (cancellation integration tests, authorization, tenant/org/
+  facility isolation, lifecycle, idempotency, cancellation concurrency,
+  audit exactly-once, cancelled-slot rebooking, no_show behavior, all
+  Stage 1C appointment regression tests, Stage 1C overlap concurrency,
+  Stage 1C P2034 retry).
+- **No blocking reviews; no unresolved review threads.**
+- **No schema or migration changes** (cancellation reason persisted in
+  audit event metadata only).
+- **Feature branch preserved** on remote at `e6aa1d1b...` (not deleted).
+- **BC01 / BC10 / Stage 1C historical branches:** unchanged.
+- **No direct `main` push; no force operation occurred.**
+
+### Canonical Decisions (verified on merged main)
+
+- **Cancellation endpoint:** `POST /api/v1/appointments/:id/cancel`.
+- **Lifecycle decision:** only `booked` is cancellable; `booked →
+  cancelled`; `cancelled` is idempotent success; all other source states
+  return 422 `APPOINTMENT_INVALID_TRANSITION`.
+- **Idempotency decision:** re-cancellation returns canonical success with
+  no duplicate audit event and no mutation.
+- **Cancellation reason decision:** required free-text (1–500 chars); no
+  canonical enum.
+- **Reason persistence:** audit-event metadata only
+  (`{ endpoint, appointmentId, reason }`) — no appointment column, no
+  cancellation-record table.
+- **Authorization:** `appointments:cancel` granted to R06 Receptionist,
+  R07 Scheduler, R09 Clinic Administrator; R13 System Administrator and
+  all other roles excluded.
+- **Tenant/org/facility scope:** derived exclusively from the
+  authenticated session; request body cannot override scope (strict Zod
+  schema rejects unknown keys).
+- **Overlap status-exclusion decision:** booking overlap query excludes
+  only canonical non-blocking terminal statuses `cancelled` and `no_show`
+  (verified against STATUS_CODES.md §4.1 and APPOINTMENTS.md §3.5/§7.3/
+  §8.3).
+- **Cancelled-slot-rebookable behavior:** a cancelled or no_show slot is
+  rebookable; the historical row remains persisted.
+- **Cancellation concurrency result:** two concurrent cancels produce one
+  valid state transition and exactly one `appointments.cancelled` audit
+  event; SERIALIZABLE + P2034 retry preserved.
+- **Audit result:** `appointments.cancelled` (`facility_context`)
+  emitted exactly once on first successful transition; forbidden-key
+  validation passes.
+- **Stage 1C regression result:** all Stage 1C booking, overlap, and
+  P2034 concurrency tests remain green.
+
 ### Unfinished Work
 
-- Authoritative CI run on GitHub Actions (Node 24 + PostgreSQL 17) must
-  pass before merge.
-- Operator final review and merge.
+None for Stage 1D. (Documentation-only closeout commit SHA is reported
+externally; no further continuity commit is required to avoid recursion.)
 
 ### Latest Verified Feature Commit
 
-(Pending — recorded in the completion report after push.)
+- **Feature branch tip (merged into main via PR #17):**
+  `e6aa1d1b4293f64989901e291acfd835993aabf3`
+- **PR #17 merge commit (current main tip, last verified 2026-08-09):**
+  `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
 
 ### Recovery Information
 
 - **Authoritative feature branch:** `feature/appointments-stage-1d-cancellation`
+  (preserved on remote at `e6aa1d1b...`).
 - **Pre-task base (origin/main):** `136831b8612dd2f62382508f362bb9c0fc6ebeaf`
+- **PR #17 merge commit:** `ccdeea504a7ed80c5cc15ae1fd426fc8d4a8301b`
 - **BC01 branch:** not modified.
 - **BC10 branch:** not modified.
 - **Stage 1C historical branch (`feature/appointments-stage-1c-booking`):**
   not modified.
-- **main:** not pushed.
+- **main:** advanced only via the PR #17 merge commit (no direct push).
 
 ### Immediate Next Step
 
-1. Wait for authoritative Main CI (Node 24 + PostgreSQL 17) to reach a
-   terminal green status for the feature branch head SHA.
-2. If CI fails, diagnose and fix only legitimate Stage 1D defects via a
-   new child commit (never rewrite history).
-3. Operator final review and merge of the PR. Do NOT merge during this
-   task.
+Stage 1D Appointment Cancellation is merged. The likely next substantive
+stage is **Appointment Rescheduling**, modeled as cancellation of the
+original appointment plus creation of a new appointment. Cancellation now
+exists as its prerequisite. Rescheduling is NOT implemented and is NOT
+marked complete. If canonical documentation requires explicit operator
+ratification before rescheduling begins, that ratification must be
+obtained first.
 
