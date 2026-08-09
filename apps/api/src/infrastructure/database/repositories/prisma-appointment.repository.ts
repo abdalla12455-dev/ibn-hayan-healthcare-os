@@ -67,12 +67,37 @@ const MAX_SERIALIZATION_RETRIES = 3;
 const RETRY_DELAY_MS = 50;
 
 /**
- * Checks if an error is a Prisma serialization/write conflict (P2034).
+ * Checks if an error is a Prisma serialization/write conflict that is safe
+ * to retry under SERIALIZABLE isolation.
+ *
+ * Two error shapes must be recognised:
+ *
+ * 1. **Prisma known-request error** — `error.code === 'P2034'`. This is the
+ *    canonical Prisma serialization-failure code.
+ *
+ * 2. **Driver-adapter error** — when the `@prisma/adapter-pg` driver
+ *    adapter is in use, a PostgreSQL `SQLSTATE 40001` (serialization
+ *    failure) is surfaced as a `DriverAdapterError` whose `cause` is
+ *    `{ kind: 'TransactionWriteConflict' }`. This form does **not**
+ *    carry a `P2034` code; without recognising it the conflict would
+ *    escape as an HTTP 500 instead of being retried.
  */
 function isSerializationConflict(error: unknown): boolean {
-  if (error instanceof Error && 'code' in error) {
-    const code = (error as { code: string }).code;
-    return code === 'P2034';
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  // Prisma standard serialization-failure code (P2034).
+  if ('code' in error && (error as { code: unknown }).code === 'P2034') {
+    return true;
+  }
+  // Prisma driver-adapter form (PostgreSQL SQLSTATE 40001).
+  if (
+    error.name === 'DriverAdapterError' &&
+    typeof (error as { cause?: unknown }).cause === 'object' &&
+    (error as { cause?: { kind?: unknown } }).cause?.kind ===
+      'TransactionWriteConflict'
+  ) {
+    return true;
   }
   return false;
 }
