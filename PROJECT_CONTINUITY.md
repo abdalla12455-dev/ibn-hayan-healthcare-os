@@ -6476,9 +6476,21 @@ obtained first.
 
 ### Latest Verified Feature Commit
 
-- **Feature branch tip:** (reported externally after commit/push; no
-  self-referential SHA recursion.)
+- **Feature branch tip:** `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`
+  (local HEAD == direct remote == remote-tracking; SHA equality verified).
 - **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
+- **PR #20:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/20
+  (draft, OPEN, unmerged).
+- **Authoritative Main CI run:** `31288690338` (head SHA
+  `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`, exact-head match,
+  conclusion **success**).
+  - Static/build job: success (Node.js 24, pnpm 11.14.0, frozen
+    lockfile, Prisma validate/generate, typecheck, lint, unit tests,
+    production build — all passed).
+  - PostgreSQL 17 job: success (rescheduling integration suite 42
+    tests passed; booking regression 36 tests; cancellation regression
+    31 tests; today's appointments 24 tests; audit atomicity 9,
+    integration 29, store 16, concurrency 11, verify 7 — all passed).
 
 ### Recovery Information
 
@@ -6494,7 +6506,9 @@ obtained first.
 ### Immediate Next Step
 
 Stage 1E Appointment Rescheduling is implemented on
-`feature/appointments-stage-1e-rescheduling` and awaits CI validation
-and operator review. Stage 1E is NOT merged and NOT marked complete.
-The PR must pass authoritative PostgreSQL 17 CI before readiness.
+`feature/appointments-stage-1e-rescheduling`, committed, pushed, and
+has passed authoritative PostgreSQL 17 CI (run `31288690338`,
+conclusion success). The draft PR #20 is ready for final operator
+review. Stage 1E is NOT merged and NOT marked complete. The operator
+should review PR #20 and merge it when satisfied.
 
