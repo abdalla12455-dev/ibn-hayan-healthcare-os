@@ -355,7 +355,21 @@ export type ClinicAdminActionCode =
  * appointment ID for traceability, but no patient details, provider
  * details, or appointment timing information.
  *
- * Both actions are mapped to the `facility_context` category
+ * The `appointments.cancelled` event is emitted after a successful
+ * FIRST-TIME appointment cancellation via
+ * `POST /api/v1/appointments/:id/cancel`. Per the Stage 1D
+ * implementation specification and STATUS_CODES.md §4.1
+ * ("Cancellation recorded with reason and actor"), the event
+ * metadata carries
+ * `{ endpoint: 'appointments_cancel', appointmentId: string, reason: string }`
+ * — the appointment ID for traceability and the caller-supplied
+ * cancellation reason. No patient details, provider details, or
+ * appointment timing information are carried. The event is emitted
+ * ONLY when the appointment actually transitions from `booked` to
+ * `cancelled`; an idempotent re-cancellation of an already-cancelled
+ * appointment does NOT emit a duplicate event.
+ *
+ * All three actions are mapped to the `facility_context` category
  * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
@@ -370,6 +384,7 @@ export type ClinicAdminActionCode =
 export const APPOINTMENTS_ACTION_CODES = [
   'appointments.schedule.viewed',
   'appointments.booked',
+  'appointments.cancelled',
 ] as const;
 
 export type AppointmentsActionCode =

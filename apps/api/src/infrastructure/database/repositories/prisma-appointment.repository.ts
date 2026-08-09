@@ -3,7 +3,9 @@ import type {
   AppointmentRepository,
   AppointmentReadProjection,
   Appointment,
+  AppointmentCancelResult,
   AppointmentCreateInput,
+  AppointmentId,
   TenantId,
   OrganisationId,
   FacilityId,
@@ -13,6 +15,29 @@ import {
   appointmentRowFromPrisma,
   appointmentFromPrisma,
 } from '../mappers/appointment.mapper.js';
+
+/**
+ * The canonical appointment statuses that do NOT reserve a provider's
+ * time slot for overlap purposes.
+ *
+ * Per STATUS_CODES.md §4.1, `cancelled` and `no_show` are terminal
+ * statuses whose slots are freed for rebooking:
+ * - `cancelled`: "Appointment has been cancelled before arrival" —
+ *   terminal; APPOINTMENTS.md §3.5 / §8.3 confirm a cancelled slot is
+ *   offered to waitlist patients (the slot is freed).
+ * - `no_show`: "Patient did not arrive and did not cancel" — terminal;
+ *   APPOINTMENTS.md §7.3 confirms a no-show slot is recoverable
+ *   (offered to waitlist, adjacent appointments extended).
+ *
+ * Only these two terminal statuses are excluded. Other terminal or
+ * in-flight statuses (completed, in_progress, etc.) are NOT excluded
+ * from overlap detection in this stage; they remain blocking. This is
+ * the minimal status-exclusion correction required for cancellation to
+ * free a slot for rebooking, and does NOT assume additional
+ * non-blocking statuses beyond those verified against canonical
+ * documentation.
+ */
+const NON_BLOCKING_STATUSES = ['cancelled', 'no_show'] as const;
 
 /**
  * Error thrown when a provider has an overlapping appointment.
@@ -165,12 +190,21 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           // Overlap condition: existingStart < requestedEnd AND existingEnd > requestedStart
           // This is the standard overlap rule. Adjacent appointments where
           // one ends exactly when another begins are NOT considered overlapping.
+          //
+          // Status-exclusion (Stage 1D): appointments in canonical
+          // non-blocking terminal statuses (cancelled, no_show) do NOT
+          // reserve the slot, so a cancelled or no_show appointment does
+          // not block a new booking at the same time. See
+          // NON_BLOCKING_STATUSES for the canonical rationale.
           const conflicting = await tx.appointment.findFirst({
             where: {
               tenantId,
               organisationId,
               facilityId,
               providerId: input.providerId,
+              status: {
+                notIn: [...NON_BLOCKING_STATUSES],
+              },
               // Overlap: existingStart < requestedEnd AND existingEnd > requestedStart
               scheduledStart: {
                 lt: input.scheduledEnd,
@@ -215,5 +249,101 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
     const result = await this.executeWithSerializationRetry(transactionLogic);
     return appointmentFromPrisma(result);
+  }
+
+  async findById(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+  ): Promise<Appointment | null> {
+    const row = await this.prisma.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        tenantId,
+        organisationId,
+        facilityId,
+      },
+    });
+    return row === null ? null : appointmentFromPrisma(row);
+  }
+
+  async cancel(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+  ): Promise<AppointmentCancelResult> {
+    const transactionLogic = async (): Promise<AppointmentCancelResult> => {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          // Scoped lookup: all three scope identifiers must match. An
+          // appointment outside scope returns null, indistinguishable
+          // from "does not exist" (no cross-scope existence leak).
+          const row = await tx.appointment.findFirst({
+            where: {
+              id: appointmentId,
+              tenantId,
+              organisationId,
+              facilityId,
+            },
+          });
+
+          if (row === null) {
+            return {
+              outcome: 'not_found' as const,
+            };
+          }
+
+          // Idempotent re-cancellation: already cancelled is a no-op.
+          // No mutation, no timestamp/reason churn. The audit event is
+          // NOT emitted for this case (the service uses `transitioned`
+          // to decide).
+          if (row.status === 'cancelled') {
+            return {
+              outcome: 'cancelled' as const,
+              appointment: appointmentFromPrisma(row),
+              transitioned: false,
+            };
+          }
+
+          // Only `booked` is canonically cancellable in this stage.
+          // Any other source state (confirmed, arrived, in_progress,
+          // completed, no_show) is an invalid transition.
+          if (row.status !== 'booked') {
+            return {
+              outcome: 'invalid_source_state' as const,
+              appointment: appointmentFromPrisma(row),
+            };
+          }
+
+          // Atomic conditional transition: only update rows still in
+          // `booked`. Under SERIALIZABLE isolation, a concurrent
+          // cancellation that already transitioned this row causes a
+          // P2034 serialization conflict, which is retried by the
+          // outer loop; on retry the row is observed as `cancelled`
+          // and resolved as an idempotent success above. This
+          // guarantees exactly one `transitioned: true` result per
+          // appointment under concurrent cancellation.
+          const updated = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: { status: 'cancelled' },
+          });
+
+          return {
+            outcome: 'cancelled' as const,
+            appointment: appointmentFromPrisma(updated),
+            transitioned: true,
+          };
+        },
+        {
+          isolationLevel: 'Serializable',
+        },
+      );
+
+      return result;
+    };
+
+    return this.executeWithSerializationRetry(transactionLogic);
   }
 }

@@ -313,3 +313,112 @@ export const BookingErrorResponseSchema = z
   .strict();
 
 export type BookingErrorResponse = z.infer<typeof BookingErrorResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// CancelAppointmentRequest
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical request schema for cancelling an appointment via
+ * `POST /api/v1/appointments/:id/cancel`.
+ *
+ * All scope (tenantId, organisationId, facilityId) is derived from
+ * the authenticated session context. The request body contains ONLY
+ * the cancellation reason.
+ *
+ * Per STATUS_CODES.md §4.1, a cancellation is "recorded with reason
+ * and actor". The reason is a required free-text string (no canonical
+ * cancellation-reason enum exists in ENUMS.md). The actor is derived
+ * from the authenticated session and recorded in the audit event, NOT
+ * in the request body.
+ *
+ * The request does NOT include:
+ * - tenantId, organisationId, or facilityId (derived from session)
+ * - status (callers cannot supply arbitrary status values; the
+ *   transition is always booked → cancelled)
+ * - patientId, providerId, or timing (the appointment already exists)
+ * - actorId (derived from the authenticated session)
+ *
+ * The schema is `.strict()` so that adding an unexpected field at
+ * the boundary is rejected by the Zod parse.
+ */
+export const CancelAppointmentRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(500),
+  })
+  .strict();
+
+export type CancelAppointmentRequest = z.infer<
+  typeof CancelAppointmentRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// CancelAppointmentResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical response schema for a successful appointment
+ * cancellation via `POST /api/v1/appointments/:id/cancel`.
+ *
+ * Returns the cancelled appointment with all persisted fields. The
+ * `status` is always `cancelled` for a successful response (whether
+ * the cancellation just transitioned the appointment or was an
+ * idempotent re-cancellation of an already-cancelled appointment).
+ *
+ * The response does NOT include scope fields (tenantId,
+ * organisationId, facilityId) or timestamps (createdAt, updatedAt),
+ * matching the shape of {@link BookAppointmentResponseSchema}.
+ */
+export const CancelAppointmentResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict();
+
+export type CancelAppointmentResponse = z.infer<
+  typeof CancelAppointmentResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// CancellationErrorResponse
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical error response schema for the appointment cancellation
+ * endpoint.
+ *
+ * Error codes:
+ * - `APPOINTMENT_VALIDATION_ERROR`: invalid request body (e.g. missing
+ *   or too-long reason).
+ * - `APPOINTMENT_NOT_FOUND`: the appointment does not exist or is not
+ *   accessible in the authenticated tenant, organisation, or facility.
+ *   The same error is returned regardless of whether the appointment
+ *   does not exist or exists in another scope (no existence leak).
+ * - `APPOINTMENT_INVALID_TRANSITION`: the appointment is in a source
+ *   state that is not canonically cancellable in this stage (only
+ *   `booked` is cancellable; `cancelled` is idempotent success).
+ */
+export const CancellationErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum([
+          'APPOINTMENT_VALIDATION_ERROR',
+          'APPOINTMENT_NOT_FOUND',
+          'APPOINTMENT_INVALID_TRANSITION',
+        ]),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type CancellationErrorResponse = z.infer<
+  typeof CancellationErrorResponseSchema
+>;

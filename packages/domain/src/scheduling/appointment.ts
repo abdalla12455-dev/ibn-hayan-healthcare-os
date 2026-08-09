@@ -138,3 +138,47 @@ export interface AppointmentCreateInput {
 export interface AppointmentCreated {
   readonly appointment: Appointment;
 }
+
+/**
+ * The outcome of an appointment cancellation attempt.
+ *
+ * Per STATUS_CODES.md §4.1, `cancelled` is a terminal status
+ * ("Terminal (or rebooked as new appointment)"). The canonical
+ * appointment lifecycle permits cancellation from the `booked`
+ * (Scheduled) source state. Per APPOINTMENTS.md §16.2, commands are
+ * "idempotent where the operation supports idempotency"; re-cancelling
+ * an already-cancelled appointment is therefore an idempotent no-op.
+ *
+ * The result is discriminated by `outcome`:
+ *
+ * - `not_found`: no appointment matches the supplied scoped identifiers.
+ *   The caller MUST treat this identically to a nonexistent appointment
+ *   (no cross-tenant/organisation/facility existence leak).
+ * - `invalid_source_state`: the appointment exists in scope but is in a
+ *   source state that is not canonically cancellable in this stage
+ *   (only `booked` is cancellable). The appointment is returned so the
+ *   service can map the error without a second read.
+ * - `cancelled`: the appointment is now in the `cancelled` state. The
+ *   `transitioned` flag is `true` when the appointment actually
+ *   transitioned from `booked` to `cancelled` (the audit event MUST be
+ *   emitted exactly once for this case). The `transitioned` flag is
+ *   `false` when the appointment was already `cancelled` (idempotent
+ *   re-cancellation; NO audit event is emitted and NO state mutation
+ *   occurs).
+ *
+ * The repository performs the transition atomically within a
+ * SERIALIZABLE transaction with bounded P2034 retry, so concurrent
+ * cancellation attempts produce exactly one `transitioned: true` result
+ * and one or more `transitioned: false` (idempotent) results.
+ */
+export type AppointmentCancelResult =
+  | { readonly outcome: 'not_found' }
+  | {
+      readonly outcome: 'invalid_source_state';
+      readonly appointment: Appointment;
+    }
+  | {
+      readonly outcome: 'cancelled';
+      readonly appointment: Appointment;
+      readonly transitioned: boolean;
+    };

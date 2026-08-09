@@ -28,9 +28,11 @@
 
 import type {
   Appointment,
+  AppointmentCancelResult,
   AppointmentCreateInput,
   AppointmentReadProjection,
 } from './appointment.js';
+import type { AppointmentId } from './appointment.js';
 import type { TenantId } from '../tenancy/tenant.js';
 import type { OrganisationId } from '../tenancy/organisation.js';
 import type { FacilityId } from '../tenancy/facility.js';
@@ -106,4 +108,66 @@ export interface AppointmentRepository {
     facilityId: FacilityId,
     input: AppointmentCreateInput,
   ): Promise<Appointment>;
+
+  /**
+   * Find a single appointment by its identifier, scoped to the
+   * authenticated session's tenant, organisation, and facility.
+   *
+   * There is no unscoped lookup. All three scope values must match for
+   * an appointment to be returned; an appointment that exists in
+   * another tenant, organisation, or facility returns `null` (not an
+   * error), so the caller cannot distinguish "does not exist" from
+   * "exists outside scope". This is the structural enforcement of
+   * CODING_STANDARDS.md §10 and prevents cross-scope existence leakage.
+   *
+   * @param tenantId The Tenant that owns the appointment.
+   * @param organisationId The Organisation that owns the appointment.
+   * @param facilityId The Facility where the appointment occurs.
+   * @param appointmentId The appointment's stable identifier.
+   * @returns The appointment, or `null` if no appointment matches the
+   *          full scoped identifier set.
+   */
+  findById(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+  ): Promise<Appointment | null>;
+
+  /**
+   * Cancel an existing appointment, scoped to the authenticated
+   * session's tenant, organisation, and facility.
+   *
+   * The caller does NOT supply scope; scope is always derived from the
+   * authenticated context. The caller does NOT supply the target
+   * status; the transition is always `booked → cancelled`.
+   *
+   * Lifecycle rules (per STATUS_CODES.md §4.1 and APPOINTMENTS.md
+   * §16.2):
+   * - Only `booked` is canonically cancellable in this stage.
+   * - `cancelled` is terminal; re-cancelling an already-cancelled
+   *   appointment is an idempotent no-op (no mutation, no audit event).
+   * - Any other source state is an invalid transition.
+   *
+   * Concurrency safety: the lookup, transition validation, and status
+   * mutation are performed within a transaction with SERIALIZABLE
+   * isolation to prevent race conditions where two concurrent
+   * cancellation requests could both transition the same appointment.
+   * SERIALIZABLE transaction conflicts (Prisma P2034) are retried with
+   * a bounded retry loop; on retry, a concurrently-cancelled
+   * appointment is observed as already-cancelled and resolved as an
+   * idempotent success.
+   *
+   * @param tenantId The Tenant that owns the appointment.
+   * @param organisationId The Organisation that owns the appointment.
+   * @param facilityId The Facility where the appointment occurs.
+   * @param appointmentId The appointment's stable identifier.
+   * @returns The cancellation result (see {@link AppointmentCancelResult}).
+   */
+  cancel(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+  ): Promise<AppointmentCancelResult>;
 }

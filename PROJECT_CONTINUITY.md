@@ -5855,3 +5855,337 @@ During PostgreSQL 17 validation, several test infrastructure issues were discove
 - **After concurrency fix:** (pending new commit SHA)
 - **Failed CI run:** 31233146530 (P2034 serialization conflict not retried)
 - **Main:** origin/main @ c7ddda1101eff266ff1cbceeb90eeea4efc0b782 (BC10 merged via PR #14)
+
+
+## Stage 1D — Appointment Cancellation (2026-08-08)
+
+### Operator Ratification
+
+The operator approved **Stage 1D — Appointment Cancellation** as the next
+production stage, resolving the prior "Next substantive project stage: Not
+defined" statement. The approved sequence is:
+
+Stage 1C Appointment Booking → **Stage 1D Appointment Cancellation** →
+future Appointment Rescheduling.
+
+Rescheduling is explicitly excluded from this stage and depends on
+cancellation (rescheduling = cancel original + create new).
+
+### Repository
+
+- **Remote:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os.git
+- **Feature branch:** `feature/appointments-stage-1d-cancellation`
+- **Base main SHA (last verified 2026-08-08):** `136831b8612dd2f62382508f362bb9c0fc6ebeaf`
+- **Bounded context:** BC06 Scheduling / Appointments
+- **Surface:** Clinic-side backend appointment lifecycle
+
+### Approved Scope
+
+Allow an authorized clinic-side user (R06 Receptionist, R07 Scheduler,
+R09 Clinic Administrator) to cancel an existing appointment safely within
+the authenticated tenant, organisation, and facility:
+
+1. Locate the appointment using session-derived scope.
+2. Prevent cross-tenant / cross-organisation / cross-facility leakage.
+3. Transition the appointment to the canonical `cancelled` state.
+4. Capture the cancellation reason.
+5. Record the actor from authenticated context.
+6. Emit the canonical `appointments.cancelled` audit event exactly once.
+7. Be idempotent for an already-cancelled appointment.
+8. Allow the previously occupied slot to be booked again.
+9. Preserve all existing Stage 1C booking behavior.
+10. Remain concurrency-safe.
+
+### Excluded Scope
+
+Appointment rescheduling, no-show recording, confirmed/arrived/in-progress/
+completed transitions, provider scheduling/availability, slot templates,
+patient/provider demographics, credentialing, reminders, notifications,
+waitlist, billing, payment, frontend/UI, mobile UI, Platform Super Admin
+workflows.
+
+### Architecture-Gate Result
+
+Resolved from canonical documentation (APPOINTMENTS.md, STATUS_CODES.md
+§4.1, ENUMS.md, existing API conventions):
+
+- **Canonical endpoint:** `POST /api/v1/appointments/:id/cancel` (POST
+  verb, action-style sub-resource, matches existing booking `POST
+  /api/v1/appointments` convention and the `:id/cancel` action pattern).
+- **Cancellable source states:** only `booked` is cancellable in this
+  stage. `cancelled` is idempotent success. All other states (confirmed,
+  arrived, in_progress, completed, no_show) are invalid transitions
+  (HTTP 422 `APPOINTMENT_INVALID_TRANSITION`).
+- **Already-cancelled idempotency:** explicitly idempotent. Re-cancellation
+  returns canonical success WITHOUT emitting a duplicate audit event and
+  WITHOUT mutating timestamps/reason.
+- **Cancellation reason:** required free-text string, min 1 / max 500
+  characters (no canonical cancellation-reason enum exists in ENUMS.md).
+  Persisted in the `appointments.cancelled` audit event metadata (NOT in a
+  new appointment column — canonical docs do not require a separate
+  cancellation-record table or appointment column for reason). No schema
+  change required.
+- **Actor persistence:** actor is derived from the authenticated session
+  and recorded in the audit event (`actorId`, `actorType: 'USER'`), NOT
+  in a new appointment column.
+- **Concurrency:** SERIALIZABLE transaction with bounded P2034 retry
+  (reuses the existing `executeWithSerializationRetry` pattern from
+  Stage 1C). Atomic conditional transition guarantees exactly one
+  `transitioned: true` result per appointment under concurrent
+  cancellation.
+- **Authorization:** dedicated permission `appointments:cancel`, granted
+  to R06/R07/R09 only; R13 and all other roles denied. Enforced via the
+  existing `@RequirePermission` + `AuthorizationGuard` infrastructure.
+- **Audit category:** `facility_context` (verified against
+  `inferCategoryFromAction`). Metadata: `{ endpoint:
+  'appointments_cancel', appointmentId, reason }`. No PHI, demographics,
+  timing, secrets, or arbitrary payload. Forbidden-key validation passes.
+
+### AppointmentRepository Additions
+
+Extended the EXISTING `AppointmentRepository` port in place
+(`packages/domain/src/scheduling/repositories.ts`):
+
+- `findById(tenantId, organisationId, facilityId, appointmentId)` —
+  tenant-safe scoped lookup; returns null outside scope; branded domain
+  identifiers; never accepts caller-provided scope as authoritative.
+- `cancel(tenantId, organisationId, facilityId, appointmentId)` —
+  returns `AppointmentCancelResult` (`not_found` | `invalid_source_state`
+  | `cancelled` with `transitioned: boolean`). Implemented atomically
+  under SERIALIZABLE + P2034 retry in `PrismaAppointmentRepository`.
+
+Added `AppointmentCancelResult` domain type in
+`packages/domain/src/scheduling/appointment.ts`.
+
+### Scoped Lookup Behavior
+
+`findById` and `cancel` both require all three scope identifiers
+(tenantId, organisationId, facilityId) derived from the authenticated
+session. An appointment outside scope returns `not_found`
+(indistinguishable from "does not exist" — no cross-scope existence
+leak). The request body cannot override scope (the strict Zod schema
+rejects unknown keys including `tenantId`/`organisationId`/
+`facilityId`/`actorId`/`status`).
+
+### Cancellation Transition Implementation
+
+`booked → cancelled` only. Callers cannot supply an arbitrary target
+status; the transition is always `booked → cancelled`. The repository
+conditionally updates only rows still in `booked`; a concurrent
+cancellation that already transitioned the row triggers a P2034 conflict,
+retried, and on retry resolves as idempotent `cancelled` with
+`transitioned: false`.
+
+### Overlap Status-Exclusion Fix (MANDATORY)
+
+Updated the existing overlap query in
+`PrismaAppointmentRepository.create` to exclude canonical non-blocking
+terminal statuses (`cancelled`, `no_show`) via `status: { notIn:
+[...NON_BLOCKING_STATUSES] }`. Verified against STATUS_CODES.md §4.1
+and APPOINTMENTS.md §3.5/§7.3/§8.3. Only these two terminal statuses are
+excluded; other terminal/in-flight statuses remain blocking (minimal
+correction, no assumptions beyond canonical docs).
+
+### Cancelled-Slot Rebooking
+
+A cancelled appointment no longer blocks its previous time slot — the
+same slot can be booked again. The cancelled row remains persisted for
+history (NOT deleted to free the slot). A `no_show` appointment likewise
+does not block rebooking. Adjacent (back-to-back) appointments remain
+non-overlapping.
+
+### no_show Overlap Behavior
+
+`no_show` is terminal and non-blocking for future overlap checks — a
+`no_show` slot can be rebooked. Verified against APPOINTMENTS.md §7.3.
+
+### Authorization Implementation
+
+- New permission `appointments:cancel` added to `PERMISSION_CODES`
+  (total now 11).
+- Granted to R06 Receptionist and R07 Scheduler via
+  `CLINIC_BOOKING_PERMISSIONS` (now 9 permissions each).
+- Granted to R09 Clinic Administrator via `CLINIC_ADMIN_PERMISSIONS`
+  (now 11 permissions).
+- NOT granted to R13_SYSTEM_ADMINISTRATOR or any other role.
+- Enforced via `@RequirePermission('appointments:cancel')` on the
+  controller cancel endpoint, evaluated by `AuthorizationGuard` before
+  the service runs.
+
+### Audit
+
+- Action code: `appointments.cancelled` (added to
+  `APPOINTMENTS_ACTION_CODES` in `packages/observability/src/audit/
+  action-codes.ts`).
+- Category: `facility_context`.
+- Metadata: `{ endpoint: 'appointments_cancel', appointmentId, reason }`.
+- Actor: derived from authenticated session (`actorId`, `actorType:
+  'USER'`, `sessionId`).
+- Emitted exactly once on first successful transition (`transitioned ===
+  true`) via `auditHelper.emitDirect(...)` AFTER the appointment
+  transitions to `cancelled`.
+- NOT emitted for idempotent re-cancellation, validation failure,
+  authorization failure, not-found, or invalid transition.
+- Forbidden-key validation: passes (metadata keys `endpoint`,
+  `appointmentId`, `reason` match no forbidden substring).
+
+### Cancellation Concurrency Behavior
+
+Two concurrent cancellation requests both return HTTP 200 (idempotent for
+the second). The final state is deterministically `cancelled`. Exactly
+one `appointments.cancelled` audit event is emitted (only the request
+that performs the actual `transitioned: true` transition emits). No
+duplicate audit, no status corruption, no duplicate cancellation
+metadata. SERIALIZABLE isolation is preserved (not weakened).
+
+### Files Created
+
+- `apps/api/src/modules/appointments/appointments-cancellation.service.ts`
+  — cancellation application service.
+- `apps/api/test/appointments/appointments-cancellation.integration.spec.ts`
+  — 31 PostgreSQL 17 integration tests.
+
+### Files Modified
+
+- `packages/domain/src/scheduling/repositories.ts` — added `findById`
+  and `cancel` port methods.
+- `packages/domain/src/scheduling/appointment.ts` — added
+  `AppointmentCancelResult` type.
+- `packages/domain/src/authorization/permissions.ts` — added
+  `appointments:cancel` to `PERMISSION_CODES`.
+- `packages/domain/src/authorization/role-permissions.ts` — granted
+  `appointments:cancel` to R06/R07/R09.
+- `packages/domain/src/authorization/authorization.spec.ts` — updated
+  count assertions (R09: 10→11, R06/R07: 8→9, PERMISSION_CODES.length:
+  10→11).
+- `packages/observability/src/audit/action-codes.ts` — added
+  `appointments.cancelled` action code + documentation.
+- `packages/contracts/src/appointments/appointments.schema.ts` — added
+  `CancelAppointmentRequestSchema`, `CancelAppointmentResponseSchema`,
+  `CancellationErrorResponseSchema`.
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts`
+  — implemented `findById`, `cancel`; applied overlap status-exclusion
+  fix to `create`.
+- `apps/api/src/modules/appointments/appointments.errors.ts` — added
+  `appointmentNotFound`, `appointmentInvalidTransition` error helpers.
+- `apps/api/src/modules/appointments/appointments.errors.spec.ts` —
+  added cancellation error tests.
+- `apps/api/src/modules/appointments/appointments.controller.ts` —
+  added `POST :id/cancel` endpoint with `@RequirePermission`.
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts`
+  — added cancellation stub, fixture, and unit tests; updated
+  constructor to 3 args.
+- `apps/api/src/modules/appointments/appointments.module.ts` —
+  registered `AppointmentsCancellationService`.
+
+### Files Deleted
+
+None.
+
+### Schema Changes
+
+None. No Prisma schema changes. The cancellation reason is persisted in
+the audit event metadata; the appointment `status` column (existing)
+transitions to `cancelled`.
+
+### Migration Changes
+
+None. No new migrations. No existing migrations edited.
+
+### Tests
+
+**Unit tests added:**
+- Controller cancellation unit tests (authorization, validation,
+  lifecycle, audit, scope).
+- Cancellation error-helper unit tests.
+
+**Integration tests added (PostgreSQL 17):** 31 tests covering:
+- Authorization (R06, R07, R09 allowed; R13 denied; R02 denied; 401
+  unauthenticated).
+- Scope isolation (in-scope cancel; cross-tenant/cross-org/cross-facility
+  safe 404; body-scope-override rejected).
+- Lifecycle (booked→cancelled; idempotent re-cancel; invalid
+  source-state rejected; arbitrary status rejected).
+- Reason validation (valid; missing; too long; empty).
+- Audit (exactly-once on first transition; no duplicate on idempotent;
+  no emission on validation/authz/not-found failure).
+- Overlap status-exclusion regression (booked blocks overlap; cancelled
+  frees slot; cancelled persisted; no_show frees slot; adjacent allowed;
+  Stage 1C booking concurrency intact).
+- Cancellation concurrency (one transition, one audit event).
+
+### Validation Results
+
+- `git diff --check`: clean (no conflict markers).
+- Prisma validate (main + audit schemas): valid.
+- Prisma generate: success.
+- Domain typecheck: pass.
+- Contracts typecheck: pass.
+- Observability typecheck: pass.
+- API typecheck: pass.
+- API lint: pass (0 errors).
+- Domain lint: pass.
+- Contracts lint: pass.
+- API unit tests: 430 passed.
+- Domain unit tests: 126 passed.
+- Observability unit tests: 95 passed.
+- PostgreSQL 17 appointments integration tests: 91 passed (31 new
+  cancellation + 60 Stage 1C regression).
+- PostgreSQL 17 audit integration tests: 29 passed.
+- PostgreSQL 17 audit atomicity tests: 9 passed.
+- PostgreSQL 17 audit concurrency tests: 11 passed.
+- PostgreSQL 17 database context tests: 151 passed.
+- PostgreSQL 17 auth integration tests: 35 passed.
+- PostgreSQL 17 context integration tests: 55 passed.
+- PostgreSQL 17 clinic-admin integration tests: 24 passed.
+- PostgreSQL 17 role-preview integration tests: 53 passed.
+- API production build: success.
+
+### PostgreSQL 17 Local Status
+
+PostgreSQL 17 was made available locally by extracting PG17 binaries and
+share data from the official `postgres:17` Docker image and pointing the
+disposable-cluster bootstrap at them via `PG_BINDIR` + `LD_LIBRARY_PATH`.
+All PostgreSQL 17 integration test suites listed above ran against a real
+disposable PG17 cluster and passed. Authoritative CI (GitHub Actions
+`node:24` + `postgres:17`) is the final gate.
+
+### Known Risks
+
+- The local environment runs Node v22.23.2 (project wants v24); builds
+  and tests pass but CI on Node 24 is authoritative.
+- Rescheduling is not implemented (intentionally excluded; depends on
+  cancellation).
+- Cancellation reason is persisted in audit metadata only; if a future
+  canonical decision requires a dedicated cancellation-reason column or
+  cancellation-record table, a forward-only migration will be needed.
+
+### Unfinished Work
+
+- Authoritative CI run on GitHub Actions (Node 24 + PostgreSQL 17) must
+  pass before merge.
+- Operator final review and merge.
+
+### Latest Verified Feature Commit
+
+(Pending — recorded in the completion report after push.)
+
+### Recovery Information
+
+- **Authoritative feature branch:** `feature/appointments-stage-1d-cancellation`
+- **Pre-task base (origin/main):** `136831b8612dd2f62382508f362bb9c0fc6ebeaf`
+- **BC01 branch:** not modified.
+- **BC10 branch:** not modified.
+- **Stage 1C historical branch (`feature/appointments-stage-1c-booking`):**
+  not modified.
+- **main:** not pushed.
+
+### Immediate Next Step
+
+1. Wait for authoritative Main CI (Node 24 + PostgreSQL 17) to reach a
+   terminal green status for the feature branch head SHA.
+2. If CI fails, diagnose and fix only legitimate Stage 1D defects via a
+   new child commit (never rewrite history).
+3. Operator final review and merge of the PR. Do NOT merge during this
+   task.
+

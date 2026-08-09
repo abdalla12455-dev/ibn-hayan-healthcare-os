@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   appointmentConfigurationRequired,
   appointmentInvalidTimezone,
+  appointmentNotFound,
+  appointmentInvalidTransition,
 } from './appointments.errors.js';
 
 /**
@@ -64,6 +69,58 @@ describe('appointments.errors', () => {
       // The message should not contain RangeError or timezone validation details
       expect(response.error.message).not.toContain('RangeError');
       expect(response.error.message).not.toContain('Invalid');
+    });
+  });
+
+  describe('appointmentNotFound', () => {
+    it('returns NotFoundException', () => {
+      const error = appointmentNotFound();
+      expect(error).toBeInstanceOf(NotFoundException);
+    });
+
+    it('has the APPOINTMENT_NOT_FOUND error code', () => {
+      const error = appointmentNotFound();
+      expect(error.getResponse()).toMatchObject({
+        error: {
+          code: 'APPOINTMENT_NOT_FOUND',
+        },
+      });
+    });
+
+    it('has a non-empty message', () => {
+      const error = appointmentNotFound();
+      const response = error.getResponse() as { error: { message: string } };
+      expect(response.error.message.length).toBeGreaterThan(0);
+    });
+
+    it('does NOT reveal which scope dimension is missing', () => {
+      const error = appointmentNotFound();
+      const response = error.getResponse() as { error: { message: string } };
+      expect(response.error.message).not.toContain('tenant');
+      expect(response.error.message).not.toContain('organisation');
+      expect(response.error.message).not.toContain('facility');
+    });
+  });
+
+  describe('appointmentInvalidTransition', () => {
+    it('returns UnprocessableEntityException', () => {
+      const error = appointmentInvalidTransition();
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+    });
+
+    it('has the APPOINTMENT_INVALID_TRANSITION error code', () => {
+      const error = appointmentInvalidTransition();
+      expect(error.getResponse()).toMatchObject({
+        error: {
+          code: 'APPOINTMENT_INVALID_TRANSITION',
+        },
+      });
+    });
+
+    it('has a non-empty message', () => {
+      const error = appointmentInvalidTransition();
+      const response = error.getResponse() as { error: { message: string } };
+      expect(response.error.message.length).toBeGreaterThan(0);
     });
   });
 });

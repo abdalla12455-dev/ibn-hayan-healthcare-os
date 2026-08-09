@@ -80,9 +80,10 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
- * The eight permissions granted to R06 Receptionist and R07 Scheduler:
- * the seven context permissions plus `appointments:book`. This list is
- * EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
+ * The nine permissions granted to R06 Receptionist and R07 Scheduler:
+ * the seven context permissions plus `appointments:book` and
+ * `appointments:cancel`. This list is EXPLICIT: it does NOT use
+ * `PERMISSION_CODES` directly.
  *
  * Per the Stage 1C implementation specification, R06 and R07 are the
  * clinic-side roles authorized to create appointments via
@@ -90,16 +91,23 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
  * is NOT granted to R13_SYSTEM_ADMINISTRATOR — platform-level identity
  * must not accidentally gain clinic-booking access through a global
  * permission.
+ *
+ * Per the Stage 1D implementation specification, R06 and R07 are also
+ * authorized to cancel appointments via
+ * `POST /api/v1/appointments/:id/cancel`. The `appointments:cancel`
+ * permission is NOT granted to R13_SYSTEM_ADMINISTRATOR — platform-level
+ * identity must not gain clinic-cancellation access.
  */
 const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
   ...HUMAN_CONTEXT_PERMISSIONS,
   'appointments:book',
+  'appointments:cancel',
 ] as const;
 
 /**
- * The ten permissions granted to R09 Clinic Administrator: the
+ * The eleven permissions granted to R09 Clinic Administrator: the
  * seven context permissions plus `clinic_admin_overview:view`,
- * `appointments:view`, and `appointments:book`. This list is
+ * `appointments:view`, `appointments:book`, and `appointments:cancel`. This list is
  * EXPLICIT: it does NOT use `PERMISSION_CODES` directly. Adding
  * a future permission to `PERMISSION_CODES` does NOT automatically
  * grant it to R09 — the new permission must be explicitly added to
@@ -119,6 +127,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'clinic_admin_overview:view',
   'appointments:view',
   'appointments:book',
+  'appointments:cancel',
 ] as const;
 
 // ---------------------------------------------------------------------------

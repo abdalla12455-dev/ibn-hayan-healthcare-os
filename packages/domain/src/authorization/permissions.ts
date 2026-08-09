@@ -79,7 +79,8 @@ export type PermissionCode =
   | 'context:clear_facility'
   | 'clinic_admin_overview:view'
   | 'appointments:view'
-  | 'appointments:book';
+  | 'appointments:book'
+  | 'appointments:cancel';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -112,6 +113,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'clinic_admin_overview:view',
   'appointments:view',
   'appointments:book',
+  'appointments:cancel',
 ] as const;
 
 /**
