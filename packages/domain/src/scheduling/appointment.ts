@@ -246,3 +246,111 @@ export type AppointmentRescheduleResult =
       readonly original: Appointment;
       readonly replacement: Appointment;
     };
+
+/**
+ * The canonical forward visit-lifecycle transition graph for Stage 1F,
+ * derived from STATUS_CODES.md §4.1 (AppointmentStatus transition map).
+ *
+ * The implemented enum uses `booked` for the canonical "Scheduled"
+ * status, `arrived` for "CheckedIn", and `in_progress` for
+ * "InProgress" (see STATUS_CODES.md §4.1 display-name mapping).
+ *
+ * Stage 1F forward edges (excluding cancellation, rescheduling, and
+ * no-show, which belong to other stages):
+ *
+ *   booked      → confirmed   (confirm)
+ *   booked      → arrived     (check-in, direct check-in without prior confirmation)
+ *   confirmed   → arrived     (check-in)
+ *   arrived     → in_progress (start)
+ *   in_progress → completed   (complete)
+ *
+ * Backward transitions (e.g. confirmed → booked, an "unconfirm") are
+ * NOT part of Stage 1F's approved forward visit lifecycle and are
+ * excluded from this stage.
+ */
+export const APPOINTMENT_VISIT_TRANSITIONS: Readonly<
+  Record<AppointmentStatus, readonly AppointmentStatus[]>
+> = {
+  booked: ['confirmed', 'arrived'],
+  confirmed: ['arrived'],
+  arrived: ['in_progress'],
+  in_progress: ['completed'],
+  completed: [],
+  cancelled: [],
+  no_show: [],
+};
+
+/**
+ * Input for a canonical appointment visit-lifecycle status transition.
+ *
+ * The caller supplies the set of canonically-permitted source states
+ * and the single target state. The repository enforces that the
+ * appointment's current status is one of `allowedSourceStates` before
+ * transitioning to `targetStatus`. The caller NEVER supplies an
+ * arbitrary target; the target is fixed per command by the service
+ * layer (confirm → `confirmed`, check-in → `arrived`, start →
+ * `in_progress`, complete → `completed`).
+ *
+ * The `idempotentIfAlreadyAtTarget` flag governs the behaviour when
+ * the appointment is already in the target state. For a terminal
+ * target (`completed`), a re-application is an idempotent no-op
+ * (returns `already_at_target`, no mutation, no audit event), mirroring
+ * the cancellation idempotency for the terminal `cancelled` state.
+ * For a non-terminal target (`confirmed`, `arrived`, `in_progress`),
+ * a re-application is an invalid transition (the same-state edge is
+ * not in the canonical transition map), so the repository returns
+ * `invalid_source_state`.
+ */
+export interface AppointmentTransitionInput {
+  readonly allowedSourceStates: readonly AppointmentStatus[];
+  readonly targetStatus: AppointmentStatus;
+  readonly idempotentIfAlreadyAtTarget: boolean;
+}
+
+/**
+ * The outcome of an appointment visit-lifecycle status transition
+ * attempt.
+ *
+ * The result is discriminated by `outcome`:
+ *
+ * - `not_found`: no appointment matches the supplied scoped
+ *   identifiers. The caller MUST treat this identically to a
+ *   nonexistent appointment (no cross-tenant/organisation/facility
+ *   existence leak).
+ * - `invalid_source_state`: the appointment exists in scope but is in
+ *   a source state that is not canonically permitted for this
+ *   transition. This includes non-terminal same-state re-applications
+ *   (e.g. confirming an already-`confirmed` appointment) and any
+ *   state outside `allowedSourceStates`. The appointment is returned
+ *   so the service can map the error without a second read.
+ * - `already_at_target`: the appointment is already in the target
+ *   state AND the transition is idempotent for that target (terminal
+ *   `completed`). This is an idempotent no-op: no mutation, no audit
+ *   event. The appointment is returned so the service can build the
+ *   canonical success response.
+ * - `transitioned`: the appointment transitioned from a permitted
+ *   source state to the target state. The `transitioned` flag is
+ *   `true` so the service emits the audit event exactly once.
+ *
+ * The repository performs the transition atomically within a
+ * SERIALIZABLE transaction with bounded P2034 /
+ * DriverAdapterError retry, so concurrent transition attempts produce
+ * exactly one `transitioned` result and at most one idempotent
+ * `already_at_target` result (for terminal targets) or one
+ * `invalid_source_state` result (for non-terminal targets).
+ */
+export type AppointmentTransitionResult =
+  | { readonly outcome: 'not_found' }
+  | {
+      readonly outcome: 'invalid_source_state';
+      readonly appointment: Appointment;
+    }
+  | {
+      readonly outcome: 'already_at_target';
+      readonly appointment: Appointment;
+    }
+  | {
+      readonly outcome: 'transitioned';
+      readonly appointment: Appointment;
+      readonly transitioned: true;
+    };

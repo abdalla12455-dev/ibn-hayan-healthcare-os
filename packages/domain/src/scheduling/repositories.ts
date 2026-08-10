@@ -33,6 +33,8 @@ import type {
   AppointmentReadProjection,
   AppointmentRescheduleInput,
   AppointmentRescheduleResult,
+  AppointmentTransitionInput,
+  AppointmentTransitionResult,
 } from './appointment.js';
 import type { AppointmentId } from './appointment.js';
 import type { TenantId } from '../tenancy/tenant.js';
@@ -243,4 +245,65 @@ export interface AppointmentRepository {
     appointmentId: AppointmentId,
     input: AppointmentRescheduleInput,
   ): Promise<AppointmentRescheduleResult>;
+
+  /**
+   * Transition an existing appointment's status along the canonical
+   * forward visit-lifecycle graph (Stage 1F), scoped to the
+   * authenticated session's tenant, organisation, and facility.
+   *
+   * The caller does NOT supply scope; scope is always derived from
+   * the authenticated context. The caller does NOT supply an
+   * arbitrary target status; the target is fixed per command by the
+   * service layer via {@link AppointmentTransitionInput}. The
+   * repository enforces that the appointment's current status is one
+   * of `allowedSourceStates` before transitioning to `targetStatus`.
+   *
+   * Lifecycle rules (per STATUS_CODES.md §4.1 and
+   * {@link APPOINTMENT_VISIT_TRANSITIONS}):
+   * - confirm:  `booked` → `confirmed`
+   * - check-in: `booked` | `confirmed` → `arrived`
+   * - start:    `arrived` → `in_progress`
+   * - complete: `in_progress` → `completed`
+   *
+   * Idempotency:
+   * - For a terminal target (`completed`), re-applying the transition
+   *   to an already-`completed` appointment is an idempotent no-op
+   *   (`already_at_target`): no mutation, no audit event. This mirrors
+   *   the cancellation idempotency for the terminal `cancelled` state.
+   * - For a non-terminal target (`confirmed`, `arrived`,
+   *   `in_progress`), re-applying the transition to an appointment
+   *   already in the target state is an invalid transition
+   *   (`invalid_source_state`), because the same-state edge is not in
+   *   the canonical transition map.
+   *
+   * Concurrency safety: the scoped lookup, source-state validation,
+   * and status mutation are performed within a transaction with
+   * SERIALIZABLE isolation to prevent race conditions where two
+   * concurrent transition requests could both transition the same
+   * appointment. SERIALIZABLE transaction conflicts (Prisma P2034 and
+   * `@prisma/adapter-pg` `DriverAdapterError` with
+   * `cause.kind === 'TransactionWriteConflict'`) are retried with a
+   * bounded retry loop; on retry, a concurrently-transitioned
+   * appointment is re-observed at its committed status and resolved
+   * deterministically (one `transitioned` result; the loser resolves
+   * as `already_at_target` for terminal targets or
+   * `invalid_source_state` for non-terminal targets). No expected
+   * serialization conflict escapes as an HTTP 500.
+   *
+   * @param tenantId The Tenant that owns the appointment.
+   * @param organisationId The Organisation that owns the appointment.
+   * @param facilityId The Facility where the appointment occurs.
+   * @param appointmentId The appointment's stable identifier.
+   * @param input The transition specification (allowed sources, target,
+   *              idempotency flag).
+   * @returns The transition result (see
+   *          {@link AppointmentTransitionResult}).
+   */
+  transitionStatus(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+    input: AppointmentTransitionInput,
+  ): Promise<AppointmentTransitionResult>;
 }

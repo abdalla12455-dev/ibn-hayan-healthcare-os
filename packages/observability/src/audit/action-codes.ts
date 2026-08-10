@@ -385,7 +385,28 @@ export type ClinicAdminActionCode =
  * does NOT emit the event. Exactly one event is emitted per
  * successful reschedule.
  *
- * All four actions are mapped to the `facility_context` category
+ * The `appointments.confirmed`, `appointments.checked_in`,
+ * `appointments.started`, and `appointments.completed` events are
+ * emitted after a successful FIRST-TIME visit-lifecycle transition
+ * (Stage 1F). Per the Stage 1F implementation specification and
+ * STATUS_CODES.md §4.1, the canonical forward visit-lifecycle edges
+ * are booked → confirmed, booked|confirmed → arrived, arrived →
+ * in_progress, in_progress → completed. The event metadata carries
+ * `{ endpoint, appointmentId }` only — the appointment ID for
+ * traceability. No patient details, provider details, appointment
+ * timing, encounter references, or clinical content are carried (no
+ * PHI). The events are emitted ONLY when the appointment actually
+ * transitions; an idempotent re-completion of an already-completed
+ * appointment does NOT emit a duplicate `appointments.completed`
+ * event (mirroring the cancellation idempotency for the terminal
+ * `cancelled` state). Non-terminal same-state re-applications
+ * (confirm/check-in/start) are invalid transitions and emit no event.
+ * The `appointments.confirmed`, `appointments.checked_in`,
+ * `appointments.started`, and `appointments.completed` endpoints are
+ * `appointments_confirm`, `appointments_check_in`,
+ * `appointments_start`, and `appointments_complete` respectively.
+ *
+ * All eight actions are mapped to the `facility_context` category
  * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
@@ -402,6 +423,10 @@ export const APPOINTMENTS_ACTION_CODES = [
   'appointments.booked',
   'appointments.cancelled',
   'appointments.rescheduled',
+  'appointments.confirmed',
+  'appointments.checked_in',
+  'appointments.started',
+  'appointments.completed',
 ] as const;
 
 export type AppointmentsActionCode =

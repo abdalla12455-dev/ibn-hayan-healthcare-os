@@ -232,6 +232,12 @@ describe('authorization permission catalogue', () => {
     // `appointments:reschedule` permission, granted to R06, R07, and
     // R09. The permission is the authorisation gate for
     // `POST /api/v1/appointments/:id/reschedule`.
+    //
+    // Stage 1F of Appointment Visit Lifecycle adds four permissions:
+    // `appointments:confirm` and `appointments:check_in` (granted to
+    // R06, R07, R09 — operational pre-arrival/arrival actions), and
+    // `appointments:start` and `appointments:complete` (granted to
+    // R01 Physician only — clinical visit-progression actions).
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
@@ -245,6 +251,10 @@ describe('authorization permission catalogue', () => {
       'appointments:book',
       'appointments:cancel',
       'appointments:reschedule',
+      'appointments:confirm',
+      'appointments:check_in',
+      'appointments:start',
+      'appointments:complete',
     ]);
   });
 
@@ -261,6 +271,10 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('appointments:book')).toBe(true);
     expect(isPermissionCode('appointments:cancel')).toBe(true);
     expect(isPermissionCode('appointments:reschedule')).toBe(true);
+    expect(isPermissionCode('appointments:confirm')).toBe(true);
+    expect(isPermissionCode('appointments:check_in')).toBe(true);
+    expect(isPermissionCode('appointments:start')).toBe(true);
+    expect(isPermissionCode('appointments:complete')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -301,7 +315,11 @@ describe('authorization role-permission matrix', () => {
         p !== 'appointments:view' &&
         p !== 'appointments:book' &&
         p !== 'appointments:cancel' &&
-        p !== 'appointments:reschedule',
+        p !== 'appointments:reschedule' &&
+        p !== 'appointments:confirm' &&
+        p !== 'appointments:check_in' &&
+        p !== 'appointments:start' &&
+        p !== 'appointments:complete',
     );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
@@ -383,11 +401,11 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('permissionsForRole returns the matrix entry for a known role', () => {
-    // R01_PHYSICIAN and R13_SYSTEM_ADMINISTRATOR have all permissions except
-    // clinic_admin_overview:view (R09 only), appointments:view (R09 only),
-    // appointments:book (R06, R07, R09 only), appointments:cancel
-    // (R06, R07, R09 only), and appointments:reschedule
-    // (R06, R07, R09 only)
+    // R01_PHYSICIAN has the seven context permissions plus
+    // appointments:start and appointments:complete (clinical visit
+    // lifecycle, Stage 1F). It does NOT hold the operational
+    // appointments permissions (book/cancel/reschedule/confirm/check_in)
+    // or the R09-only permissions.
     expect(permissionsForRole('R01_PHYSICIAN')).toEqual(
       PERMISSION_CODES.filter(
         (p) =>
@@ -395,9 +413,14 @@ describe('authorization role-permission matrix', () => {
           p !== 'appointments:view' &&
           p !== 'appointments:book' &&
           p !== 'appointments:cancel' &&
-          p !== 'appointments:reschedule',
+          p !== 'appointments:reschedule' &&
+          p !== 'appointments:confirm' &&
+          p !== 'appointments:check_in',
       ),
     );
+    // R13_SYSTEM_ADMINISTRATOR has only the seven context permissions
+    // (HUMAN_CONTEXT_PERMISSIONS). It does NOT hold any appointments
+    // or clinic-admin permissions.
     expect(permissionsForRole('R13_SYSTEM_ADMINISTRATOR')).toEqual(
       PERMISSION_CODES.filter(
         (p) =>
@@ -405,10 +428,22 @@ describe('authorization role-permission matrix', () => {
           p !== 'appointments:view' &&
           p !== 'appointments:book' &&
           p !== 'appointments:cancel' &&
-          p !== 'appointments:reschedule',
+          p !== 'appointments:reschedule' &&
+          p !== 'appointments:confirm' &&
+          p !== 'appointments:check_in' &&
+          p !== 'appointments:start' &&
+          p !== 'appointments:complete',
       ),
     );
-    expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(PERMISSION_CODES);
+    // R09 holds all permissions EXCEPT the clinical visit-progression
+    // permissions (appointments:start, appointments:complete), which
+    // are reserved for R01 Physician.
+    expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(
+      PERMISSION_CODES.filter(
+        (p) =>
+          p !== 'appointments:start' && p !== 'appointments:complete',
+      ),
+    );
   });
 
   it('permissionsForRole returns an empty array for an unknown role', () => {
@@ -417,15 +452,15 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('permissionsForRoles accumulates permissions across multiple roles (union)', () => {
-    // Two roles that both grant all seven context permissions
-    // (R01 and R13) produce a union of seven context permissions.
-    // Neither role grants `clinic_admin_overview:view`, so the
-    // union does not include it.
+    // R01_PHYSICIAN grants the seven context permissions plus
+    // appointments:start and appointments:complete (Stage 1F clinical
+    // visit lifecycle). R13 grants only the seven context permissions.
+    // The union is R01's permissions (9), since R13's set is a subset.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
     ]);
-    expect(union.size).toBe(7);
+    expect(union.size).toBe(9);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
@@ -433,6 +468,8 @@ describe('authorization role-permission matrix', () => {
     expect(union.has('context:clear_organisation')).toBe(true);
     expect(union.has('context:select_facility')).toBe(true);
     expect(union.has('context:clear_facility')).toBe(true);
+    expect(union.has('appointments:start')).toBe(true);
+    expect(union.has('appointments:complete')).toBe(true);
     expect(union.has('clinic_admin_overview:view')).toBe(false);
   });
 
@@ -451,7 +488,7 @@ describe('authorization role-permission matrix', () => {
       'R01_PHYSICIAN',
       'owner',
     ]);
-    expect(union.size).toBe(7);
+    expect(union.size).toBe(9);
   });
 
   it('R14 combined with a human role yields the union (R14 does not revoke)', () => {
@@ -459,7 +496,7 @@ describe('authorization role-permission matrix', () => {
       'R14_INTEGRATION_ACCOUNT',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(7);
+    expect(union.size).toBe(9);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
@@ -558,15 +595,18 @@ describe('authorization role-permission matrix', () => {
   // `PERMISSION_CODES.filter(...)` pattern).
   // -------------------------------------------------------------------------
 
-  it('R09 Clinic Administrator receives EXACTLY 12 permissions (not PERMISSION_CODES.length)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 12, including
-    // appointments:book, appointments:cancel, and
-    // appointments:reschedule). If a future change adds a permission
-    // to PERMISSION_CODES but forgets to add it to
-    // CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it.
+  it('R09 Clinic Administrator receives EXACTLY 14 permissions (not PERMISSION_CODES.length)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 14: 7 context +
+    // clinic_admin_overview:view + appointments:view + appointments:book
+    // + appointments:cancel + appointments:reschedule +
+    // appointments:confirm + appointments:check_in). R09 does NOT
+    // receive appointments:start or appointments:complete (clinical
+    // visit-progression actions reserved for R01 Physician). If a
+    // future change adds a permission to PERMISSION_CODES but forgets
+    // to add it to CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it.
     // This is the desired least-privilege behaviour.
     const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
-    expect(r09Permissions).toHaveLength(12);
+    expect(r09Permissions).toHaveLength(14);
     expect(r09Permissions).toEqual([
       'context:view',
       'context:select',
@@ -580,7 +620,11 @@ describe('authorization role-permission matrix', () => {
       'appointments:book',
       'appointments:cancel',
       'appointments:reschedule',
+      'appointments:confirm',
+      'appointments:check_in',
     ]);
+    expect(r09Permissions).not.toContain('appointments:start');
+    expect(r09Permissions).not.toContain('appointments:complete');
   });
 
   it('R13 System Administrator receives EXACTLY 7 permissions (not PERMISSION_CODES.filter(...))', () => {
@@ -603,37 +647,73 @@ describe('authorization role-permission matrix', () => {
     expect(r13Permissions).not.toContain('appointments:book');
     expect(r13Permissions).not.toContain('appointments:cancel');
     expect(r13Permissions).not.toContain('appointments:reschedule');
+    expect(r13Permissions).not.toContain('appointments:confirm');
+    expect(r13Permissions).not.toContain('appointments:check_in');
+    expect(r13Permissions).not.toContain('appointments:start');
+    expect(r13Permissions).not.toContain('appointments:complete');
   });
 
-  it('R06 and R07 receive EXACTLY 10 permissions (7 context + appointments:book + appointments:cancel + appointments:reschedule)', () => {
+  it('R06 and R07 receive EXACTLY 12 permissions (7 context + book + cancel + reschedule + confirm + check_in)', () => {
     // R06_RECEPTIONIST and R07_SCHEDULER receive CLINIC_BOOKING_PERMISSIONS
-    // (10 permissions: 7 context + appointments:book +
-    // appointments:cancel + appointments:reschedule).
+    // (12 permissions: 7 context + appointments:book +
+    // appointments:cancel + appointments:reschedule +
+    // appointments:confirm + appointments:check_in). They do NOT
+    // receive appointments:start or appointments:complete (clinical
+    // visit-progression actions reserved for R01 Physician).
     const r06Permissions = ROLE_PERMISSION_MATRIX.R06_RECEPTIONIST;
     const r07Permissions = ROLE_PERMISSION_MATRIX.R07_SCHEDULER;
-    expect(r06Permissions).toHaveLength(10);
-    expect(r07Permissions).toHaveLength(10);
+    expect(r06Permissions).toHaveLength(12);
+    expect(r07Permissions).toHaveLength(12);
     expect(r06Permissions).toContain('appointments:book');
     expect(r07Permissions).toContain('appointments:book');
     expect(r06Permissions).toContain('appointments:cancel');
     expect(r07Permissions).toContain('appointments:cancel');
     expect(r06Permissions).toContain('appointments:reschedule');
     expect(r07Permissions).toContain('appointments:reschedule');
+    expect(r06Permissions).toContain('appointments:confirm');
+    expect(r07Permissions).toContain('appointments:confirm');
+    expect(r06Permissions).toContain('appointments:check_in');
+    expect(r07Permissions).toContain('appointments:check_in');
     expect(r06Permissions).not.toContain('clinic_admin_overview:view');
     expect(r07Permissions).not.toContain('clinic_admin_overview:view');
+    expect(r06Permissions).not.toContain('appointments:start');
+    expect(r07Permissions).not.toContain('appointments:start');
+    expect(r06Permissions).not.toContain('appointments:complete');
+    expect(r07Permissions).not.toContain('appointments:complete');
   });
 
-  it('R01-R05, R08, R10-R13 receive EXACTLY 7 permissions (human context only)', () => {
-    // Every human role other than R09, R14 receives the same 7 context
-    // permissions as R13. This verifies the matrix does NOT use
-    // `PERMISSION_CODES.filter(...)` (which would grant all future
-    // permissions except `clinic_admin_overview:view`).
+  it('R01 Physician receives EXACTLY 9 permissions (7 context + appointments:start + appointments:complete)', () => {
+    // R01_PHYSICIAN receives CLINICAL_VISIT_PERMISSIONS (9 permissions:
+    // 7 context + appointments:start + appointments:complete). These
+    // are the clinical visit-progression actions. R01 does NOT receive
+    // the operational appointments permissions (book/cancel/reschedule/
+    // confirm/check_in) or clinic_admin_overview:view.
+    const r01Permissions = ROLE_PERMISSION_MATRIX.R01_PHYSICIAN;
+    expect(r01Permissions).toHaveLength(9);
+    expect(r01Permissions).toContain('appointments:start');
+    expect(r01Permissions).toContain('appointments:complete');
+    expect(r01Permissions).not.toContain('clinic_admin_overview:view');
+    expect(r01Permissions).not.toContain('appointments:book');
+    expect(r01Permissions).not.toContain('appointments:cancel');
+    expect(r01Permissions).not.toContain('appointments:reschedule');
+    expect(r01Permissions).not.toContain('appointments:confirm');
+    expect(r01Permissions).not.toContain('appointments:check_in');
+  });
+
+  it('R02-R05, R08, R10-R13 receive EXACTLY 7 permissions (human context only)', () => {
+    // Every human role other than R01 (clinical visit), R06/R07
+    // (clinic booking), R09 (clinic admin), and R14 (integration)
+    // receives the same 7 context permissions as R13. This verifies
+    // the matrix does NOT use `PERMISSION_CODES.filter(...)` (which
+    // would grant all future permissions except
+    // `clinic_admin_overview:view`).
     const contextOnlyRoles = PLATFORM_ROLE_CODES.filter(
       (code) =>
         code !== 'R09_ADMINISTRATOR' &&
         code !== 'R14_INTEGRATION_ACCOUNT' &&
         code !== 'R06_RECEPTIONIST' &&
-        code !== 'R07_SCHEDULER',
+        code !== 'R07_SCHEDULER' &&
+        code !== 'R01_PHYSICIAN',
     );
     for (const code of contextOnlyRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
@@ -642,32 +722,37 @@ describe('authorization role-permission matrix', () => {
       expect(permissions).not.toContain('appointments:book');
       expect(permissions).not.toContain('appointments:cancel');
       expect(permissions).not.toContain('appointments:reschedule');
+      expect(permissions).not.toContain('appointments:confirm');
+      expect(permissions).not.toContain('appointments:check_in');
+      expect(permissions).not.toContain('appointments:start');
+      expect(permissions).not.toContain('appointments:complete');
       // Every context-only role has the SAME 7 permissions as R13.
       expect(permissions).toEqual(ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR);
     }
   });
 
   it('R09 is NOT a hidden global super-administrator (R09 != PERMISSION_CODES)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 12), NOT
-    // PERMISSION_CODES (which is currently 12 but would grow if a
-    // future permission is added). This test verifies R09's matrix
-    // entry is NOT a reference to PERMISSION_CODES.
-    //
-    // We verify by checking that R09's permissions equal the explicit
-    // CLINIC_ADMIN_PERMISSIONS list, not PERMISSION_CODES. If a future
-    // change accidentally makes R09 = PERMISSION_CODES again, this
-    // test will still pass (because both are currently 12), but the
-    // TYPE of the matrix entry will differ. The structural test is
-    // the length assertion above (R09 has EXACTLY 12, not
-    // PERMISSION_CODES.length).
-    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(12);
-    expect(PERMISSION_CODES.length).toBe(12);
-    // If a future permission is added to PERMISSION_CODES, the
-    // lengths will diverge. This test documents the current equality
-    // and will FAIL if a future permission is added to PERMISSION_CODES
-    // without updating CLINIC_ADMIN_PERMISSIONS — which is the
-    // desired behaviour (the test failure prompts the developer to
-    // explicitly decide whether R09 should receive the new permission).
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 14), NOT
+    // PERMISSION_CODES (which is currently 16). R09 does NOT receive
+    // appointments:start or appointments:complete (clinical
+    // visit-progression actions reserved for R01 Physician), so R09's
+    // permission count is strictly less than PERMISSION_CODES.length.
+    // This test verifies R09's matrix entry is NOT a reference to
+    // PERMISSION_CODES and that R09 does not silently inherit clinical
+    // visit permissions.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(14);
+    expect(PERMISSION_CODES.length).toBe(16);
+    // R09 must NOT equal the full PERMISSION_CODES catalogue.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toEqual(
+      PERMISSION_CODES,
+    );
+    // R09 must NOT hold the clinical visit-progression permissions.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
+      'appointments:start',
+    );
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
+      'appointments:complete',
+    );
   });
 
   it('matrix entries are stable references (not computed at access time)', () => {
@@ -746,7 +831,7 @@ describe('TenantRoleAssignment domain type', () => {
       'R01_PHYSICIAN',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(7);
+    expect(union.size).toBe(9);
   });
 
   it('a catalogue entry is a readonly snapshot', () => {
