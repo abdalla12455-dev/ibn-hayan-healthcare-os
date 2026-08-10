@@ -6692,11 +6692,12 @@ Integration test file `appointments-visit-lifecycle.integration.spec.ts` covers:
 - Observability unit tests: PASS (95/95)
 - Controller spec: PASS (18/18)
 - API production build: PASS
-- **PostgreSQL 17 integration tests: NOT RUN locally** (PG17 unavailable in this environment). CI must validate before readiness.
+- **PostgreSQL 17 integration tests (local): NOT RUN** (PG17 unavailable in this environment).
+- **PostgreSQL 17 integration tests (authoritative CI): SUCCESS.** Run 31441476104 on exact PR head 913fb16411e1806d13bc9e71e8af72298b93f0ad. 73 Stage 1F integration tests passed; Stage 1C booking regression (24 tests), Stage 1D cancellation regression (31 tests), Stage 1E rescheduling regression (42 tests) all passed.
 
 ### Known Risks
 
-- PostgreSQL 17 integration tests have not been executed locally. Concurrency behaviour, audit emission, and transition enforcement are validated by type safety and unit tests, but the real PG17 SERIALIZABLE isolation behaviour must be confirmed by CI.
+- PostgreSQL 17 integration tests were NOT RUN locally (PG17 unavailable), but authoritative CI (run 31441476104) validated all 73 Stage 1F tests plus regressions on real PostgreSQL 17 with SERIALIZABLE isolation. Both P2034 and DriverAdapterError TransactionWriteConflict retry behavior confirmed green.
 - The confirm-vs-cancel and confirm-vs-reschedule concurrency outcomes are non-deterministic in which request wins, but the test asserts the deterministic invariant (exactly one transition, exactly one audit event, no split-brain).
 
 ### No-Show Exclusion
@@ -6715,4 +6716,4 @@ No-show recording and reversal remain excluded. `NON_BLOCKING_STATUSES` (`cancel
 
 ### Immediate Next Step
 
-Operator review of the Stage 1F PR. CI (PostgreSQL 17) must pass on the exact PR head before merge readiness is claimed. Do NOT merge during this implementation task.
+Stage 1F implementation is complete. Authoritative exact-head CI (run 31441476104, head 913fb16) passed: static/build SUCCESS, PostgreSQL 17 SUCCESS (73 Stage 1F + Stage 1C/1D/1E regressions all green). PR #22 is ready for final operator review and merge. At this pre-merge point PR #22 remains unmerged; operator final review/merge is next.
