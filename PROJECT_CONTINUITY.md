@@ -6342,8 +6342,10 @@ obtained first.
   `cancelled`. If any step fails, the transaction rolls back — the
   original remains `booked` and no replacement exists.
 - **Transaction design:** SERIALIZABLE isolation, matching Stage 1C/1D.
-- **Concurrency design:** bounded retry (max 5 attempts) for both
-  serialization-conflict error forms:
+- **Concurrency design:** bounded retry with a maximum of 3 total
+  attempts (`MAX_SERIALIZATION_RETRIES = 3` in
+  `prisma-appointment.repository.ts`, shared by booking, cancellation,
+  and rescheduling) for both serialization-conflict error forms:
   1. Prisma `P2034` (known request serialization conflict).
   2. `@prisma/adapter-pg` `DriverAdapterError` with
      `cause.kind === 'TransactionWriteConflict'`.
@@ -6476,14 +6478,16 @@ obtained first.
 
 ### Latest Verified Feature Commit
 
-- **Feature branch tip:** `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`
+- **Feature branch tip:** `db29c88f1af10fc55fa64fb85874adf16e631266`
   (local HEAD == direct remote == remote-tracking; SHA equality verified).
+  - Implementation commit: `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`
+  - Continuity/docs commit: `db29c88f1af10fc55fa64fb85874adf16e631266`
 - **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
 - **PR #20:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/20
   (draft, OPEN, unmerged).
-- **Authoritative Main CI run:** `31288690338` (head SHA
-  `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`, exact-head match,
-  conclusion **success**).
+- **Authoritative Main CI run (current exact head `db29c88`):**
+  `31288942970` (head SHA `db29c88f1af10fc55fa64fb85874adf16e631266`,
+  exact-head match, conclusion **success**).
   - Static/build job: success (Node.js 24, pnpm 11.14.0, frozen
     lockfile, Prisma validate/generate, typecheck, lint, unit tests,
     production build — all passed).
@@ -6491,11 +6495,16 @@ obtained first.
     tests passed; booking regression 36 tests; cancellation regression
     31 tests; today's appointments 24 tests; audit atomicity 9,
     integration 29, store 16, concurrency 11, verify 7 — all passed).
+- **Prior implementation-head CI run (`461a5ae`):** `31288690338`
+  (conclusion success; same job breakdown as above). Both heads are
+  green; the current exact head `db29c88` adds only a
+  PROJECT_CONTINUITY.md documentation correction.
 
 ### Recovery Information
 
 - **Authoritative feature branch:**
   `feature/appointments-stage-1e-rescheduling`
+  (tip `db29c88f1af10fc55fa64fb85874adf16e631266`).
 - **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
 - **BC01 branch:** not modified.
 - **BC10 branch:** not modified.
@@ -6507,8 +6516,11 @@ obtained first.
 
 Stage 1E Appointment Rescheduling is implemented on
 `feature/appointments-stage-1e-rescheduling`, committed, pushed, and
-has passed authoritative PostgreSQL 17 CI (run `31288690338`,
-conclusion success). The draft PR #20 is ready for final operator
-review. Stage 1E is NOT merged and NOT marked complete. The operator
-should review PR #20 and merge it when satisfied.
+has passed authoritative PostgreSQL 17 CI on the current exact head
+`db29c88` (run `31288942970`, conclusion success). The retry count in
+this continuity record has been corrected to match the implementation
+(`MAX_SERIALIZATION_RETRIES = 3`, i.e., 3 total attempts). The draft
+PR #20 is ready for final operator review. Stage 1E is NOT merged and
+NOT marked complete. The operator should review PR #20 and merge it
+when satisfied.
 
