@@ -6693,27 +6693,45 @@ Integration test file `appointments-visit-lifecycle.integration.spec.ts` covers:
 - Controller spec: PASS (18/18)
 - API production build: PASS
 - **PostgreSQL 17 integration tests (local): NOT RUN** (PG17 unavailable in this environment).
-- **PostgreSQL 17 integration tests (authoritative CI): SUCCESS.** Run 31441476104 on exact PR head 913fb16411e1806d13bc9e71e8af72298b93f0ad. 73 Stage 1F integration tests passed; Stage 1C booking regression (24 tests), Stage 1D cancellation regression (31 tests), Stage 1E rescheduling regression (42 tests) all passed.
+- **PostgreSQL 17 integration tests (authoritative CI): SUCCESS.** Final exact-head CI run 31443235674 on PR head b567c6bdc2ceaf0769b441a8f84628609a0470aa passed. 73 Stage 1F integration tests passed; Stage 1C booking regression (24 tests), Stage 1D cancellation regression (31 tests), Stage 1E rescheduling regression (42 tests) all passed.
 
 ### Known Risks
 
-- PostgreSQL 17 integration tests were NOT RUN locally (PG17 unavailable), but authoritative CI (run 31441476104) validated all 73 Stage 1F tests plus regressions on real PostgreSQL 17 with SERIALIZABLE isolation. Both P2034 and DriverAdapterError TransactionWriteConflict retry behavior confirmed green.
+- PostgreSQL 17 integration tests were NOT RUN locally (PG17 unavailable), but authoritative CI (final run 31443235674 on head b567c6b) validated all 73 Stage 1F tests plus regressions on real PostgreSQL 17 with SERIALIZABLE isolation. Both P2034 and DriverAdapterError TransactionWriteConflict retry behavior confirmed green.
 - The confirm-vs-cancel and confirm-vs-reschedule concurrency outcomes are non-deterministic in which request wins, but the test asserts the deterministic invariant (exactly one transition, exactly one audit event, no split-brain).
 
 ### No-Show Exclusion
 
 No-show recording and reversal remain excluded. `NON_BLOCKING_STATUSES` (`cancelled`, `no_show`) unchanged. The `no_show` enum value exists but is not acted upon by Stage 1F.
 
+### Merge Status
+
+**Stage 1F is MERGED into main via PR #22.**
+
+- **PR #22:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/22
+- **PR #22 merge commit on main:** `76677e0a964952e98baea4b7e4a75496bf55ca62`
+- **Final Stage 1F feature head:** `b567c6bdc2ceaf0769b441a8f84628609a0470aa`
+- **Final exact-head CI run:** `31443235674` (conclusion success; static/build + PostgreSQL 17 both passed)
+- **Merge strategy:** normal merge-commit (no squash, no rebase, no force)
+- **Stage 1F status:** MERGED
+
 ### Recovery Information
 
-- Feature branch: `feature/appointments-stage-1f-visit-lifecycle`
-- Base: `f8c211b3b6817bb80b44a234ecec0d569e7cedb1`
+- Feature branch (preserved): `feature/appointments-stage-1f-visit-lifecycle` (tip `b567c6bdc2ceaf0769b441a8f84628609a0470aa`)
+- PR #22 merge commit on main: `76677e0a964952e98baea4b7e4a75496bf55ca62`
+- Pre-task base (origin/main): `f8c211b3b6817bb80b44a234ecec0d569e7cedb1`
 - No schema or migration changes.
 - No force operations.
-- main was NOT pushed.
+- main advanced only via PR #22 merge (no direct push, no force).
 - Stage 1C/1D/1E branches NOT modified.
 - BC01/BC10 branches NOT modified.
 
+### Authorization Decision (Final)
+
+- **Confirm / Check-in:** R06 Receptionist, R07 Scheduler, R09 Clinic Administrator (operational actions per APPOINTMENTS.md §9.1).
+- **Start / Complete:** R01 Physician only (clinical actions; canonical architecture reserves clinical lifecycle actions for clinical roles). No canonical evidence grants R02 Nurse or R09 Clinic Administrator start/complete permissions.
+- **R13 Platform Super Admin:** denied for ALL four clinic lifecycle actions (no inheritance). Verified by integration tests.
+
 ### Immediate Next Step
 
-Stage 1F implementation is complete. Authoritative exact-head CI (run 31441476104, head 913fb16) passed: static/build SUCCESS, PostgreSQL 17 SUCCESS (73 Stage 1F + Stage 1C/1D/1E regressions all green). PR #22 is ready for final operator review and merge. At this pre-merge point PR #22 remains unmerged; operator final review/merge is next.
+Stage 1F Appointment Visit Lifecycle is MERGED into main via PR #22 (merge commit `76677e0a964952e98baea4b7e4a75496bf55ca62`). The final exact-head CI (run `31443235674`, head `b567c6b`) passed authoritative PostgreSQL 17 CI. No schema or migration changes were introduced. No recursive continuity commit will be created. The next substantive project decision is operator-determined (e.g., Stage 1G appointment no-show exception lifecycle, or another bounded-context stage).
