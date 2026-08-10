@@ -718,8 +718,22 @@ export class AppointmentsController {
   async confirmAppointment(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body: unknown,
   ): Promise<AppointmentVisitLifecycleResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
     const result = await this.visitLifecycleService.confirmAppointment(
       id,
       cookieValue,
@@ -784,8 +798,22 @@ export class AppointmentsController {
   async checkInAppointment(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body: unknown,
   ): Promise<AppointmentVisitLifecycleResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
     const result = await this.visitLifecycleService.checkInAppointment(
       id,
       cookieValue,
@@ -849,8 +877,22 @@ export class AppointmentsController {
   async startAppointment(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body: unknown,
   ): Promise<AppointmentVisitLifecycleResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
     const result = await this.visitLifecycleService.startAppointment(
       id,
       cookieValue,
@@ -917,8 +959,22 @@ export class AppointmentsController {
   async completeAppointment(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body: unknown,
   ): Promise<AppointmentVisitLifecycleResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
     const result = await this.visitLifecycleService.completeAppointment(
       id,
       cookieValue,

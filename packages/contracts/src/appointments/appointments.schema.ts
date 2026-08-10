@@ -562,6 +562,33 @@ export type ReschedulingErrorResponse = z.infer<
 // ---------------------------------------------------------------------------
 
 /**
+ * The canonical request-body schema for the appointment visit-lifecycle
+ * endpoints (confirm, check-in, start, complete).
+ *
+ * All four commands accept NO business input besides the appointment ID
+ * (supplied in the URL path). The body MUST be empty, absent, or an
+ * empty JSON object. Any supplied field — including `tenantId`,
+ * `organisationId`, `facilityId`, `status`, `actorId`, or any other
+ * key — is rejected as an `APPOINTMENT_VALIDATION_ERROR` (400). This
+ * prevents scope override, status override, and actor override via the
+ * request body.
+ *
+ * The schema accepts `undefined` (no body sent), `null` (some clients
+ * send null), and `{}` (empty JSON object). It rejects any object with
+ * keys via `.strict()`, matching the existing booking, cancellation,
+ * and rescheduling contract conventions.
+ */
+export const VisitLifecycleRequestBodySchema = z.union([
+  z.undefined(),
+  z.null(),
+  z.object({}).strict(),
+]);
+
+export type VisitLifecycleRequestBody = z.infer<
+  typeof VisitLifecycleRequestBodySchema
+>;
+
+/**
  * The canonical response schema for a successful appointment
  * visit-lifecycle transition (confirm, check-in, start, complete).
  *
