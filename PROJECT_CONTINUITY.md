@@ -6296,10 +6296,12 @@ obtained first.
 - **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
 - **Branch:** `feature/appointments-stage-1e-rescheduling`
 - **Verified base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
-- **Status:** implemented, validated locally (typecheck, lint, unit tests,
-  prisma validate/generate, production build); PostgreSQL 17 integration
-  tests NOT RUN locally (no PostgreSQL 17 binary available in this
-  environment); CI required before readiness.
+- **Status:** ✅ MERGED INTO MAIN via PR #20 (merge commit
+  `2211f4395b9214765df62f09e27e8a25e645efb0`, merged 2026-08-10).
+  Implementation validated by authoritative PostgreSQL 17 CI on the
+  final PR head `0404c73` (run `31414044488`, conclusion success).
+  All Stage 1C/1D regression suites and the 42-test rescheduling
+  integration suite passed.
 
 ### Architecture-Gate Decisions
 
@@ -6478,15 +6480,20 @@ obtained first.
 
 ### Latest Verified Feature Commit
 
-- **Feature branch tip:** `db29c88f1af10fc55fa64fb85874adf16e631266`
-  (local HEAD == direct remote == remote-tracking; SHA equality verified).
+- **PR #20 merge commit (on main):**
+  `2211f4395b9214765df62f09e27e8a25e645efb0` (merged 2026-08-10,
+  normal merge-commit strategy, verified on remote main).
+- **Final implementation PR head:** `0404c73fa2d6801e2eed23d01d4e8c75aa0cbe99`
+  (the exact head merged via PR #20).
   - Implementation commit: `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`
-  - Continuity/docs commit: `db29c88f1af10fc55fa64fb85874adf16e631266`
+  - Continuity/docs commit 1: `db29c88f1af10fc55fa64fb85874adf16e631266`
+  - Continuity/docs commit 2 (retry correction):
+    `0404c73fa2d6801e2eed23d01d4e8c75aa0cbe99`
 - **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
 - **PR #20:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/20
-  (draft, OPEN, unmerged).
-- **Authoritative Main CI run (current exact head `db29c88`):**
-  `31288942970` (head SHA `db29c88f1af10fc55fa64fb85874adf16e631266`,
+  (MERGED, state closed).
+- **Authoritative Main CI run (final exact head `0404c73`):**
+  `31414044488` (head SHA `0404c73fa2d6801e2eed23d01d4e8c75aa0cbe99`,
   exact-head match, conclusion **success**).
   - Static/build job: success (Node.js 24, pnpm 11.14.0, frozen
     lockfile, Prisma validate/generate, typecheck, lint, unit tests,
@@ -6495,32 +6502,34 @@ obtained first.
     tests passed; booking regression 36 tests; cancellation regression
     31 tests; today's appointments 24 tests; audit atomicity 9,
     integration 29, store 16, concurrency 11, verify 7 — all passed).
-- **Prior implementation-head CI run (`461a5ae`):** `31288690338`
-  (conclusion success; same job breakdown as above). Both heads are
-  green; the current exact head `db29c88` adds only a
-  PROJECT_CONTINUITY.md documentation correction.
+- **Prior CI runs (historical):**
+  - `31288942970` (head `db29c88`, conclusion success).
+  - `31288690338` (head `461a5ae`, conclusion success).
 
 ### Recovery Information
 
-- **Authoritative feature branch:**
+- **Authoritative feature branch (preserved on remote):**
   `feature/appointments-stage-1e-rescheduling`
-  (tip `db29c88f1af10fc55fa64fb85874adf16e631266`).
+  (tip `0404c73fa2d6801e2eed23d01d4e8c75aa0cbe99`; merged into main
+  via PR #20, branch not deleted).
+- **PR #20 merge commit on main:**
+  `2211f4395b9214765df62f09e27e8a25e645efb0`
 - **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
 - **BC01 branch:** not modified.
 - **BC10 branch:** not modified.
 - **Stage 1C historical branch:** not modified.
 - **Stage 1D historical branch:** not modified.
-- **main:** NOT pushed.
+- **main:** advanced only via PR #20 merge (no direct push, no force).
 
 ### Immediate Next Step
 
-Stage 1E Appointment Rescheduling is implemented on
-`feature/appointments-stage-1e-rescheduling`, committed, pushed, and
-has passed authoritative PostgreSQL 17 CI on the current exact head
-`db29c88` (run `31288942970`, conclusion success). The retry count in
-this continuity record has been corrected to match the implementation
-(`MAX_SERIALIZATION_RETRIES = 3`, i.e., 3 total attempts). The draft
-PR #20 is ready for final operator review. Stage 1E is NOT merged and
-NOT marked complete. The operator should review PR #20 and merge it
-when satisfied.
+Stage 1E Appointment Rescheduling is MERGED into main via PR #20
+(merge commit `2211f4395b9214765df62f09e27e8a25e645efb0`). The final
+PR head `0404c73` passed authoritative PostgreSQL 17 CI (run
+`31414044488`, conclusion success). The retry count in this continuity
+record matches the implementation (`MAX_SERIALIZATION_RETRIES = 3`,
+i.e., 3 total attempts). No schema or migration changes were
+introduced. No recursive continuity commit will be created. The next
+substantive project decision is operator-determined (e.g., Stage 1F or
+another bounded-context stage).
 
