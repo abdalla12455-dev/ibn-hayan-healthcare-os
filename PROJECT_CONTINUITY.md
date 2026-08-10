@@ -6533,3 +6533,187 @@ introduced. No recursive continuity commit will be created. The next
 substantive project decision is operator-determined (e.g., Stage 1F or
 another bounded-context stage).
 
+
+---
+
+## Stage 1F — Appointment Visit Lifecycle (2026-08-10)
+
+### Operator Ratification
+
+The operator explicitly ratified **Stage 1F — Appointment Visit Lifecycle** as the next substantive production stage, following the approved sequence 1C (Booking) → 1D (Cancellation) → 1E (Rescheduling) → 1F (Visit Lifecycle).
+
+### Repository and Branch
+
+- **Repository:** `abdalla12455-dev/ibn-hayan-healthcare-os`
+- **Feature branch:** `feature/appointments-stage-1f-visit-lifecycle`
+- **Base (origin/main):** `f8c211b3b6817bb80b44a234ecec0d569e7cedb1`
+- **Bounded context:** BC06 Scheduling / Appointments
+
+### Approved Scope
+
+Clinic-side backend appointment visit lifecycle: confirm, check-in, start, complete. Extends the existing Stage 1C/1D/1E appointment implementation in place. No second appointment module, no competing lifecycle engine, no duplicate status implementation.
+
+### Explicitly Excluded Scope
+
+No-show recording/reversal, cancellation redesign, rescheduling redesign, frontend/UI, Platform Super Admin operational workflows, patient/provider demographics, provider scheduling, slot templates, waitlists, reminders, notifications, billing execution, payment, encounter clinical documentation, diagnoses, prescriptions, procedures, recurring appointments, self-scheduling, bulk actions, arbitrary status editing, generic unrestricted appointment update APIs. No-show remains excluded for a later dedicated exception-lifecycle stage.
+
+### Architecture-Gate Result
+
+All canonical decisions were resolved from repository documentation (STATUS_CODES.md §4.1, APPOINTMENTS.md, ENUMS.md, PRODUCT_BIBLE). No blockers encountered.
+
+### Canonical Transition Graph
+
+    booked      → confirmed   (confirm)
+    booked      → arrived     (check-in, direct check-in)
+    confirmed   → arrived     (check-in)
+    arrived     → in_progress (start)
+    in_progress → completed   (complete)
+
+Encoded in `APPOINTMENT_VISIT_TRANSITIONS` (domain). Disallowed transitions return `APPOINTMENT_INVALID_TRANSITION` (422).
+
+### Terminology Mapping
+
+- Scheduled = implemented `booked` (no new enum value)
+- CheckedIn = implemented `arrived` (no new enum value)
+- InProgress = implemented `in_progress` (no new enum value)
+
+### Idempotency Decisions
+
+- **Confirm:** non-terminal. `confirmed → confirmed` = invalid transition (422). Not idempotent.
+- **Check-in:** non-terminal. `arrived → arrived` = invalid transition (422). Not idempotent.
+- **Start:** non-terminal. `in_progress → in_progress` = invalid transition (422). Not idempotent.
+- **Complete:** terminal. `completed → completed` = idempotent success (200, no mutation, no duplicate audit). Mirrors cancellation idempotency for the terminal `cancelled` state.
+
+### Backward-Transition Decision
+
+Backward transitions (e.g. `confirmed → booked`) are NOT part of Stage 1F forward visit lifecycle and are excluded. No backward transition was implemented.
+
+### Endpoints
+
+- `POST /api/v1/appointments/:id/confirm`
+- `POST /api/v1/appointments/:id/check-in`
+- `POST /api/v1/appointments/:id/start`
+- `POST /api/v1/appointments/:id/complete`
+
+All four accept NO request body (no scope, status, or actor fields).
+
+### Permission Codes
+
+- `appointments:confirm`
+- `appointments:check_in`
+- `appointments:start`
+- `appointments:complete`
+
+### Role Decisions
+
+- **Confirm:** R06 Receptionist, R07 Scheduler, R09 Clinic Administrator.
+- **Check-in:** R06 Receptionist, R07 Scheduler, R09 Clinic Administrator.
+- **Start:** R01 Physician only (clinical action).
+- **Complete:** R01 Physician only (clinical action).
+- **R13 Platform Super Admin:** denied for ALL clinic lifecycle actions (no inheritance).
+- R09 Clinic Administrator does NOT receive start/complete (no clinical override — canonical architecture reserves clinical lifecycle actions for clinical roles).
+
+### Timestamp / Persistence Decision
+
+No new database columns (`confirmedAt`, `arrivedAt`, `startedAt`, `completedAt`, `confirmationChannel`, `encounterId`). Lifecycle timing is inherent in the audit event timestamp. Canonical docs do not require persistent lifecycle timestamp columns for Stage 1F.
+
+### Confirmation Channel Decision
+
+No confirmation channel field. Canonical docs (ENUMS.md) do not define a confirmation-channel enum. No SMS/phone/email enums invented.
+
+### Encounter (BC02) Boundary
+
+BC02 is NOT implemented. The encounter reference is future audit metadata, not a hard dependency. Starting/completing a visit does NOT require a BC02 Encounter. No fake encounter reference created. BC02 will subscribe to completion events in a future stage.
+
+### Billing (BC07) Boundary
+
+BC07 is NOT implemented. Appointment completion does NOT synchronously trigger billing. BC07 will be a future downstream consumer. No fake billing records created.
+
+### Repository Design
+
+Extended the EXISTING `AppointmentRepository` with a single `transitionStatus(...)` primitive. The caller supplies allowed source states + fixed target + idempotency flag; the repository enforces the canonical source→target map. No generic caller-controlled `updateStatus(anyStatus)`. Scoped lookup by tenantId/organisationId/facilityId/appointmentId; cross-scope returns `not_found`.
+
+### Concurrency Design
+
+`transitionStatus` runs in a SERIALIZABLE transaction with bounded retry (`MAX_SERIALIZATION_RETRIES = 3`, 3 total attempts). Both serialization conflict forms preserved: Prisma P2034 and `@prisma/adapter-pg` `DriverAdapterError` with `cause.kind === 'TransactionWriteConflict'`. On retry, the row is re-observed at its committed status and resolved deterministically. No expected serialization conflict escapes as HTTP 500.
+
+### Audit Actions
+
+- `appointments.confirmed` (endpoint `appointments_confirm`)
+- `appointments.checked_in` (endpoint `appointments_check_in`)
+- `appointments.started` (endpoint `appointments_start`)
+- `appointments.completed` (endpoint `appointments_complete`)
+
+Category: `facility_context`. Metadata: `{ endpoint, appointmentId }` only — no PHI. Exactly one success audit event per actual transition; no event on failure, not-found, invalid transition, or idempotent re-completion.
+
+### Schema / Migration Decision
+
+No schema changes. No migration. `AppointmentStatus` enum already contains all 7 statuses (booked, confirmed, arrived, in_progress, completed, cancelled, no_show).
+
+### Files Created
+
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts`
+- `apps/api/test/appointments/appointments-visit-lifecycle.integration.spec.ts`
+
+### Files Modified
+
+- `packages/domain/src/authorization/permissions.ts` (4 new permission codes)
+- `packages/domain/src/authorization/role-permissions.ts` (CLINICAL_VISIT_PERMISSIONS for R01; confirm/check_in to R06/R07/R09)
+- `packages/domain/src/authorization/authorization.spec.ts` (permission count assertions)
+- `packages/domain/src/scheduling/appointment.ts` (APPOINTMENT_VISIT_TRANSITIONS, AppointmentTransitionInput, AppointmentTransitionResult)
+- `packages/domain/src/scheduling/repositories.ts` (transitionStatus port method)
+- `packages/contracts/src/appointments/appointments.schema.ts` (visit-lifecycle response + error schemas)
+- `packages/observability/src/audit/action-codes.ts` (4 new action codes)
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` (transitionStatus implementation)
+- `apps/api/src/modules/appointments/appointments.errors.ts` (appointmentVisitInvalidTransition)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (4 endpoints)
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts` (visit-lifecycle stub)
+- `apps/api/src/modules/appointments/appointments.module.ts` (service registration)
+
+### Files Deleted
+
+None.
+
+### Tests
+
+Integration test file `appointments-visit-lifecycle.integration.spec.ts` covers: authentication, authorization (allowed + denied roles per command, R13 denial), scope isolation (cross-tenant/org/facility 404, body override rejection), confirmation (happy, idempotency, invalid sources, audit), check-in (booked→arrived, confirmed→arrived, idempotency, invalid sources, audit), start (happy, idempotency, invalid sources, audit), complete (happy, terminal idempotency, invalid sources, audit), full happy path (booked→confirmed→arrived→in_progress→completed), direct happy path (booked→arrived→in_progress→completed), concurrency (confirm-vs-confirm, confirm-vs-cancel, confirm-vs-reschedule, check-in concurrency, check-in-vs-cancel, check-in-vs-reschedule, start concurrency, complete-vs-complete, no-500), terminal/exception regression (cancelled/no_show/completed cannot advance), audit metadata (no PHI, actor context, no event on failure), and slot blocking regression (cancelled/no_show non-blocking, booked blocking).
+
+### Validation
+
+- Prisma validate: PASS
+- Prisma generate: PASS
+- Domain typecheck: PASS
+- Contracts typecheck: PASS
+- Observability typecheck: PASS
+- API typecheck: PASS
+- Full monorepo typecheck: PASS
+- API lint: PASS (0 errors)
+- Domain unit tests: PASS (127/127)
+- Observability unit tests: PASS (95/95)
+- Controller spec: PASS (18/18)
+- API production build: PASS
+- **PostgreSQL 17 integration tests (local): NOT RUN** (PG17 unavailable in this environment).
+- **PostgreSQL 17 integration tests (authoritative CI): SUCCESS.** Run 31441476104 on exact PR head 913fb16411e1806d13bc9e71e8af72298b93f0ad. 73 Stage 1F integration tests passed; Stage 1C booking regression (24 tests), Stage 1D cancellation regression (31 tests), Stage 1E rescheduling regression (42 tests) all passed.
+
+### Known Risks
+
+- PostgreSQL 17 integration tests were NOT RUN locally (PG17 unavailable), but authoritative CI (run 31441476104) validated all 73 Stage 1F tests plus regressions on real PostgreSQL 17 with SERIALIZABLE isolation. Both P2034 and DriverAdapterError TransactionWriteConflict retry behavior confirmed green.
+- The confirm-vs-cancel and confirm-vs-reschedule concurrency outcomes are non-deterministic in which request wins, but the test asserts the deterministic invariant (exactly one transition, exactly one audit event, no split-brain).
+
+### No-Show Exclusion
+
+No-show recording and reversal remain excluded. `NON_BLOCKING_STATUSES` (`cancelled`, `no_show`) unchanged. The `no_show` enum value exists but is not acted upon by Stage 1F.
+
+### Recovery Information
+
+- Feature branch: `feature/appointments-stage-1f-visit-lifecycle`
+- Base: `f8c211b3b6817bb80b44a234ecec0d569e7cedb1`
+- No schema or migration changes.
+- No force operations.
+- main was NOT pushed.
+- Stage 1C/1D/1E branches NOT modified.
+- BC01/BC10 branches NOT modified.
+
+### Immediate Next Step
+
+Stage 1F implementation is complete. Authoritative exact-head CI (run 31441476104, head 913fb16) passed: static/build SUCCESS, PostgreSQL 17 SUCCESS (73 Stage 1F + Stage 1C/1D/1E regressions all green). PR #22 is ready for final operator review and merge. At this pre-merge point PR #22 remains unmerged; operator final review/merge is next.

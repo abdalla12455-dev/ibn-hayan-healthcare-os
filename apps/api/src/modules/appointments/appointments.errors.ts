@@ -213,3 +213,44 @@ export function appointmentRescheduleInvalidTransition(): UnprocessableEntityExc
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Visit lifecycle errors (Stage 1F)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a 422 when an appointment is in a source state that is not
+ * canonically permitted for a Stage 1F visit-lifecycle transition
+ * (confirm, check-in, start, complete).
+ *
+ * Per STATUS_CODES.md §4.1 and the Stage 1F specification, the
+ * canonical forward visit-lifecycle edges are:
+ * - confirm:  booked → confirmed
+ * - check-in: booked | confirmed → arrived
+ * - start:    arrived → in_progress
+ * - complete: in_progress → completed
+ *
+ * For non-terminal targets (confirmed, arrived, in_progress), a
+ * same-state re-application is NOT a permitted edge and is rejected as
+ * an invalid transition. For the terminal `completed` target, an
+ * already-completed appointment is an idempotent success (not this
+ * error). The message is transition-specific so the client can present
+ * the correct action to the user, while the error code is shared with
+ * cancellation/rescheduling for a single invalid-transition code path.
+ */
+export function appointmentVisitInvalidTransition(
+  action: 'confirm' | 'check-in' | 'start' | 'complete',
+): UnprocessableEntityException {
+  const messages: Record<typeof action, string> = {
+    confirm: 'The appointment cannot be confirmed from its current state.',
+    'check-in': 'The appointment cannot be checked in from its current state.',
+    start: 'The appointment cannot be started from its current state.',
+    complete: 'The appointment cannot be completed from its current state.',
+  };
+  return new UnprocessableEntityException({
+    error: {
+      code: 'APPOINTMENT_INVALID_TRANSITION',
+      message: messages[action],
+    },
+  });
+}

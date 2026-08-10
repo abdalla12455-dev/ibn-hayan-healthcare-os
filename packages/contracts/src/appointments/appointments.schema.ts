@@ -556,3 +556,103 @@ export const ReschedulingErrorResponseSchema = z
 export type ReschedulingErrorResponse = z.infer<
   typeof ReschedulingErrorResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Visit Lifecycle (Stage 1F): confirm, check-in, start, complete
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical request-body schema for the appointment visit-lifecycle
+ * endpoints (confirm, check-in, start, complete).
+ *
+ * All four commands accept NO business input besides the appointment ID
+ * (supplied in the URL path). The body MUST be empty, absent, or an
+ * empty JSON object. Any supplied field — including `tenantId`,
+ * `organisationId`, `facilityId`, `status`, `actorId`, or any other
+ * key — is rejected as an `APPOINTMENT_VALIDATION_ERROR` (400). This
+ * prevents scope override, status override, and actor override via the
+ * request body.
+ *
+ * The schema accepts `undefined` (no body sent), `null` (some clients
+ * send null), and `{}` (empty JSON object). It rejects any object with
+ * keys via `.strict()`, matching the existing booking, cancellation,
+ * and rescheduling contract conventions.
+ */
+export const VisitLifecycleRequestBodySchema = z.union([
+  z.undefined(),
+  z.null(),
+  z.object({}).strict(),
+]);
+
+export type VisitLifecycleRequestBody = z.infer<
+  typeof VisitLifecycleRequestBodySchema
+>;
+
+/**
+ * The canonical response schema for a successful appointment
+ * visit-lifecycle transition (confirm, check-in, start, complete).
+ *
+ * Returns the appointment with all persisted fields. The `status`
+ * reflects the target state of the transition (`confirmed`,
+ * `arrived`, `in_progress`, or `completed`). For an idempotent
+ * re-completion of an already-completed appointment, the response is
+ * the same canonical success shape with `status: 'completed'` and NO
+ * duplicate audit event is emitted.
+ *
+ * The schema is identical in shape to {@link BookAppointmentResponseSchema}
+ * and {@link CancelAppointmentResponseSchema} so the frontend can use
+ * a single appointment-response code path.
+ */
+export const AppointmentVisitLifecycleResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict();
+
+export type AppointmentVisitLifecycleResponse = z.infer<
+  typeof AppointmentVisitLifecycleResponseSchema
+>;
+
+/**
+ * The canonical error response schema for the appointment
+ * visit-lifecycle endpoints (confirm, check-in, start, complete).
+ *
+ * Error codes:
+ * - `APPOINTMENT_VALIDATION_ERROR`: invalid request body (the
+ *   visit-lifecycle commands accept no body fields; any supplied
+ *   field is rejected).
+ * - `APPOINTMENT_NOT_FOUND`: the appointment does not exist or is not
+ *   accessible in the authenticated tenant, organisation, or facility.
+ *   The same error is returned regardless of whether the appointment
+ *   does not exist or exists in another scope (no existence leak).
+ * - `APPOINTMENT_INVALID_TRANSITION`: the appointment is in a source
+ *   state that is not canonically permitted for this transition, OR
+ *   (for non-terminal targets) the appointment is already in the
+ *   target state (same-state re-application is not a permitted edge).
+ *   For the terminal `completed` target, an already-completed
+ *   appointment is an idempotent success (not this error).
+ */
+export const VisitLifecycleErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum([
+          'APPOINTMENT_VALIDATION_ERROR',
+          'APPOINTMENT_NOT_FOUND',
+          'APPOINTMENT_INVALID_TRANSITION',
+        ]),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type VisitLifecycleErrorResponse = z.infer<
+  typeof VisitLifecycleErrorResponseSchema
+>;

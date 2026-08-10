@@ -81,7 +81,11 @@ export type PermissionCode =
   | 'appointments:view'
   | 'appointments:book'
   | 'appointments:cancel'
-  | 'appointments:reschedule';
+  | 'appointments:reschedule'
+  | 'appointments:confirm'
+  | 'appointments:check_in'
+  | 'appointments:start'
+  | 'appointments:complete';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -116,6 +120,10 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'appointments:book',
   'appointments:cancel',
   'appointments:reschedule',
+  'appointments:confirm',
+  'appointments:check_in',
+  'appointments:start',
+  'appointments:complete',
 ] as const;
 
 /**

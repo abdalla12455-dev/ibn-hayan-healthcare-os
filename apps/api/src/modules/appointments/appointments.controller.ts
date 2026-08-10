@@ -25,15 +25,56 @@ import type {
   BookAppointmentResponse,
   CancelAppointmentResponse,
   RescheduleAppointmentResponse,
+  AppointmentVisitLifecycleResponse,
 } from '@ibn-hayan/contracts';
 import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
+import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
 import {
   readCookie,
   buildAuditContext,
 } from '../../infrastructure/transport/index.js';
+
+/**
+ * Shared OpenAPI response schema for the four Stage 1F visit-lifecycle
+ * endpoints (confirm, check-in, start, complete). All four return the
+ * same appointment shape with a status reflecting the transition's
+ * target state.
+ */
+const visitLifecycleResponseSchema = {
+  type: 'object',
+  required: [
+    'id',
+    'patientId',
+    'providerId',
+    'scheduledStart',
+    'scheduledEnd',
+    'status',
+    'typeCode',
+  ],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    patientId: { type: 'string', format: 'uuid' },
+    providerId: { type: 'string', format: 'uuid' },
+    scheduledStart: { type: 'string', format: 'date-time' },
+    scheduledEnd: { type: 'string', format: 'date-time' },
+    status: {
+      type: 'string',
+      enum: [
+        'booked',
+        'confirmed',
+        'arrived',
+        'in_progress',
+        'completed',
+        'cancelled',
+        'no_show',
+      ],
+    },
+    typeCode: { type: 'string', minLength: 1, maxLength: 80 },
+  },
+};
 
 /**
  * Appointments controller.
@@ -81,6 +122,7 @@ export class AppointmentsController {
     private readonly bookingService: AppointmentsBookingService,
     private readonly cancellationService: AppointmentsCancellationService,
     private readonly reschedulingService: AppointmentsReschedulingService,
+    private readonly visitLifecycleService: AppointmentsVisitLifecycleService,
   ) {}
 
   /**
@@ -609,6 +651,338 @@ export class AppointmentsController {
       throw sessionRequired();
     }
 
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 1F — Visit Lifecycle (confirm, check-in, start, complete)
+  // -------------------------------------------------------------------------
+  //
+  // The four visit-lifecycle commands accept NO request body. All scope
+  // (tenantId, organisationId, facilityId) is derived from the
+  // authenticated session. The caller cannot supply an arbitrary
+  // target status; each endpoint fixes its canonical transition.
+  //
+  // A shared response schema and Swagger definition is used for all
+  // four endpoints via the visitLifecycleResponse() helper.
+
+  /**
+   * POST /api/v1/appointments/:id/confirm
+   *
+   * Confirm an appointment (`booked` → `confirmed`).
+   *
+   * Authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+   * Administrator (operational pre-arrival action; permission
+   * `appointments:confirm`).
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:confirm`, or when the active context is missing.
+   * Returns 404 when the appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope leak).
+   * Returns 422 when the appointment is not in the `booked` state
+   * (confirming an already-confirmed appointment is an invalid
+   * transition, NOT idempotent success — `confirmed` is reversible,
+   * not terminal).
+   */
+  @Post(':id/confirm')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:confirm', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Confirm an appointment (booked → confirmed) for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The confirmed appointment. The appointments.confirmed audit event is emitted exactly once on a first-time transition.',
+    schema: visitLifecycleResponseSchema,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Appointment not found or not accessible in the current context.',
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'The appointment cannot be confirmed from its current state.',
+  })
+  async confirmAppointment(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<AppointmentVisitLifecycleResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+    const result = await this.visitLifecycleService.confirmAppointment(
+      id,
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments/:id/check-in
+   *
+   * Check a patient in (`booked` | `confirmed` → `arrived`).
+   *
+   * Authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+   * Administrator (operational arrival action; permission
+   * `appointments:check_in`). Per STATUS_CODES.md §4.1, both
+   * `booked` (direct check-in) and `confirmed` are canonically
+   * permitted source states.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:check_in`, or when the active context is missing.
+   * Returns 404 when the appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope leak).
+   * Returns 422 when the appointment is not in `booked` or
+   * `confirmed` (checking in an already-arrived appointment is an
+   * invalid transition — `arrived` is reversible, not terminal).
+   */
+  @Post(':id/check-in')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:check_in', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Check a patient in (booked|confirmed → arrived) for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The checked-in appointment. The appointments.checked_in audit event is emitted exactly once on a first-time transition.',
+    schema: visitLifecycleResponseSchema,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Appointment not found or not accessible in the current context.',
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'The appointment cannot be checked in from its current state.',
+  })
+  async checkInAppointment(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<AppointmentVisitLifecycleResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+    const result = await this.visitLifecycleService.checkInAppointment(
+      id,
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments/:id/start
+   *
+   * Start a visit (`arrived` → `in_progress`).
+   *
+   * Authorized for R01 Physician only (clinical visit-progression
+   * action; permission `appointments:start`). Per STATUS_CODES.md
+   * §4.1, InProgress means "Patient is being seen by the practitioner".
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:start` (R01 Physician only), or when the active
+   * context is missing.
+   * Returns 404 when the appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope leak).
+   * Returns 422 when the appointment is not in `arrived` (starting
+   * an already-in-progress appointment is an invalid transition —
+   * `in_progress` is reversible, not terminal).
+   */
+  @Post(':id/start')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:start', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Start a visit (arrived → in_progress) for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The in-progress appointment. The appointments.started audit event is emitted exactly once on a first-time transition.',
+    schema: visitLifecycleResponseSchema,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Appointment not found or not accessible in the current context.',
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'The appointment cannot be started from its current state.',
+  })
+  async startAppointment(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<AppointmentVisitLifecycleResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+    const result = await this.visitLifecycleService.startAppointment(
+      id,
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments/:id/complete
+   *
+   * Complete a visit (`in_progress` → `completed`).
+   *
+   * Authorized for R01 Physician only (clinical visit-progression
+   * action; permission `appointments:complete`). `completed` is a
+   * canonical terminal state. Re-completing an already-completed
+   * appointment is an idempotent no-op (no mutation, no duplicate
+   * audit event), mirroring the cancellation idempotency for the
+   * terminal `cancelled` state.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:complete` (R01 Physician only), or when the active
+   * context is missing.
+   * Returns 404 when the appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope leak).
+   * Returns 422 when the appointment is not in `in_progress` (an
+   * already-completed appointment returns idempotent success 200,
+   * NOT this error).
+   */
+  @Post(':id/complete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:complete', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Complete a visit (in_progress → completed) for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The completed appointment. The appointments.completed audit event is emitted exactly once on a first-time transition. An idempotent re-completion returns success without a duplicate audit event.',
+    schema: visitLifecycleResponseSchema,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Appointment not found or not accessible in the current context.',
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'The appointment cannot be completed from its current state.',
+  })
+  async completeAppointment(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<AppointmentVisitLifecycleResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { VisitLifecycleRequestBodySchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = VisitLifecycleRequestBodySchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+    const result = await this.visitLifecycleService.completeAppointment(
+      id,
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
     return result;
   }
 }

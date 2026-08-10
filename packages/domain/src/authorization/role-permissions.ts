@@ -112,6 +112,45 @@ const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:book',
   'appointments:cancel',
   'appointments:reschedule',
+  'appointments:confirm',
+  'appointments:check_in',
+] as const;
+
+/**
+ * The nine permissions granted to R01 Physician: the seven context
+ * permissions plus `appointments:start` and `appointments:complete`.
+ * This list is EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
+ *
+ * Per the Stage 1F implementation specification, R01 Physician is the
+ * canonical clinical role that progresses a visit from `arrived` to
+ * `in_progress` (start) and from `in_progress` to `completed`
+ * (complete). Per STATUS_CODES.md §4.1, InProgress means "Patient is
+ * being seen by the practitioner" and Completed means "Appointment
+ * has concluded" — these are practitioner (clinical) actions, NOT
+ * operational actions. They are therefore NOT granted to R06
+ * Receptionist, R07 Scheduler, or R09 Clinic Administrator, and NOT
+ * granted to R13_SYSTEM_ADMINISTRATOR.
+ *
+ * Per download/docs/07_MODULES/APPOINTMENTS.md §9.1, R01 Physician's
+ * appointment-related responsibilities are "View own schedule, block
+ * slots, manage appointment types". The start/complete visit-lifecycle
+ * actions are the clinical progression of an appointment the physician
+ * is delivering; they are the canonical clinical counterpart to the
+ * operational booking/cancellation/rescheduling actions held by
+ * R06/R07/R09.
+ *
+ * R02 Nurse does NOT receive `appointments:start` or
+ * `appointments:complete` in this stage: APPOINTMENTS.md §9.1 lists
+ * R02 responsibilities as "View clinic schedule, manage room
+ * assignments", which does not canonically grant visit start/complete.
+ * A future stage may extend clinical visit permissions to R02 if
+ * canonical evidence authorizes it; until then the least-privilege
+ * choice is R01 only.
+ */
+const CLINICAL_VISIT_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'appointments:start',
+  'appointments:complete',
 ] as const;
 
 /**
@@ -144,6 +183,8 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:book',
   'appointments:cancel',
   'appointments:reschedule',
+  'appointments:confirm',
+  'appointments:check_in',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -214,7 +255,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
-  R01_PHYSICIAN: HUMAN_CONTEXT_PERMISSIONS,
+  R01_PHYSICIAN: CLINICAL_VISIT_PERMISSIONS,
   R02_NURSE: HUMAN_CONTEXT_PERMISSIONS,
   R03_PHARMACIST: HUMAN_CONTEXT_PERMISSIONS,
   R04_TECHNICIAN: HUMAN_CONTEXT_PERMISSIONS,

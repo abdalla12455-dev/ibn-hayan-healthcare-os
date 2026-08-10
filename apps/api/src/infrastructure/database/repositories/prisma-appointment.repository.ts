@@ -7,6 +7,8 @@ import type {
   AppointmentCreateInput,
   AppointmentRescheduleInput,
   AppointmentRescheduleResult,
+  AppointmentTransitionInput,
+  AppointmentTransitionResult,
   AppointmentId,
   TenantId,
   OrganisationId,
@@ -483,6 +485,98 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             outcome: 'rescheduled' as const,
             original: appointmentFromPrisma(cancelled),
             replacement: appointmentFromPrisma(replacement),
+          };
+        },
+        {
+          isolationLevel: 'Serializable',
+        },
+      );
+
+      return result;
+    };
+
+    return this.executeWithSerializationRetry(transactionLogic);
+  }
+
+  async transitionStatus(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+    input: AppointmentTransitionInput,
+  ): Promise<AppointmentTransitionResult> {
+    const transactionLogic = async (): Promise<AppointmentTransitionResult> => {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          // Scoped lookup: all three scope identifiers must match.
+          // An appointment outside scope returns not_found,
+          // indistinguishable from "does not exist" (no cross-scope
+          // existence leak).
+          const row = await tx.appointment.findFirst({
+            where: {
+              id: appointmentId,
+              tenantId,
+              organisationId,
+              facilityId,
+            },
+          });
+
+          if (row === null) {
+            return {
+              outcome: 'not_found' as const,
+            };
+          }
+
+          // Idempotent terminal-target re-application (e.g.
+          // completing an already-completed appointment). This
+          // mirrors the cancellation idempotency for the terminal
+          // `cancelled` state: no mutation, no audit event. The
+          // service uses `already_at_target` to return the canonical
+          // success response without emitting a duplicate audit
+          // event. Only the terminal `completed` target enables
+          // idempotency (the service sets
+          // `idempotentIfAlreadyAtTarget: true` only for complete).
+          if (
+            input.idempotentIfAlreadyAtTarget &&
+            row.status === input.targetStatus
+          ) {
+            return {
+              outcome: 'already_at_target' as const,
+              appointment: appointmentFromPrisma(row),
+            };
+          }
+
+          // Validate the canonical source-state → target-state edge.
+          // The appointment's current status must be one of the
+          // canonically-permitted source states for this transition.
+          // A non-terminal same-state re-application (e.g. confirming
+          // an already-confirmed appointment) falls through here:
+          // the current status equals the target, which is NOT in
+          // the allowed source states (the same-state edge is not in
+          // the canonical transition map), so it resolves as
+          // invalid_source_state.
+          if (!input.allowedSourceStates.includes(row.status)) {
+            return {
+              outcome: 'invalid_source_state' as const,
+              appointment: appointmentFromPrisma(row),
+            };
+          }
+
+          // Atomic conditional transition: update the status to the
+          // target. Under SERIALIZABLE isolation, a concurrent
+          // transition that already changed this row causes a P2034
+          // / DriverAdapterError conflict, which is retried by the
+          // outer loop; on retry the row is re-observed at its
+          // committed status and resolved deterministically above.
+          const updated = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: { status: input.targetStatus },
+          });
+
+          return {
+            outcome: 'transitioned' as const,
+            appointment: appointmentFromPrisma(updated),
+            transitioned: true as const,
           };
         },
         {

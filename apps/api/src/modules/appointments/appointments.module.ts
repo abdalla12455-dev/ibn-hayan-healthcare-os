@@ -9,6 +9,7 @@ import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
+import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
 
 /**
  * Appointments module.
@@ -25,6 +26,18 @@ import { AppointmentsReschedulingService } from './appointments-rescheduling.ser
  * - `POST /api/v1/appointments/:id/reschedule` for rescheduling
  *   appointments, authorized for R06 Receptionist, R07 Scheduler, and
  *   R09 Clinic Administrator roles (requires `appointments:reschedule`
+ *   permission).
+ * - `POST /api/v1/appointments/:id/confirm` for confirming appointments,
+ *   authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+ *   Administrator roles (requires `appointments:confirm` permission).
+ * - `POST /api/v1/appointments/:id/check-in` for checking patients in,
+ *   authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+ *   Administrator roles (requires `appointments:check_in` permission).
+ * - `POST /api/v1/appointments/:id/start` for starting a visit,
+ *   authorized for R01 Physician only (requires `appointments:start`
+ *   permission).
+ * - `POST /api/v1/appointments/:id/complete` for completing a visit,
+ *   authorized for R01 Physician only (requires `appointments:complete`
  *   permission).
  *
  * The module depends on:
@@ -49,6 +62,7 @@ import { AppointmentsReschedulingService } from './appointments-rescheduling.ser
     AppointmentsBookingService,
     AppointmentsCancellationService,
     AppointmentsReschedulingService,
+    AppointmentsVisitLifecycleService,
   ],
 })
 export class AppointmentsModule {}
