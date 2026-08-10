@@ -80,10 +80,10 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
- * The nine permissions granted to R06 Receptionist and R07 Scheduler:
- * the seven context permissions plus `appointments:book` and
- * `appointments:cancel`. This list is EXPLICIT: it does NOT use
- * `PERMISSION_CODES` directly.
+ * The ten permissions granted to R06 Receptionist and R07 Scheduler:
+ * the seven context permissions plus `appointments:book`,
+ * `appointments:cancel`, and `appointments:reschedule`. This list is
+ * EXPLICIT: it does NOT use `PERMISSION_CODES` directly.
  *
  * Per the Stage 1C implementation specification, R06 and R07 are the
  * clinic-side roles authorized to create appointments via
@@ -97,21 +97,31 @@ const HUMAN_CONTEXT_PERMISSIONS: readonly PermissionCode[] = [
  * `POST /api/v1/appointments/:id/cancel`. The `appointments:cancel`
  * permission is NOT granted to R13_SYSTEM_ADMINISTRATOR — platform-level
  * identity must not gain clinic-cancellation access.
+ *
+ * Per the Stage 1E implementation specification, R06 and R07 are also
+ * authorized to reschedule appointments via
+ * `POST /api/v1/appointments/:id/reschedule`. Per
+ * download/docs/07_MODULES/APPOINTMENTS.md, R06 "Book, reschedule,
+ * cancel appointments" and R07 "create, modify, and cancel
+ * appointments". The `appointments:reschedule` permission is NOT
+ * granted to R13_SYSTEM_ADMINISTRATOR — platform-level identity must
+ * not gain clinic-rescheduling access.
  */
 const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
   ...HUMAN_CONTEXT_PERMISSIONS,
   'appointments:book',
   'appointments:cancel',
+  'appointments:reschedule',
 ] as const;
 
 /**
- * The eleven permissions granted to R09 Clinic Administrator: the
+ * The twelve permissions granted to R09 Clinic Administrator: the
  * seven context permissions plus `clinic_admin_overview:view`,
- * `appointments:view`, `appointments:book`, and `appointments:cancel`. This list is
- * EXPLICIT: it does NOT use `PERMISSION_CODES` directly. Adding
- * a future permission to `PERMISSION_CODES` does NOT automatically
- * grant it to R09 — the new permission must be explicitly added to
- * this list to be granted.
+ * `appointments:view`, `appointments:book`, `appointments:cancel`,
+ * and `appointments:reschedule`. This list is EXPLICIT: it does NOT
+ * use `PERMISSION_CODES` directly. Adding a future permission to
+ * `PERMISSION_CODES` does NOT automatically grant it to R09 — the
+ * new permission must be explicitly added to this list to be granted.
  *
  * Per the audit-semantics restoration task Phase 5, this explicit
  * list is the smallest coherent least-privilege correction that
@@ -121,6 +131,11 @@ const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
  * permission to R09, making R09 a "hidden global super-administrator."
  * The explicit list ensures R09 receives ONLY the permissions
  * explicitly listed here.
+ *
+ * Per the Stage 1E specification, R09 receives `appointments:reschedule`
+ * alongside `appointments:book` and `appointments:cancel` so that the
+ * Clinic Administrator can manage the full appointment lifecycle within
+ * the authenticated facility scope.
  */
 const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   ...HUMAN_CONTEXT_PERMISSIONS,
@@ -128,6 +143,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:view',
   'appointments:book',
   'appointments:cancel',
+  'appointments:reschedule',
 ] as const;
 
 // ---------------------------------------------------------------------------

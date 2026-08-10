@@ -31,6 +31,8 @@ import type {
   AppointmentCancelResult,
   AppointmentCreateInput,
   AppointmentReadProjection,
+  AppointmentRescheduleInput,
+  AppointmentRescheduleResult,
 } from './appointment.js';
 import type { AppointmentId } from './appointment.js';
 import type { TenantId } from '../tenancy/tenant.js';
@@ -170,4 +172,75 @@ export interface AppointmentRepository {
     facilityId: FacilityId,
     appointmentId: AppointmentId,
   ): Promise<AppointmentCancelResult>;
+
+  /**
+   * Reschedule an existing appointment to a new slot, scoped to the
+   * authenticated session's tenant, organisation, and facility.
+   *
+   * Per STATUS_CODES.md §4.1, rescheduling transitions the original
+   * appointment out of its active slot and creates a replacement
+   * appointment for the new slot: "New appointment created with
+   * Scheduled status; original marked Cancelled." In the implemented
+   * lifecycle `booked` is the canonical "Scheduled" status, so the
+   * replacement is created as `booked` and the original transitions
+   * to `cancelled`.
+   *
+   * The caller does NOT supply scope; scope is always derived from
+   * the authenticated context. The caller does NOT supply patient,
+   * provider, type, or status; those are inherited from the original
+   * appointment. Only the replacement slot (scheduledStart,
+   * scheduledEnd) is supplied via {@link AppointmentRescheduleInput}.
+   *
+   * Lifecycle rules (per STATUS_CODES.md §4.1):
+   * - Only `booked` is canonically reschedulable in this stage.
+   * - `cancelled` and `no_show` are terminal ("rebooked as new
+   *   appointment", not rescheduled in-place).
+   * - Any other source state is an invalid transition.
+   *
+   * Atomicity: the scoped lookup, source-state validation, overlap
+   * check, replacement creation, and original transition are all
+   * performed within a single SERIALIZABLE transaction. A failure in
+   * any step (overlap, serialization conflict after bounded retries,
+   * database error) leaves the original appointment unchanged and no
+   * replacement appointment exists. The operation MUST NOT produce
+   * the partial state "original cancelled, replacement not created".
+   *
+   * Overlap: the replacement slot is checked for provider overlap
+   * against existing appointments in the same tenant, organisation,
+   * and facility, excluding canonical non-blocking statuses
+   * (`cancelled`, `no_show`). The original appointment itself does
+   * not incorrectly conflict with the replacement: when the overlap
+   * check runs, the original is still in the `booked` (blocking)
+   * state, so the overlap query explicitly excludes the original
+   * appointment's own id from the conflicting set. This scoped
+   * exclusion is safe because the original is being transitioned to
+   * `cancelled` within the same atomic transaction.
+   *
+   * Concurrency safety: SERIALIZABLE transaction conflicts (Prisma
+   * P2034 and `@prisma/adapter-pg` `DriverAdapterError` with
+   * `cause.kind === 'TransactionWriteConflict'`) are retried with a
+   * bounded retry loop; on retry, the transaction re-observes
+   * committed state. Two concurrent reschedules of the same original
+   * cannot create two replacements: under SERIALIZABLE isolation the
+   * second reschedule observes the original as already `cancelled`
+   * (invalid source state) after the first commits, or one conflicts
+   * and is retried to the same outcome.
+   *
+   * @param tenantId The Tenant that owns the appointment.
+   * @param organisationId The Organisation that owns the appointment.
+   * @param facilityId The Facility where the appointment occurs.
+   * @param appointmentId The original appointment's stable identifier.
+   * @param input The replacement slot (scheduledStart, scheduledEnd).
+   * @returns The reschedule result (see
+   *          {@link AppointmentRescheduleResult}).
+   * @throws AppointmentOverlapError if the replacement slot overlaps
+   *         an existing blocking appointment for the same provider.
+   */
+  reschedule(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+    input: AppointmentRescheduleInput,
+  ): Promise<AppointmentRescheduleResult>;
 }

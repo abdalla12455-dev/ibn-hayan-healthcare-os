@@ -6286,3 +6286,241 @@ marked complete. If canonical documentation requires explicit operator
 ratification before rescheduling begins, that ratification must be
 obtained first.
 
+---
+
+## Stage 1E — Appointment Rescheduling (2026-08-09)
+
+### Operator Ratification
+
+- **Stage:** 1E — Appointment Rescheduling
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Branch:** `feature/appointments-stage-1e-rescheduling`
+- **Verified base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
+- **Status:** implemented, validated locally (typecheck, lint, unit tests,
+  prisma validate/generate, production build); PostgreSQL 17 integration
+  tests NOT RUN locally (no PostgreSQL 17 binary available in this
+  environment); CI required before readiness.
+
+### Architecture-Gate Decisions
+
+- **Canonical reschedule endpoint:** `POST /api/v1/appointments/:id/reschedule`
+  (APPOINTMENTS.md §6.5, STATUS_CODES.md §4.1).
+- **Canonical source state:** only `booked` may be rescheduled; all other
+  states return `APPOINTMENT_INVALID_TRANSITION` (422). A cancelled
+  appointment is NOT reschedulable (a new booking is required instead).
+- **Replacement appointment canonical status:** `booked` (the "Scheduled"
+  wording in STATUS_CODES.md §4.1 is descriptive terminology for the
+  canonical `booked` database status — no `scheduled` enum value was
+  invented; the lifecycle enum is unchanged from Stage 1D).
+- **Idempotency decision:** reschedule is NOT idempotent; re-rescheduling
+  a cancelled original returns `APPOINTMENT_INVALID_TRANSITION`.
+- **Editable fields:** `scheduledStart`, `scheduledEnd`, `reason`.
+- **Inherited fields (preserved from original):** `patientId`,
+  `providerId`, `typeCode`, `tenantId`, `organisationId`, `facilityId`.
+- **Reschedule reason:** required, free-text, 1–500 chars, persisted in
+  the audit-event metadata only (same persistence decision as Stage 1D
+  cancellation reason — no appointment column).
+- **Original/replacement traceability:** audit-event metadata
+  correlation only (`{ endpoint, originalAppointmentId,
+  replacementAppointmentId, reason }`); no schema field added (no
+  `rescheduledFromAppointmentId` / `rescheduledToAppointmentId` columns)
+  because canonical documentation does not require persistent linkage.
+- **Schema change decision:** NONE. Rescheduling is fully representable
+  with existing appointment rows, status, and audit correlation. No
+  migration created.
+- **Migration decision:** NONE.
+
+### Implementation Design
+
+- **Atomicity:** a single SERIALIZABLE Prisma interactive transaction in
+  `PrismaAppointmentRepository.reschedule()` performs: (1) lock/read the
+  original scoped by tenant/org/facility/id; (2) verify source state is
+  `booked`; (3) check provider overlap excluding `cancelled`/`no_show`
+  and excluding the original appointment's own row (so it does not
+  conflict with its own replacement); (4) create the replacement
+  appointment with `booked` status; (5) update the original to
+  `cancelled`. If any step fails, the transaction rolls back — the
+  original remains `booked` and no replacement exists.
+- **Transaction design:** SERIALIZABLE isolation, matching Stage 1C/1D.
+- **Concurrency design:** bounded retry with a maximum of 3 total
+  attempts (`MAX_SERIALIZATION_RETRIES = 3` in
+  `prisma-appointment.repository.ts`, shared by booking, cancellation,
+  and rescheduling) for both serialization-conflict error forms:
+  1. Prisma `P2034` (known request serialization conflict).
+  2. `@prisma/adapter-pg` `DriverAdapterError` with
+     `cause.kind === 'TransactionWriteConflict'`.
+  Each retry re-observes committed state. Serialization conflicts are
+  NOT blindly converted to overlap errors — a retry must succeed or
+  exhaust retries before surfacing a safe error.
+- **Overlap behavior:** `NON_BLOCKING_STATUSES` includes only
+  `cancelled` and `no_show` (unchanged from Stage 1D). The original
+  appointment being rescheduled is excluded from its own overlap check
+  via `NOT id = originalId` within the overlap query, scoped to the
+  same provider. Adjacent appointments remain allowed.
+- **Failed-reschedule rollback:** any validation, overlap,
+  eligibility, or persistence failure leaves the original appointment
+  unchanged (still `booked`) and creates no replacement row and emits
+  no `appointments.rescheduled` audit event.
+- **Session-scope behavior:** tenant/org/facility derived exclusively
+  from the authenticated session; the request body cannot override
+  scope (strict Zod schema rejects unknown keys including `tenantId`,
+  `organisationId`, `facilityId`, `status`, `patientId`, `providerId`).
+  Cross-tenant/org/facility originals return `APPOINTMENT_NOT_FOUND`
+  (404) — existence is not leaked outside authenticated scope.
+- **Authorization permission:** `appointments:reschedule` added to the
+  `PermissionCode` union and `PERMISSION_CODES` array in
+  `packages/domain/src/authorization/permissions.ts`.
+- **Allowed roles:** R06 Receptionist, R07 Scheduler, R09 Clinic
+  Administrator (added to `CLINIC_BOOKING_PERMISSIONS` for R06/R07 and
+  `CLINIC_ADMIN_PERMISSIONS` for R09 in `role-permissions.ts`).
+- **R13 result:** R13 System Administrator does NOT receive
+  `appointments:reschedule` (platform super-admin does not inherit
+  clinic operational permissions); R13 returns 403.
+- **Patient validation:** `PatientRepository.existsInTenant()` called
+  with session-derived `tenantId` and the inherited `patientId` from
+  the original (not caller-supplied).
+- **Provider validation:** `ProviderRepository.isEligibleForFacility()`
+  called with session-derived `tenantId`/`facilityId` and the inherited
+  `providerId` from the original (not caller-supplied).
+- **Audit action(s):** `appointments.rescheduled` (added to
+  `APPOINTMENTS_ACTION_CODES` in
+  `packages/observability/src/audit/action-codes.ts`; mapped to
+  `facility_context` category). Emitted exactly once via
+  `auditHelper.emitDirect(...)` AFTER the repository commits the atomic
+  reschedule. Not emitted on failure.
+- **Audit metadata:** `{ endpoint: 'appointments_reschedule',
+  originalAppointmentId, replacementAppointmentId, reason }` — no PHI,
+  patient demographics, provider demographics, timing details, or
+  secrets. Forbidden-key validation passes.
+- **Audit forbidden-key result:** PASS — metadata keys are exactly
+  `endpoint`, `originalAppointmentId`, `replacementAppointmentId`,
+  `reason`.
+
+### Files
+
+- **Created:**
+  - `apps/api/src/modules/appointments/appointments-rescheduling.service.ts`
+  - `apps/api/test/appointments/appointments-rescheduling.integration.spec.ts`
+- **Modified:**
+  - `packages/domain/src/scheduling/appointment.ts` (added
+    `AppointmentRescheduleResult` type)
+  - `packages/domain/src/scheduling/repositories.ts` (added `reschedule`
+    method to `AppointmentRepository` interface)
+  - `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts`
+    (added `reschedule` implementation)
+  - `packages/contracts/src/appointments/appointments.schema.ts` (added
+    reschedule Zod schemas)
+  - `apps/api/src/modules/appointments/appointments.errors.ts` (added
+    `appointmentRescheduleInvalidTransition`)
+  - `packages/domain/src/authorization/permissions.ts` (added
+    `appointments:reschedule`)
+  - `packages/domain/src/authorization/role-permissions.ts` (added to
+    R06/R07/R09)
+  - `packages/observability/src/audit/action-codes.ts` (added
+    `appointments.rescheduled`)
+  - `apps/api/src/modules/appointments/appointments.module.ts` (wired
+    `AppointmentsReschedulingService`)
+  - `apps/api/src/modules/appointments/appointments.controller.ts`
+    (added reschedule endpoint + service injection)
+  - `packages/domain/src/authorization/authorization.spec.ts` (updated
+    permission count assertions: 12 permissions, R09=12, R06/R07=10)
+  - `apps/api/src/modules/appointments/appointments.controller.spec.ts`
+    (added rescheduling stub + reschedule unit tests)
+- **Deleted:** none.
+- **Schema changes:** none.
+- **Migration changes:** none.
+
+### Tests
+
+- Integration tests written (NOT RUN locally — no PostgreSQL 17):
+  `apps/api/test/appointments/appointments-rescheduling.integration.spec.ts`
+  covering: authorization (R06/R07/R09 allow, R13/R02 deny, 401 no
+  cookie); scope isolation (in-scope, cross-tenant/org/facility 404,
+  strict body); lifecycle (booked→cancelled+booked replacement, cancelled/
+  completed/no_show rejected, arbitrary status rejected); time (end<=start,
+  past, adjacent); success atomicity (one replacement, inherited fields);
+  failure atomicity (overlap, validation, not-found — original unchanged);
+  overlap (booked blocks, cancelled/no_show non-blocking, self-overlap
+  allowed); concurrency (same-original no duplicates, competing originals
+  at most one occupant, booking-vs-reschedule safe, adjacent concurrent);
+  audit (exactly once, metadata traceability, no event on failure, no PHI);
+  regression (booking after reschedule, cancellation after reschedule,
+  rebook original slot, cancel replacement).
+
+### Local Validation
+
+- **Typecheck:** PASS (full monorepo).
+- **Lint:** PASS (full monorepo).
+- **Unit tests:** PASS (434 API + 227 web + 126 domain + 95
+  observability + 208 contracts).
+- **Prisma validate:** PASS (both transactional and audit schemas).
+- **Prisma generate:** PASS.
+- **Production build:** PASS (full monorepo).
+- **PostgreSQL 17 status:** NOT RUN (no PostgreSQL 17 binary available
+  locally; CI required).
+- **git diff --check:** PASS (no conflict markers).
+
+### Known Risks
+
+- PostgreSQL 17 integration tests have not run locally; they may reveal
+  issues only visible against a real database (concurrency edge cases,
+  overlap query behavior, audit outbox projection). CI is authoritative.
+- The `reschedule` repository method is new and untested against real
+  PostgreSQL 17; the overlap-exclusion-of-original logic and the
+  concurrent-same-original behavior need CI validation.
+
+### Deferred Scope
+
+- Frontend/UI, mobile UI, provider scheduling, recurring appointments,
+  bulk rescheduling, patient self-service rescheduling, and all
+  explicitly excluded lifecycle transitions (confirmed, arrived,
+  in-progress, completed, no-show command) are out of scope for Stage 1E.
+
+### Latest Verified Feature Commit
+
+- **Feature branch tip:** `db29c88f1af10fc55fa64fb85874adf16e631266`
+  (local HEAD == direct remote == remote-tracking; SHA equality verified).
+  - Implementation commit: `461a5aedb1e4d6ffb10ce0690f0c206790de7f91`
+  - Continuity/docs commit: `db29c88f1af10fc55fa64fb85874adf16e631266`
+- **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
+- **PR #20:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/20
+  (draft, OPEN, unmerged).
+- **Authoritative Main CI run (current exact head `db29c88`):**
+  `31288942970` (head SHA `db29c88f1af10fc55fa64fb85874adf16e631266`,
+  exact-head match, conclusion **success**).
+  - Static/build job: success (Node.js 24, pnpm 11.14.0, frozen
+    lockfile, Prisma validate/generate, typecheck, lint, unit tests,
+    production build — all passed).
+  - PostgreSQL 17 job: success (rescheduling integration suite 42
+    tests passed; booking regression 36 tests; cancellation regression
+    31 tests; today's appointments 24 tests; audit atomicity 9,
+    integration 29, store 16, concurrency 11, verify 7 — all passed).
+- **Prior implementation-head CI run (`461a5ae`):** `31288690338`
+  (conclusion success; same job breakdown as above). Both heads are
+  green; the current exact head `db29c88` adds only a
+  PROJECT_CONTINUITY.md documentation correction.
+
+### Recovery Information
+
+- **Authoritative feature branch:**
+  `feature/appointments-stage-1e-rescheduling`
+  (tip `db29c88f1af10fc55fa64fb85874adf16e631266`).
+- **Pre-task base (origin/main):** `194226db17df5b3e1f68cbcfa6b7adf1b4d98842`
+- **BC01 branch:** not modified.
+- **BC10 branch:** not modified.
+- **Stage 1C historical branch:** not modified.
+- **Stage 1D historical branch:** not modified.
+- **main:** NOT pushed.
+
+### Immediate Next Step
+
+Stage 1E Appointment Rescheduling is implemented on
+`feature/appointments-stage-1e-rescheduling`, committed, pushed, and
+has passed authoritative PostgreSQL 17 CI on the current exact head
+`db29c88` (run `31288942970`, conclusion success). The retry count in
+this continuity record has been corrected to match the implementation
+(`MAX_SERIALIZATION_RETRIES = 3`, i.e., 3 total attempts). The draft
+PR #20 is ready for final operator review. Stage 1E is NOT merged and
+NOT marked complete. The operator should review PR #20 and merge it
+when satisfied.
+

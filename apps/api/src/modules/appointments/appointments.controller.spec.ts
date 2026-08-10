@@ -4,9 +4,11 @@ import { AppointmentsController } from './appointments.controller.js';
 import type { AppointmentsTodayService } from './appointments-today.service.js';
 import type { AppointmentsBookingService } from './appointments-booking.service.js';
 import type { AppointmentsCancellationService } from './appointments-cancellation.service.js';
+import type { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import type {
   TodayAppointmentsResponse,
   CancelAppointmentResponse,
+  RescheduleAppointmentResponse,
 } from '@ibn-hayan/contracts';
 
 /**
@@ -83,6 +85,16 @@ const VALID_CANCEL_RESPONSE: CancelAppointmentResponse = {
   typeCode: 'consultation',
 };
 
+const VALID_RESCHEDULE_RESPONSE: RescheduleAppointmentResponse = {
+  id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+  patientId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+  providerId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+  scheduledStart: '2026-09-01T10:00:00.000Z',
+  scheduledEnd: '2026-09-01T10:30:00.000Z',
+  status: 'booked',
+  typeCode: 'consultation',
+};
+
 function makeServiceStub(
   overrides: {
     result?: TodayAppointmentsResponse | null;
@@ -138,6 +150,32 @@ function makeCancellationServiceStub(
   return { cancelAppointment } as unknown as AppointmentsCancellationService;
 }
 
+function makeReschedulingServiceStub(
+  overrides: {
+    result?: RescheduleAppointmentResponse | null;
+    error?: Error;
+  } = {},
+) {
+  const result = overrides.result === undefined ? null : overrides.result;
+  const error = overrides.error;
+  const rescheduleAppointment = vi.fn(
+    (
+      _appointmentId: string,
+      _request: unknown,
+      _cookieValue: string | undefined,
+      _auditContext?: unknown,
+    ): Promise<RescheduleAppointmentResponse | null> => {
+      if (error !== undefined) {
+        return Promise.reject(error);
+      }
+      return Promise.resolve(result);
+    },
+  );
+  return {
+    rescheduleAppointment,
+  } as unknown as AppointmentsReschedulingService;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -149,6 +187,7 @@ describe('AppointmentsController', () => {
         makeServiceStub(),
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest();
       const result = await controller.getTodayAppointments(req);
@@ -161,6 +200,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -176,6 +216,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -191,6 +232,7 @@ describe('AppointmentsController', () => {
         makeServiceStub({ result: null }),
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toMatchObject({
@@ -208,6 +250,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ query: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -223,6 +266,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ query: { organisationId: 'evil-org' } });
       await controller.getTodayAppointments(req);
@@ -238,6 +282,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ query: { facilityId: 'evil-facility' } });
       await controller.getTodayAppointments(req);
@@ -253,6 +298,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({
         headers: {
@@ -274,6 +320,7 @@ describe('AppointmentsController', () => {
         service,
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ body: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -289,6 +336,7 @@ describe('AppointmentsController', () => {
         makeServiceStub({ error }),
         makeBookingServiceStub(),
         makeCancellationServiceStub(),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toThrow(
@@ -303,6 +351,7 @@ describe('AppointmentsController', () => {
         makeServiceStub(),
         makeBookingServiceStub(),
         makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       const result = await controller.cancelAppointment(
@@ -318,6 +367,7 @@ describe('AppointmentsController', () => {
         makeServiceStub(),
         makeBookingServiceStub(),
         makeCancellationServiceStub({ result: null }),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       await expect(
@@ -340,6 +390,7 @@ describe('AppointmentsController', () => {
         makeServiceStub(),
         makeBookingServiceStub(),
         makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       await expect(
@@ -366,6 +417,7 @@ describe('AppointmentsController', () => {
         makeServiceStub(),
         makeBookingServiceStub(),
         cancellationService,
+        makeReschedulingServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       // The strict schema rejects unknown keys (tenantId, status, etc.)
@@ -374,6 +426,115 @@ describe('AppointmentsController', () => {
           req,
           'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
           { reason: 'ok', tenantId: 'evil', status: 'cancelled' },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'APPOINTMENT_VALIDATION_ERROR',
+          },
+        },
+      });
+    });
+  });
+
+  describe('rescheduleAppointment', () => {
+    it('returns the service response on valid request', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub(),
+        makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      const result = await controller.rescheduleAppointment(
+        req,
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        {
+          scheduledStart: '2026-09-01T10:00:00.000Z',
+          scheduledEnd: '2026-09-01T10:30:00.000Z',
+          reason: 'Patient requested a later slot.',
+        },
+      );
+      expect(result).toEqual(VALID_RESCHEDULE_RESPONSE);
+    });
+
+    it('throws UnauthorizedException when service returns null', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub(),
+        makeReschedulingServiceStub({ result: null }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      await expect(
+        controller.rescheduleAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          {
+            scheduledStart: '2026-09-01T10:00:00.000Z',
+            scheduledEnd: '2026-09-01T10:30:00.000Z',
+            reason: 'Patient requested a later slot.',
+          },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'AUTH_SESSION_REQUIRED',
+          },
+        },
+      });
+    });
+
+    it('rejects a body that does not match the strict contract', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub(),
+        makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      // missing required `reason`
+      await expect(
+        controller.rescheduleAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          {
+            scheduledStart: '2026-09-01T10:00:00.000Z',
+            scheduledEnd: '2026-09-01T10:30:00.000Z',
+          },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: {
+            code: 'APPOINTMENT_VALIDATION_ERROR',
+          },
+        },
+      });
+    });
+
+    it('does NOT accept caller-supplied scope, status, patient, or provider in the body', async () => {
+      const controller = new AppointmentsController(
+        makeServiceStub(),
+        makeBookingServiceStub(),
+        makeCancellationServiceStub(),
+        makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
+      );
+      const req = makeRequest({ method: 'POST' });
+      // The strict schema rejects unknown keys (tenantId, status,
+      // patientId, providerId, etc.)
+      await expect(
+        controller.rescheduleAppointment(
+          req,
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          {
+            scheduledStart: '2026-09-01T10:00:00.000Z',
+            scheduledEnd: '2026-09-01T10:30:00.000Z',
+            reason: 'ok',
+            tenantId: 'evil',
+            status: 'booked',
+            patientId: 'evil',
+            providerId: 'evil',
+          },
         ),
       ).rejects.toMatchObject({
         response: {

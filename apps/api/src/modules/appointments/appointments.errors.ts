@@ -188,3 +188,28 @@ export function appointmentInvalidTransition(): UnprocessableEntityException {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Rescheduling errors (Stage 1E)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a 422 when an appointment is in a source state that is not
+ * canonically reschedulable in this stage.
+ *
+ * Per STATUS_CODES.md §4.1 and the Stage 1E specification, only
+ * `booked` is reschedulable. `cancelled` and `no_show` are terminal
+ * ("rebooked as new appointment", not rescheduled in-place). Any other
+ * source state is an invalid transition. The message is reschedule-
+ * specific so the client can present the correct action to the user,
+ * while the error code is shared with cancellation for a single
+ * invalid-transition code path.
+ */
+export function appointmentRescheduleInvalidTransition(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'APPOINTMENT_INVALID_TRANSITION',
+      message: 'The appointment cannot be rescheduled from its current state.',
+    },
+  });
+}

@@ -5,6 +5,8 @@ import type {
   Appointment,
   AppointmentCancelResult,
   AppointmentCreateInput,
+  AppointmentRescheduleInput,
+  AppointmentRescheduleResult,
   AppointmentId,
   TenantId,
   OrganisationId,
@@ -359,6 +361,128 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             outcome: 'cancelled' as const,
             appointment: appointmentFromPrisma(updated),
             transitioned: true,
+          };
+        },
+        {
+          isolationLevel: 'Serializable',
+        },
+      );
+
+      return result;
+    };
+
+    return this.executeWithSerializationRetry(transactionLogic);
+  }
+
+  async reschedule(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    appointmentId: AppointmentId,
+    input: AppointmentRescheduleInput,
+  ): Promise<AppointmentRescheduleResult> {
+    const transactionLogic = async (): Promise<AppointmentRescheduleResult> => {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          // Scoped lookup: all three scope identifiers must match. An
+          // appointment outside scope returns not_found, indistinguishable
+          // from "does not exist" (no cross-scope existence leak).
+          const row = await tx.appointment.findFirst({
+            where: {
+              id: appointmentId,
+              tenantId,
+              organisationId,
+              facilityId,
+            },
+          });
+
+          if (row === null) {
+            return {
+              outcome: 'not_found' as const,
+            };
+          }
+
+          // Only `booked` is canonically reschedulable in this stage.
+          // `cancelled`/`no_show` are terminal ("rebooked as new
+          // appointment"). Any other source state is an invalid
+          // transition.
+          if (row.status !== 'booked') {
+            return {
+              outcome: 'invalid_source_state' as const,
+              appointment: appointmentFromPrisma(row),
+            };
+          }
+
+          // Overlap check for the replacement slot, excluding the
+          // original appointment's own id (it is still `booked` at this
+          // point but is being transitioned to `cancelled` within this
+          // same atomic transaction, so it must not block its own
+          // replacement). This scoped exclusion is safe: it excludes
+          // exactly one known appointment id that is being cancelled in
+          // the same transaction, not an arbitrary global exclusion.
+          //
+          // Non-blocking statuses (cancelled, no_show) are excluded as
+          // in the create path (see NON_BLOCKING_STATUSES).
+          const conflicting = await tx.appointment.findFirst({
+            where: {
+              tenantId,
+              organisationId,
+              facilityId,
+              providerId: row.providerId,
+              id: { not: appointmentId },
+              status: {
+                notIn: [...NON_BLOCKING_STATUSES],
+              },
+              scheduledStart: {
+                lt: input.scheduledEnd,
+              },
+              scheduledEnd: {
+                gt: input.scheduledStart,
+              },
+            },
+            select: {
+              id: true,
+            },
+          });
+
+          if (conflicting) {
+            throw new AppointmentOverlapError(row.providerId, conflicting.id);
+          }
+
+          // Create the replacement appointment, inheriting patient,
+          // provider, type, and scope from the original. Per
+          // STATUS_CODES.md §4.1, the replacement is created with
+          // "Scheduled" status, which in the implemented lifecycle is
+          // `booked`.
+          const replacement = await tx.appointment.create({
+            data: {
+              tenantId,
+              organisationId,
+              facilityId,
+              patientId: row.patientId,
+              providerId: row.providerId,
+              scheduledStart: input.scheduledStart,
+              scheduledEnd: input.scheduledEnd,
+              status: 'booked',
+              typeCode: row.typeCode,
+            },
+          });
+
+          // Transition the original to `cancelled`. Under SERIALIZABLE
+          // isolation, a concurrent reschedule/cancellation that already
+          // transitioned this row causes a P2034 /
+          // DriverAdapterError conflict, which is retried by the outer
+          // loop; on retry the row is observed as non-booked and
+          // resolved as invalid_source_state above.
+          const cancelled = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: { status: 'cancelled' },
+          });
+
+          return {
+            outcome: 'rescheduled' as const,
+            original: appointmentFromPrisma(cancelled),
+            replacement: appointmentFromPrisma(replacement),
           };
         },
         {

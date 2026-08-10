@@ -24,10 +24,12 @@ import type {
   TodayAppointmentsResponse,
   BookAppointmentResponse,
   CancelAppointmentResponse,
+  RescheduleAppointmentResponse,
 } from '@ibn-hayan/contracts';
 import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
+import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import {
   readCookie,
   buildAuditContext,
@@ -78,6 +80,7 @@ export class AppointmentsController {
     private readonly todayService: AppointmentsTodayService,
     private readonly bookingService: AppointmentsBookingService,
     private readonly cancellationService: AppointmentsCancellationService,
+    private readonly reschedulingService: AppointmentsReschedulingService,
   ) {}
 
   /**
@@ -449,6 +452,155 @@ export class AppointmentsController {
     const result = await this.cancellationService.cancelAppointment(
       id,
       parseResult.data.reason,
+      cookieValue,
+      buildAuditContext(req),
+    );
+
+    if (result === null) {
+      throw sessionRequired();
+    }
+
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments/:id/reschedule
+   *
+   * Reschedule an existing appointment to a new slot for the
+   * authenticated session's active tenant, organisation, and facility
+   * context.
+   *
+   * The request body contains ONLY the replacement slot
+   * (scheduledStart, scheduledEnd) and the reschedule reason. All scope
+   * (tenantId, organisationId, facilityId) is derived from the
+   * authenticated session. The replacement appointment inherits
+   * patientId, providerId, typeCode, tenantId, organisationId, and
+   * facilityId from the original appointment; the caller cannot
+   * override these. The caller cannot supply an arbitrary status; the
+   * transition is always `booked → cancelled` (original) plus a new
+   * `booked` replacement.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:reschedule` (only R06 Receptionist, R07 Scheduler,
+   * and R09 Clinic Administrator), or when the active context is
+   * missing or invalid.
+   * Returns 400 for an invalid request body (missing/too-long reason,
+   * end not after start, invalid timestamp format).
+   * Returns 404 when the original appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope existence
+   * leak).
+   * Returns 422 when the original appointment is in a source state that
+   * is not canonically reschedulable in this stage (only `booked` is
+   * reschedulable), when the replacement slot is in the past, or when
+   * the replacement slot overlaps an existing blocking appointment.
+   *
+   * Atomicity: the reschedule is performed within a single SERIALIZABLE
+   * transaction. A failed replacement creation (overlap, serialization
+   * conflict after bounded retries, database error) leaves the original
+   * appointment unchanged and no replacement exists.
+   *
+   * Per the Stage 1E implementation specification, the endpoint does
+   * NOT accept tenant, organisation, facility, status, patient,
+   * provider, or type identifiers from the request body.
+   */
+  @Post(':id/reschedule')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:reschedule', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Reschedule an existing appointment to a new slot for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The replacement appointment. The original appointment is transitioned to "cancelled" and a new replacement is created as "booked". The appointments.rescheduled audit event is emitted exactly once on success.',
+    schema: {
+      type: 'object',
+      required: [
+        'id',
+        'patientId',
+        'providerId',
+        'scheduledStart',
+        'scheduledEnd',
+        'status',
+        'typeCode',
+      ],
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        patientId: { type: 'string', format: 'uuid' },
+        providerId: { type: 'string', format: 'uuid' },
+        scheduledStart: { type: 'string', format: 'date-time' },
+        scheduledEnd: { type: 'string', format: 'date-time' },
+        status: {
+          type: 'string',
+          enum: [
+            'booked',
+            'confirmed',
+            'arrived',
+            'in_progress',
+            'completed',
+            'cancelled',
+            'no_show',
+          ],
+        },
+        typeCode: { type: 'string', minLength: 1, maxLength: 80 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid request body (e.g. missing/too-long reason, end not after start).',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Authorisation denied (principal does not hold the appointments:reschedule permission, OR the active context is missing or invalid).',
+  })
+  @ApiResponse({
+    status: 404,
+    description:
+      'The appointment was not found or is not accessible in the current context (no cross-scope existence leak).',
+  })
+  @ApiResponse({
+    status: 422,
+    description:
+      'The appointment cannot be rescheduled from its current state, the replacement slot is in the past, or the replacement slot overlaps an existing appointment.',
+  })
+  async rescheduleAppointment(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<RescheduleAppointmentResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+
+    // Parse and validate the request body using Zod
+    const { RescheduleAppointmentRequestSchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = RescheduleAppointmentRequestSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+
+    const result = await this.reschedulingService.rescheduleAppointment(
+      id,
+      parseResult.data,
       cookieValue,
       buildAuditContext(req),
     );
