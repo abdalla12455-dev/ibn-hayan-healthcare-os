@@ -10,6 +10,7 @@ import { PrismaTenantRoleAssignmentRepository } from './repositories/prisma-tena
 import { PrismaAppointmentRepository } from './repositories/prisma-appointment.repository.js';
 import { PrismaPatientRepository } from './repositories/prisma-patient.repository.js';
 import { PrismaProviderRepository } from './repositories/prisma-provider.repository.js';
+import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
 
 /**
@@ -64,6 +65,7 @@ export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
 export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
 export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
+export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
 
 @Module({
   providers: [
@@ -109,6 +111,10 @@ export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
       provide: WORKFORCE_REPOSITORY,
       useClass: PrismaProviderRepository,
     },
+    {
+      provide: ENCOUNTER_REPOSITORY,
+      useClass: PrismaEncounterRepository,
+    },
   ],
   // PrismaService and the repository implementations are not exported
   // directly. Feature modules that need persistence inject the
@@ -142,6 +148,7 @@ export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
     APPOINTMENT_REPOSITORY,
     PATIENT_REPOSITORY,
     WORKFORCE_REPOSITORY,
+    ENCOUNTER_REPOSITORY,
     LocalCredentialService,
   ],
 })
@@ -170,4 +177,5 @@ export type {
   AppointmentRepository,
   PatientRepository,
   ProviderRepository,
+  EncounterRepository,
 } from '@ibn-hayan/domain';

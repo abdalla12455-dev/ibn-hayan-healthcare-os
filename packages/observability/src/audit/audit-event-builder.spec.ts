@@ -8,6 +8,8 @@ import {
 } from './categories.js';
 import {
   AUDIT_ACTION_CODES,
+  isAuditActionCode,
+  inferCategoryFromAction,
 } from './action-codes.js';
 import {
   validateAuditKey,
@@ -393,6 +395,32 @@ describe('buildAuditEventDraft', () => {
     // guards against a regression where the action code is removed
     // from the catalogue but the service still tries to emit it.
     expect(AUDIT_ACTION_CODES).toContain('clinic_admin.overview.viewed');
+  });
+
+  it('includes all encounters.* action codes in the AUDIT_ACTION_CODES catalogue', () => {
+    // Defence-in-depth: every encounters action code emitted by the
+    // Encounters module (Stage 2A) MUST be present in the catalogue so
+    // that `isAuditActionCode` accepts it and `inferCategoryFromAction`
+    // maps it to `facility_context`.
+    expect(AUDIT_ACTION_CODES).toContain('encounters.created');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.arrived');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.started');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.on_leave');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.resumed');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.finished');
+    expect(AUDIT_ACTION_CODES).toContain('encounters.cancelled');
+    for (const action of [
+      'encounters.created',
+      'encounters.arrived',
+      'encounters.started',
+      'encounters.on_leave',
+      'encounters.resumed',
+      'encounters.finished',
+      'encounters.cancelled',
+    ]) {
+      expect(isAuditActionCode(action)).toBe(true);
+      expect(inferCategoryFromAction(action)).toBe('facility_context');
+    }
   });
 });
 

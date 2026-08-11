@@ -944,3 +944,91 @@ model ProviderFacilityAssignment {
   @@index([tenantId, providerId, revokedAt], map: "provider_facility_assignments_tenant_provider_revoked_idx")
   @@map("provider_facility_assignments")
 }
+
+// ---------------------------------------------------------------------------
+// Encounter (BC02 — M02 Encounter / Clinical)
+// ---------------------------------------------------------------------------
+
+/// Encounter lifecycle status.
+///
+/// Canonical EncounterStatus enum (Closed) per
+/// download/docs/03_DOMAIN/ENUMS.md §4.1 and
+/// download/docs/03_DOMAIN/STATUS_CODES.md §5.1.
+enum EncounterStatus {
+  planned
+  arrived
+  in_progress
+  on_leave
+  finished
+  cancelled
+}
+
+/// Encounter type.
+///
+/// Canonical EncounterType enum (Open-with-Council) per
+/// download/docs/03_DOMAIN/ENUMS.md §4.2.
+enum EncounterType {
+  outpatient
+  inpatient
+  emergency
+  telehealth
+  home_health
+  day_care
+}
+
+/// Encounter priority.
+///
+/// Canonical EncounterPriority enum (Closed) per
+/// download/docs/03_DOMAIN/ENUMS.md §4.3.
+enum EncounterPriority {
+  routine
+  urgent
+  emergency
+}
+
+/// A single clinical encounter (BC02).
+///
+/// The Encounter is the platform's central organizing entity for a single
+/// clinical event. It is owned by BC02 and references — but does NOT
+/// foreign-key to — the Patient (BC01), Workforce/Provider (BC10), and
+/// Scheduling/Appointment (BC06) bounded contexts. Those contexts own
+/// their own authoritative state; this table holds logical identifiers
+/// only, per SYSTEM_ARCHITECTURE §7.5 and MODULE_ARCHITECTURE §11.3
+/// (state isolation).
+///
+/// patientId, providerId, and appointmentId are stored as UUID references
+/// WITHOUT relational foreign keys. The application layer validates these
+/// references via the owning modules' repositories before persisting.
+///
+/// appointmentId is nullable (emergency/walk-in encounters have no
+/// appointment). When present, a partial unique index ensures one
+/// encounter per appointment. When null, no uniqueness is enforced.
+///
+/// The canonical lifecycle is enforced at the application/repository
+/// boundary via a conditional UPDATE ... WHERE status IN (...), NOT by a
+/// database CHECK constraint. The database stores the status; the
+/// repository enforces permitted source → target transitions atomically.
+model Encounter {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  organisationId String            @map("organisation_id") @db.Uuid
+  facilityId     String            @map("facility_id") @db.Uuid
+  patientId      String            @map("patient_id") @db.Uuid
+  providerId     String            @map("provider_id") @db.Uuid
+  appointmentId  String?           @map("appointment_id") @db.Uuid
+  encounterType  EncounterType     @default(outpatient) @map("encounter_type")
+  status         EncounterStatus   @default(planned)
+  priority       EncounterPriority @default(routine)
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, organisationId, facilityId, id], map: "encounters_tenant_org_facility_id_key")
+  @@index([tenantId], map: "encounters_tenant_id_idx")
+  @@index([tenantId, organisationId], map: "encounters_tenant_id_organisation_id_idx")
+  @@index([tenantId, facilityId], map: "encounters_tenant_id_facility_id_idx")
+  @@index([tenantId, patientId], map: "encounters_tenant_id_patient_id_idx")
+  @@index([tenantId, providerId], map: "encounters_tenant_id_provider_id_idx")
+  @@index([tenantId, appointmentId], map: "encounters_tenant_id_appointment_id_idx")
+  @@index([tenantId, facilityId, status], map: "encounters_tenant_id_facility_id_status_idx")
+  @@map("encounters")
+}

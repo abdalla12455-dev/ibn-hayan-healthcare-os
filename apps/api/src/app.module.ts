@@ -8,6 +8,7 @@ import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
 import { RolePreviewModule } from './modules/dev/index.js';
 import { ClinicAdminModule } from './modules/clinic-admin/index.js';
 import { AppointmentsModule } from './modules/appointments/index.js';
+import { EncountersModule } from './modules/encounters/index.js';
 
 /**
  * Root application module.
@@ -79,6 +80,7 @@ import { AppointmentsModule } from './modules/appointments/index.js';
     RolePreviewModule,
     ClinicAdminModule,
     AppointmentsModule,
+    EncountersModule,
   ],
 })
 export class AppModule implements NestModule {

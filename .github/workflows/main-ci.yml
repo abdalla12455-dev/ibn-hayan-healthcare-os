@@ -33,7 +33,7 @@ name: Main CI
 #      Runs inside the composite node:24 + postgres:17 Docker image (same as
 #      the ADR-015 workflow). Executes the same static/build gates inside the
 #      container (to ensure the container environment is self-consistent),
-#      then runs the nine PostgreSQL-17-dependent test suites:
+#      then runs the ten PostgreSQL-17-dependent test suites:
 #        - pnpm test:context
 #        - pnpm test:database
 #        - pnpm test:clinic-admin
@@ -303,6 +303,7 @@ jobs:
             pnpm test:database
             pnpm test:clinic-admin
             pnpm test:appointments
+            pnpm test:encounters
             pnpm test:role-preview
             pnpm audit:test:atomicity
             pnpm audit:test:integration
