@@ -11,7 +11,7 @@ import type {
   OrganisationId,
   FacilityId,
 } from '@ibn-hayan/domain';
-import type { PrismaService } from '../prisma.service.js';
+import { PrismaService } from '../prisma.service.js';
 import { encounterFromPrisma } from '../mappers/encounter.mapper.js';
 
 /**
