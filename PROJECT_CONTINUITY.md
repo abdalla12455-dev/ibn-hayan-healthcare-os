@@ -6905,8 +6905,12 @@ BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinic
 
 ### Merge Status
 
-**Stage 2A is NOT merged.** PR #24 is OPEN as DRAFT for final operator review. The authorization correction (aligning R06/R07 with canonical Encounter read access and correcting the PR metadata/continuity record) is committed on `feature/bc02-encounter-foundation`; exact-head CI must re-run green before merge. main was NOT pushed. No force operation occurred. No rebase occurred. Stage 1C/1D/1E/1F branches and BC01/BC10 historical branches NOT modified.
+**Stage 2A is MERGED.** PR #24 (feat(encounters): add BC02 encounter foundation) was merged into `main` via a normal merge commit on 2026-08-11.
+- **PR #24 merge commit SHA:** `d0ae940f2319da2ac57f74af82b06a75d792176c` (now on `origin/main`).
+- **Final feature head SHA (pre-merge):** `bd10da7ee0865b50c20af53750fd1b7e45b9cfcb`.
+- **Exact-head Main CI (final head `bd10da7`):** run `31452853061` — static/build SUCCESS, PostgreSQL 17 SUCCESS.
+- main was NOT directly pushed. No force operation occurred. No rebase occurred. Stage 1C/1D/1E/1F branches and BC01/BC10 historical branches NOT modified.
 
 ### Immediate Next Step
 
-Exact-head Main CI must pass on the corrected head (static/build + PostgreSQL 17, including the new R06/R07 read and R13 view-denial tests). Once green, mark PR #24 ready for review and merge via normal merge-commit. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
+Stage 2A is complete on `main`. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
