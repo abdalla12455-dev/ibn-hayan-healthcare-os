@@ -229,6 +229,30 @@ const ENCOUNTER_READ_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
+ * The permissions granted to R06 Receptionist and R07 Scheduler: the
+ * clinic booking permissions PLUS `encounters:view` (read on Encounter
+ * Records). Per USER_ROLES.md 10.1, R06's Encounter Records cell is
+ * "Read (sched)" and R07's is "Read/Write (sched)". The "(sched)"
+ * qualifier scopes the access to the scheduling context; the
+ * `encounters:view` permission is the read-only gate for
+ * GET /api/v1/encounters/:id.
+ *
+ * Stage 2A defines NO scheduling-scoped encounter write command. The
+ * encounter lifecycle writes (create/arrive/start/finish/cancel/
+ * on_leave/resume) are clinical actions, not scheduling actions, so
+ * R07's "Write (sched)" grants NO encounter lifecycle write in
+ * Stage 2A. A future stage may define a scheduling-scoped encounter
+ * write if canonical evidence authorizes one; until then R06 and R07
+ * receive `encounters:view` ONLY (read), plus their existing booking
+ * permissions. This list is EXPLICIT.
+ */
+const CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS: readonly PermissionCode[] =
+  [
+    ...CLINIC_BOOKING_PERMISSIONS,
+    'encounters:view',
+  ] as const;
+
+/**
  * The twelve permissions granted to R09 Clinic Administrator: the
  * seven context permissions plus `clinic_admin_overview:view`,
  * `appointments:view`, `appointments:book`, `appointments:cancel`,
@@ -337,13 +361,23 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   R04_TECHNICIAN: ENCOUNTER_READ_PERMISSIONS,
   R05_ALLIED_HEALTH_PROFESSIONAL: ENCOUNTER_READ_PERMISSIONS,
   // R06 Receptionist is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification,
-  // R06 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
-  R06_RECEPTIONIST: CLINIC_BOOKING_PERMISSIONS,
+  // `POST /api/v1/appointments`. Per the Stage 1C specification, R06
+  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R06's
+  // Encounter Records cell is "Read (sched)", so R06 additionally
+  // receives `encounters:view` (read-only; no encounter lifecycle
+  // write). R06 therefore uses
+  // CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS (13 permissions).
+  R06_RECEPTIONIST: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
   // R07 Scheduler is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification,
-  // R07 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
-  R07_SCHEDULER: CLINIC_BOOKING_PERMISSIONS,
+  // `POST /api/v1/appointments`. Per the Stage 1C specification, R07
+  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R07's
+  // Encounter Records cell is "Read/Write (sched)"; the "(sched)"
+  // write is a scheduling-scoped write that Stage 2A does NOT define
+  // as an encounter command, so R07 receives `encounters:view` ONLY
+  // (read) on encounters, plus its existing booking permissions.
+  // R07 therefore uses CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS
+  // (13 permissions).
+  R07_SCHEDULER: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
   R08_BILLER: ENCOUNTER_READ_PERMISSIONS,
   // R09 Clinic Administrator is the SOLE holder of the
   // `clinic_admin_overview:view` and `appointments:view` permissions,

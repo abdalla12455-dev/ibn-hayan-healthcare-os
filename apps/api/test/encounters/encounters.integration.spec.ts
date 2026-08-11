@@ -19,8 +19,8 @@
  * Coverage:
  * - Authentication (session cookie validation)
  * - Authorization (create/arrive/cancel: R01, R02; start/on-leave/resume/
- *   finish: R01; view: R01-R05, R08, R10, R12, R09; R13 denied; unauthenticated
- *   rejected)
+ *   finish: R01; view: R01-R05, R06, R07, R08, R10, R12, R09; R13 denied;
+ *   unauthenticated rejected)
  * - Tenant/organisation/facility context resolution
  * - Scoped lookup (cross-tenant/org/facility returns safe 404, no leak)
  * - Consent gate (configuration-gated; emergency carve-out; fail-safe)
@@ -480,6 +480,8 @@ interface Fixture {
   nurseCookie: string;
   adminCookie: string;
   platformAdminCookie: string;
+  receptionistCookie: string;
+  schedulerCookie: string;
 }
 
 async function buildFixture(): Promise<Fixture> {
@@ -558,6 +560,54 @@ async function buildFixture(): Promise<Fixture> {
     facilityId,
   );
 
+  // Receptionist (R06) — scheduling-scoped encounter read (USER_ROLES.md
+  // 10.1: "Read (sched)"). Holds booking permissions + encounters:view.
+  const { userId: receptionistId } = await createUser(
+    'receptionist@example.com',
+    'Receptionist',
+  );
+  const { membershipId: receptionistMembershipId } = await createMembership(
+    receptionistId,
+    tenantId,
+    'R06_RECEPTIONIST',
+    organisationId,
+  );
+  const receptionistCookie = await loginUser(
+    'receptionist@example.com',
+    TEST_PASSWORD,
+  );
+  await selectContext(
+    receptionistCookie,
+    receptionistMembershipId,
+    organisationId,
+    facilityId,
+  );
+
+  // Scheduler (R07) — scheduling-scoped encounter read/write
+  // (USER_ROLES.md 10.1: "Read/Write (sched)"). Stage 2A defines no
+  // scheduling-scoped encounter write command, so R07 receives
+  // encounters:view only on encounters + booking permissions.
+  const { userId: schedulerId } = await createUser(
+    'scheduler@example.com',
+    'Scheduler',
+  );
+  const { membershipId: schedulerMembershipId } = await createMembership(
+    schedulerId,
+    tenantId,
+    'R07_SCHEDULER',
+    organisationId,
+  );
+  const schedulerCookie = await loginUser(
+    'scheduler@example.com',
+    TEST_PASSWORD,
+  );
+  await selectContext(
+    schedulerCookie,
+    schedulerMembershipId,
+    organisationId,
+    facilityId,
+  );
+
   // Platform/System Administrator (R13) — no facility context.
   const { userId: platformAdminId } = await createUser(
     'platform@example.com',
@@ -579,6 +629,8 @@ async function buildFixture(): Promise<Fixture> {
     nurseCookie,
     adminCookie,
     platformAdminCookie,
+    receptionistCookie,
+    schedulerCookie,
   };
 }
 
@@ -979,6 +1031,96 @@ describe('Encounters — BC02 Foundation (PostgreSQL 17)', () => {
       await arriveEncounter(f.physicianCookie, created2.body.id);
       const startNurse = await startEncounter(f.nurseCookie, created2.body.id);
       expect(startNurse.status).toBe(403);
+    });
+
+    it('R06 receptionist can view (encounters:view) but is denied encounters:create (403)', async () => {
+      // Per USER_ROLES.md 10.1, R06 Receptionist's Encounter Records
+      // cell is "Read (sched)". R06 receives encounters:view (read) but
+      // no encounter lifecycle write permission.
+      const f = await buildFixture();
+      const created = await createEncounter(f.physicianCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      const viewRes = await viewEncounter(
+        f.receptionistCookie,
+        created.body.id,
+      );
+      expect(viewRes.status).toBe(200);
+      const createRes = await createEncounter(f.receptionistCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      expect(createRes.status).toBe(403);
+    });
+
+    it('R07 scheduler can view (encounters:view) but is denied encounters:create (403)', async () => {
+      // Per USER_ROLES.md 10.1, R07 Scheduler's Encounter Records
+      // cell is "Read/Write (sched)". Stage 2A defines no
+      // scheduling-scoped encounter write command, so R07 receives
+      // encounters:view (read) only on encounters; encounter lifecycle
+      // writes are clinical actions and remain denied.
+      const f = await buildFixture();
+      const created = await createEncounter(f.physicianCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      const viewRes = await viewEncounter(f.schedulerCookie, created.body.id);
+      expect(viewRes.status).toBe(200);
+      const createRes = await createEncounter(f.schedulerCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      expect(createRes.status).toBe(403);
+    });
+
+    it('R06/R07 are denied encounter lifecycle writes (arrive/start/finish/cancel)', async () => {
+      const f = await buildFixture();
+      const created = await createEncounter(f.physicianCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      // R06/R07 lack encounters:arrive
+      expect(
+        (await arriveEncounter(f.receptionistCookie, created.body.id)).status,
+      ).toBe(403);
+      expect(
+        (await arriveEncounter(f.schedulerCookie, created.body.id)).status,
+      ).toBe(403);
+      // R06/R07 lack encounters:cancel
+      expect(
+        (await cancelEncounter(f.receptionistCookie, created.body.id)).status,
+      ).toBe(403);
+      expect(
+        (await cancelEncounter(f.schedulerCookie, created.body.id)).status,
+      ).toBe(403);
+    });
+
+    it('R13 platform administrator is denied encounters:view (403)', async () => {
+      // Per USER_ROLES.md 10.1, R13's Encounter Records cell is "—"
+      // (no encounter permissions, including read).
+      const f = await buildFixture();
+      const created = await createEncounter(f.physicianCookie, {
+        patientId: f.patientId,
+        providerId: f.providerId,
+        encounterType: 'outpatient',
+        priority: 'routine',
+      });
+      const viewRes = await viewEncounter(
+        f.platformAdminCookie,
+        created.body.id,
+      );
+      expect(viewRes.status).toBe(403);
     });
   });
 

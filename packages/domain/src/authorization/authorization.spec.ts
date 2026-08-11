@@ -719,17 +719,24 @@ describe('authorization role-permission matrix', () => {
     expect(r13Permissions).not.toContain('encounters:resume');
   });
 
-  it('R06 and R07 receive EXACTLY 12 permissions (7 context + book + cancel + reschedule + confirm + check_in)', () => {
-    // R06_RECEPTIONIST and R07_SCHEDULER receive CLINIC_BOOKING_PERMISSIONS
-    // (12 permissions: 7 context + appointments:book +
-    // appointments:cancel + appointments:reschedule +
-    // appointments:confirm + appointments:check_in). They do NOT
-    // receive appointments:start or appointments:complete (clinical
-    // visit-progression actions reserved for R01 Physician).
+  it('R06 and R07 receive EXACTLY 13 permissions (7 context + book + cancel + reschedule + confirm + check_in + encounters:view)', () => {
+    // R06_RECEPTIONIST and R07_SCHEDULER receive
+    // CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS (13 permissions: 7
+    // context + appointments:book + appointments:cancel +
+    // appointments:reschedule + appointments:confirm +
+    // appointments:check_in + encounters:view). Per USER_ROLES.md
+    // 10.1, R06's Encounter Records cell is "Read (sched)" and R07's
+    // is "Read/Write (sched)". Stage 2A defines no scheduling-scoped
+    // encounter write command, so R06/R07 receive encounters:view
+    // (read) only on encounters, plus their booking permissions.
+    // They do NOT receive appointments:start or appointments:complete
+    // (clinical visit-progression actions reserved for R01 Physician)
+    // and do NOT receive any encounter lifecycle write permission
+    // (create/arrive/start/finish/cancel/on_leave/resume).
     const r06Permissions = ROLE_PERMISSION_MATRIX.R06_RECEPTIONIST;
     const r07Permissions = ROLE_PERMISSION_MATRIX.R07_SCHEDULER;
-    expect(r06Permissions).toHaveLength(12);
-    expect(r07Permissions).toHaveLength(12);
+    expect(r06Permissions).toHaveLength(13);
+    expect(r07Permissions).toHaveLength(13);
     expect(r06Permissions).toContain('appointments:book');
     expect(r07Permissions).toContain('appointments:book');
     expect(r06Permissions).toContain('appointments:cancel');
@@ -740,6 +747,8 @@ describe('authorization role-permission matrix', () => {
     expect(r07Permissions).toContain('appointments:confirm');
     expect(r06Permissions).toContain('appointments:check_in');
     expect(r07Permissions).toContain('appointments:check_in');
+    expect(r06Permissions).toContain('encounters:view');
+    expect(r07Permissions).toContain('encounters:view');
     expect(r06Permissions).not.toContain('clinic_admin_overview:view');
     expect(r07Permissions).not.toContain('clinic_admin_overview:view');
     expect(r06Permissions).not.toContain('appointments:start');
@@ -748,8 +757,18 @@ describe('authorization role-permission matrix', () => {
     expect(r07Permissions).not.toContain('appointments:complete');
     expect(r06Permissions).not.toContain('encounters:create');
     expect(r07Permissions).not.toContain('encounters:create');
-    expect(r06Permissions).not.toContain('encounters:view');
-    expect(r07Permissions).not.toContain('encounters:view');
+    expect(r06Permissions).not.toContain('encounters:arrive');
+    expect(r07Permissions).not.toContain('encounters:arrive');
+    expect(r06Permissions).not.toContain('encounters:start');
+    expect(r07Permissions).not.toContain('encounters:start');
+    expect(r06Permissions).not.toContain('encounters:finish');
+    expect(r07Permissions).not.toContain('encounters:finish');
+    expect(r06Permissions).not.toContain('encounters:cancel');
+    expect(r07Permissions).not.toContain('encounters:cancel');
+    expect(r06Permissions).not.toContain('encounters:on_leave');
+    expect(r07Permissions).not.toContain('encounters:on_leave');
+    expect(r06Permissions).not.toContain('encounters:resume');
+    expect(r07Permissions).not.toContain('encounters:resume');
   });
 
   it('R01 Physician receives EXACTLY 17 permissions (7 context + 2 appointment visit + 8 encounter)', () => {

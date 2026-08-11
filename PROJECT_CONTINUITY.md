@@ -6777,7 +6777,7 @@ Minimum production-grade backend Encounter foundation: encounter identity, tenan
 - **Verification source:** NO persistent consent record exists yet (BC01 deferred). The gate does NOT fabricate consent. It is implemented as a feature-flag policy seam (`ConsentGateFeatureConfig`, `CONSENT_GATE_ENABLED`): when enforced (default true), a non-emergency encounter is REJECTED with `ENCOUNTER_CONSENT_REQUIRED` because consent cannot be truthfully verified. When disabled (dev/local only), creation proceeds and the disablement is audited.
 - **Missing consent:** NEVER silently treated as granted. Fail-safe rejection.
 - **Emergency carve-out:** canonical only. An emergency encounter (encounterType=emergency OR priority=emergency) with a required `emergencyJustification` passes the enforced gate. The carve-out does NOT persist fake consent. Unauthorized emergency bypass (non-emergency type without justification) is rejected with `ENCOUNTER_EMERGENCY_JUSTIFICATION_REQUIRED`.
-- **Emergency permission/role:** the create permission (`encounters:create`) gates the action; emergency is a clinical-safety input, not a separate authorization bypass. R01 Physician and R02 Nurse may create; R09 Clinic Administrator and R13 Platform Super Admin are denied (403) — clinical actions follow least privilege.
+- **Emergency permission/role:** the create permission (`encounters:create`) gates the action; emergency is a clinical-safety input, not a separate authorization bypass. R01 Physician and R02 Nurse may create (the clinical create roles); R09 Clinic Administrator has `encounters:view` (read) but NOT `encounters:create`; R13 Platform Super Admin has NO Encounter access (read or write) — 403. Clinical actions follow least privilege.
 - **Emergency audit:** audited with metadata { emergency: true, emergencyJustification, consentGateEnforced: true }.
 
 ### Patient / Provider Validation
@@ -6800,8 +6800,29 @@ Minimum production-grade backend Encounter foundation: encounter identity, tenan
 ### Permission Codes
 
 - `encounters:create`, `encounters:view`, `encounters:arrive`, `encounters:start`, `encounters:finish`, `encounters:cancel`, `encounters:on_leave`, `encounters:resume`.
-- **Allowed:** R01 Physician, R02 Nurse (clinical roles) for create/arrive/start/on_leave/resume/finish/cancel/view.
-- **Denied:** R09 Clinic Administrator (operational, not clinical) — 403. R13 Platform Super Admin — 403 (no clinical inheritance). Unauthenticated — 401.
+- Canonical source: `download/docs/02_PRODUCT/USER_ROLES.md` §10.1 (cross-confirmed by `PERMISSIONS.md` §5.2 and `ROLES_AND_PERMISSIONS.md` §4.2). Read (`encounters:view`) and lifecycle write are granted **separately** per role.
+
+**Command-by-command authorization (Stage 2A):**
+
+| Role | Encounter Records (canonical) | `encounters:view` (read) | lifecycle write |
+|---|---|---|---|
+| R01 Physician | Read/Write | ✅ | ✅ create, arrive, start, on_leave, resume, finish, cancel |
+| R02 Nurse | Read/Write | ✅ | ✅ create, arrive, cancel · ❌ start, finish, on_leave, resume (practitioner conclusion authority reserved for R01 in Stage 2A) |
+| R03 Pharmacist | Read (med) | ✅ | ❌ all |
+| R04 Technician | Read | ✅ | ❌ all |
+| R05 Allied Health | Read | ✅ | ❌ all |
+| R06 Receptionist | Read (sched) | ✅ | ❌ all |
+| R07 Scheduler | Read/Write (sched) | ✅ | ❌ all (Stage 2A defines no scheduling-scoped encounter write command) |
+| R08 Biller | Read (bill) | ✅ | ❌ all |
+| R09 Clinic Administrator | Read | ✅ | ❌ all (operational, not clinical) |
+| R10 Compliance Officer | Read (audit) | ✅ | ❌ all |
+| R11 HR Manager | — | ❌ | ❌ all |
+| R12 Executive | Read (summary) | ✅ | ❌ all |
+| R13 System Administrator | — | ❌ | ❌ all (no clinical inheritance) |
+| R14 Integration Account | Per integration | ❌ (interactive) | ❌ (interactive) |
+
+- **R06/R07 correction:** R06 Receptionist ("Read (sched)") and R07 Scheduler ("Read/Write (sched)") receive `encounters:view` (read) plus their existing booking permissions; they receive NO encounter lifecycle write. R07's "Write (sched)" is a scheduling-scoped write that Stage 2A does not expose as an encounter command, so it grants no encounter lifecycle write here.
+- **R13 has NO Encounter access** (read or write). R13 must not inherit clinical operational permissions. Unauthenticated — 401. Permission missing — 403.
 
 ### Audit Action Codes
 
@@ -6846,7 +6867,7 @@ Minimum production-grade backend Encounter foundation: encounter identity, tenan
 - `packages/contracts/src/index.ts` (exported encounters contracts)
 - `packages/domain/src/authorization/authorization.spec.ts` (encounter permission tests)
 - `packages/domain/src/authorization/permissions.ts` (encounters:* permission codes)
-- `packages/domain/src/authorization/role-permissions.ts` (R01/R02 grants; R09/R13 denials)
+- `packages/domain/src/authorization/role-permissions.ts` (R01 full lifecycle write+view; R02 create/arrive/cancel/view; R06/R07 read (`encounters:view`); R03-R05/R08/R10/R12 read; R09 read; R11/R13 no encounter access — canonical per USER_ROLES.md §10.1)
 - `packages/domain/src/index.ts` (exported encounter domain)
 - `packages/observability/src/audit/action-codes.ts` (encounter audit action codes)
 - `packages/observability/src/audit/audit-event-builder.spec.ts` (encounter action-code tests)
@@ -6858,8 +6879,8 @@ None.
 ### Tests
 
 - 33 encounter unit tests (encounters.service.spec.ts + consent-gate-feature.config.spec.ts) — all passing.
-- 38 encounter PostgreSQL-17 integration tests (encounters.integration.spec.ts) — collected/skip locally (no PG17); run in CI via `pnpm test:encounters`.
-- Authorization/role-permission unit tests in domain package — passing.
+- 42 encounter PostgreSQL-17 integration tests (encounters.integration.spec.ts, including R06/R07 read + write-denial and R13 view-denial) — collected/skip locally (no PG17); run in CI via `pnpm test:encounters`.
+- Authorization/role-permission unit tests in domain package (74 authorization tests) — passing.
 
 ### Validation (local, Node v22 — CI uses Node v24)
 
@@ -6874,7 +6895,7 @@ None.
 
 ### Known Risks
 
-- PostgreSQL 17 integration tests (38) NOT RUN locally — authoritative CI on the exact PR head must validate against real PostgreSQL 17 with SERIALIZABLE isolation before readiness.
+- PostgreSQL 17 integration tests (42) NOT RUN locally — authoritative CI on the exact PR head must validate against real PostgreSQL 17 with SERIALIZABLE isolation before readiness. The authorization correction (R06/R07 `encounters:view`) re-runs exact-head CI; merge only after the new head is green.
 - Consent gate is a truthful policy seam: it REJECTS non-emergency encounters when enforced because no persistent consent verification source exists yet (BC01 deferred). This is fail-safe by design, not a fabrication. BC01 will provide the real verification source.
 - Node v22 locally vs Node v24 in CI — environment difference; CI is authoritative.
 
@@ -6884,8 +6905,8 @@ BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinic
 
 ### Merge Status
 
-**Stage 2A is NOT merged.** PR to be opened as DRAFT for final operator review. main was NOT pushed. No force operation occurred. No rebase occurred. Stage 1C/1D/1E/1F branches and BC01/BC10 historical branches NOT modified.
+**Stage 2A is NOT merged.** PR #24 is OPEN as DRAFT for final operator review. The authorization correction (aligning R06/R07 with canonical Encounter read access and correcting the PR metadata/continuity record) is committed on `feature/bc02-encounter-foundation`; exact-head CI must re-run green before merge. main was NOT pushed. No force operation occurred. No rebase occurred. Stage 1C/1D/1E/1F branches and BC01/BC10 historical branches NOT modified.
 
 ### Immediate Next Step
 
-Operator reviews the draft PR and authorizes exact-head CI; once PostgreSQL 17 CI passes on the exact PR head, operator may merge. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
+Exact-head Main CI must pass on the corrected head (static/build + PostgreSQL 17, including the new R06/R07 read and R13 view-denial tests). Once green, mark PR #24 ready for review and merge via normal merge-commit. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
