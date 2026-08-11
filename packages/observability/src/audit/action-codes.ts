@@ -433,6 +433,70 @@ export type AppointmentsActionCode =
   (typeof APPOINTMENTS_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Encounters (Encounter bounded context — BC02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Encounters action codes.
+ *
+ * Emitted by the Encounters module after successful encounter creation
+ * and lifecycle transitions (Stage 2A, BC02 Encounter Foundation).
+ *
+ * Per STATUS_CODES.md §10.2 (Encounter Transition Map) and §5.1
+ * (EncounterStatus), the canonical encounter lifecycle is:
+ *
+ *   planned → arrived → in_progress → finished (terminal)
+ *   planned → in_progress (direct start, e.g. emergency)
+ *   planned/arrived/in_progress → cancelled (terminal)
+ *   in_progress ⇄ on_leave (pause/resume)
+ *
+ * The `encounters.created` event is emitted after a successful
+ * encounter creation via `POST /api/v1/encounters`. The event metadata
+ * carries `{ endpoint, encounterId }` and, for an emergency encounter,
+ * `{ emergencyJustification }` (the canonical basis for the consent-gate
+ * emergency carve-out, BR-BC15-REG-003 "documented with reason"). No
+ * patient details, provider details, appointment timing, or clinical
+ * content are carried (no PHI).
+ *
+ * The `encounters.arrived`, `encounters.started`, `encounters.on_leave`,
+ * `encounters.resumed`, `encounters.finished`, and `encounters.cancelled`
+ * events are emitted after a successful FIRST-TIME lifecycle transition.
+ * The event metadata carries `{ endpoint, encounterId }` only — the
+ * encounter ID for traceability. No PHI is carried. The events are
+ * emitted ONLY when the encounter actually transitions; an idempotent
+ * re-application of a terminal transition (`finished`/`cancelled`) does
+ * NOT emit a duplicate event (mirroring the appointment completion/
+ * cancellation idempotency). Non-terminal same-state re-applications
+ * are invalid transitions and emit no event.
+ *
+ * All seven actions are mapped to the `facility_context` category
+ * (see `inferCategoryFromAction`), matching the appointments action
+ * codes: encounters are facility-scoped (the service requires an active
+ * facility and queries within the authenticated tenant/organisation/
+ * facility scope).
+ *
+ * Emission semantics:
+ *
+ * Events are emitted via `auditHelper.emitDirect(...)` (best-effort,
+ * non-transactional), matching the existing pattern for appointment
+ * lifecycle events. Events are emitted ONLY after the operation
+ * succeeds; they are NOT emitted when validation fails, when the
+ * consent gate blocks, when the service throws, or for an idempotent
+ * no-op. Events do NOT recursively audit themselves.
+ */
+export const ENCOUNTERS_ACTION_CODES = [
+  'encounters.created',
+  'encounters.arrived',
+  'encounters.started',
+  'encounters.on_leave',
+  'encounters.resumed',
+  'encounters.finished',
+  'encounters.cancelled',
+] as const;
+
+export type EncountersActionCode = (typeof ENCOUNTERS_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -454,6 +518,7 @@ export const AUDIT_ACTION_CODES = [
   ...ROLE_PREVIEW_ACTION_CODES,
   ...CLINIC_ADMIN_ACTION_CODES,
   ...APPOINTMENTS_ACTION_CODES,
+  ...ENCOUNTERS_ACTION_CODES,
 ] as const;
 
 /**
@@ -532,6 +597,13 @@ export function inferCategoryFromAction(
   // existing category. See the `APPOINTMENTS_ACTION_CODES` block above
   // for the full rationale.
   if (action.startsWith('appointments.')) {
+    return 'facility_context';
+  }
+  // Encounters actions are mapped to the `facility_context` category,
+  // matching the appointments action codes: encounters are facility-
+  // scoped (the service requires an active facility and operates within
+  // the authenticated tenant/organisation/facility scope).
+  if (action.startsWith('encounters.')) {
     return 'facility_context';
   }
   return null;

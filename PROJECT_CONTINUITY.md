@@ -6735,3 +6735,178 @@ No-show recording and reversal remain excluded. `NON_BLOCKING_STATUSES` (`cancel
 ### Immediate Next Step
 
 Stage 1F Appointment Visit Lifecycle is MERGED into main via PR #22 (merge commit `76677e0a964952e98baea4b7e4a75496bf55ca62`). The final exact-head CI (run `31443235674`, head `b567c6b`) passed authoritative PostgreSQL 17 CI. No schema or migration changes were introduced. No recursive continuity commit will be created. The next substantive project decision is operator-determined (e.g., Stage 1G appointment no-show exception lifecycle, or another bounded-context stage).
+
+---
+
+## Stage 2A — BC02 Encounter Foundation (operator-ratified)
+
+### Operator Ratification
+
+- **Stage:** Stage 2A — BC02 Encounter Foundation (BC02, M02 Encounter / Clinical).
+- **Operator decision:** Consent is a configuration-gated clinical-safety check with the canonical emergency carve-out.
+- **Ratified next stage (NOT part of this task):** BC01 Patient Demographics / Registration / Consent.
+
+### Repository and Branch
+
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Feature branch:** `feature/bc02-encounter-foundation`
+- **Verified base main SHA:** `a503dcc7d0966f3d361197259763e97144425e3d` (origin/main at branch creation; local HEAD == origin/main, 0 ahead / 0 behind)
+
+### BC02 Scope (Stage 2A)
+
+Minimum production-grade backend Encounter foundation: encounter identity, tenant isolation, organisation/facility scope, Patient logical reference, Provider logical reference, Appointment logical reference (nullable), canonical lifecycle, explicit authorization, auditability, concurrency-safe status transitions, safe persistence, consent-gate integration boundary, emergency carve-out, forward-compatible downstream boundaries. No frontend. No clinical documentation, orders, billing, pharmacy, no-show, demographics, or persistent consent records.
+
+### Architecture-Gate Findings
+
+- **Encounter entity:** id, tenantId, organisationId, facilityId, patientId, providerId, appointmentId (nullable), encounterType (default outpatient), status (default planned), priority (default routine), createdAt, updatedAt. No lifecycle timestamp columns (audit event timestamps suffice for the foundation).
+- **Appointment↔Encounter cardinality:** one appointment creates at most one encounter (partial unique index on (tenant_id, appointment_id) WHERE appointment_id IS NOT NULL). appointmentId nullable (emergency/walk-in). Encounters without appointments are canonically supported via the emergency/direct path.
+- **Cross-context state isolation:** patientId, providerId, appointmentId are logical UUID references with NO relational foreign keys (BC02 does not own or constrain BC01/BC10/BC06 state at the DB level). Application layer validates references via owning modules' repositories.
+- **EncounterStatus values:** planned, arrived, in_progress, on_leave, finished, cancelled.
+- **EncounterType:** outpatient, inpatient, emergency, telehealth, home_health, day_care.
+- **EncounterPriority:** routine, urgent, emergency.
+- **Lifecycle graph:** planned→arrived, planned→in_progress (emergency/direct-start only via create with emergency priority/type), arrived→in_progress, in_progress→on_leave, on_leave→in_progress, in_progress→finished, planned/arrived/in_progress→cancelled. finished and cancelled are terminal.
+- **OnLeave:** included (in_progress↔on_leave).
+- **Terminal/idempotency:** finished and cancelled are terminal-idempotent — re-requesting the same terminal transition is a no-op that returns the current state and emits NO audit event. Non-terminal same-state requests are invalid (invalid transition).
+- **Encounter creation timing:** explicit POST /api/v1/encounters. Not auto-wired into Stage 1F appointment check-in (separate commands; BC06 owns appointment state).
+- **Appointment synchronization model:** foundation only. Encounters and Appointments remain independently owned; Stage 2A does NOT auto-synchronize or cross-mutate. The appointmentId reference closes Stage 1F's deferred encounter-reference boundary as a logical contract (no schema FK added to Appointment).
+- **Stage 1F integration changes:** NONE. Stage 1C/1D/1E/1F code untouched.
+
+### Consent Gate (operator-ratified)
+
+- **Canonical rule:** consent is a configuration-gated clinical-safety check. The gate executes at encounter CREATION (before patient/provider/appointment reference validation).
+- **Verification source:** NO persistent consent record exists yet (BC01 deferred). The gate does NOT fabricate consent. It is implemented as a feature-flag policy seam (`ConsentGateFeatureConfig`, `CONSENT_GATE_ENABLED`): when enforced (default true), a non-emergency encounter is REJECTED with `ENCOUNTER_CONSENT_REQUIRED` because consent cannot be truthfully verified. When disabled (dev/local only), creation proceeds and the disablement is audited.
+- **Missing consent:** NEVER silently treated as granted. Fail-safe rejection.
+- **Emergency carve-out:** canonical only. An emergency encounter (encounterType=emergency OR priority=emergency) with a required `emergencyJustification` passes the enforced gate. The carve-out does NOT persist fake consent. Unauthorized emergency bypass (non-emergency type without justification) is rejected with `ENCOUNTER_EMERGENCY_JUSTIFICATION_REQUIRED`.
+- **Emergency permission/role:** the create permission (`encounters:create`) gates the action; emergency is a clinical-safety input, not a separate authorization bypass. R01 Physician and R02 Nurse may create (the clinical create roles); R09 Clinic Administrator has `encounters:view` (read) but NOT `encounters:create`; R13 Platform Super Admin has NO Encounter access (read or write) — 403. Clinical actions follow least privilege.
+- **Emergency audit:** audited with metadata { emergency: true, emergencyJustification, consentGateEnforced: true }.
+
+### Patient / Provider Validation
+
+- **Patient:** `PatientRepository.existsInTenant(tenantId, patientId)` — logical reference, no demographics copied, no cross-context FK.
+- **Provider:** `ProviderRepository` active-eligibility check within tenant + facility scope — logical reference, no schedules/availability.
+
+### API Endpoints
+
+- `POST /api/v1/encounters` — create (consent-gated).
+- `POST /api/v1/encounters/:id/arrive` — planned→arrived.
+- `POST /api/v1/encounters/:id/start` — planned|arrived→in_progress.
+- `POST /api/v1/encounters/:id/on-leave` — in_progress→on_leave.
+- `POST /api/v1/encounters/:id/resume` — on_leave→in_progress.
+- `POST /api/v1/encounters/:id/finish` — in_progress→finished (terminal idempotent).
+- `POST /api/v1/encounters/:id/cancel` — planned|arrived|in_progress→cancelled (terminal idempotent), requires reason.
+- `GET /api/v1/encounters/:id` — scoped view.
+- Client never submits tenantId/organisationId/facilityId/actorId/arbitrary status (strict Zod contract validation; session-derived scope).
+
+### Permission Codes
+
+- `encounters:create`, `encounters:view`, `encounters:arrive`, `encounters:start`, `encounters:finish`, `encounters:cancel`, `encounters:on_leave`, `encounters:resume`.
+- Canonical source: `download/docs/02_PRODUCT/USER_ROLES.md` §10.1 (cross-confirmed by `PERMISSIONS.md` §5.2 and `ROLES_AND_PERMISSIONS.md` §4.2). Read (`encounters:view`) and lifecycle write are granted **separately** per role.
+
+**Command-by-command authorization (Stage 2A):**
+
+| Role | Encounter Records (canonical) | `encounters:view` (read) | lifecycle write |
+|---|---|---|---|
+| R01 Physician | Read/Write | ✅ | ✅ create, arrive, start, on_leave, resume, finish, cancel |
+| R02 Nurse | Read/Write | ✅ | ✅ create, arrive, cancel · ❌ start, finish, on_leave, resume (practitioner conclusion authority reserved for R01 in Stage 2A) |
+| R03 Pharmacist | Read (med) | ✅ | ❌ all |
+| R04 Technician | Read | ✅ | ❌ all |
+| R05 Allied Health | Read | ✅ | ❌ all |
+| R06 Receptionist | Read (sched) | ✅ | ❌ all |
+| R07 Scheduler | Read/Write (sched) | ✅ | ❌ all (Stage 2A defines no scheduling-scoped encounter write command) |
+| R08 Biller | Read (bill) | ✅ | ❌ all |
+| R09 Clinic Administrator | Read | ✅ | ❌ all (operational, not clinical) |
+| R10 Compliance Officer | Read (audit) | ✅ | ❌ all |
+| R11 HR Manager | — | ❌ | ❌ all |
+| R12 Executive | Read (summary) | ✅ | ❌ all |
+| R13 System Administrator | — | ❌ | ❌ all (no clinical inheritance) |
+| R14 Integration Account | Per integration | ❌ (interactive) | ❌ (interactive) |
+
+- **R06/R07 correction:** R06 Receptionist ("Read (sched)") and R07 Scheduler ("Read/Write (sched)") receive `encounters:view` (read) plus their existing booking permissions; they receive NO encounter lifecycle write. R07's "Write (sched)" is a scheduling-scoped write that Stage 2A does not expose as an encounter command, so it grants no encounter lifecycle write here.
+- **R13 has NO Encounter access** (read or write). R13 must not inherit clinical operational permissions. Unauthenticated — 401. Permission missing — 403.
+
+### Audit Action Codes
+
+- `encounters.created`, `encounters.arrived`, `encounters.started`, `encounters.on_leave`, `encounters.resumed`, `encounters.finished`, `encounters.cancelled`, plus consent-gate decisions captured in metadata.
+- Category: facility_context. Exactly one success audit event per actual state change; no event on validation/auth/consent failure/not-found/invalid-transition/rollback/idempotent no-op. No PHI in metadata (forbidden-key validated: no patientName/providerName/diagnosis/notes/prescriptions/raw body).
+
+### Concurrency Design
+
+- SERIALIZABLE transactions for create and transitions.
+- Conditional UPDATE ... WHERE status IN (...) for atomic transitions; re-read committed state after serialization retry.
+- Partial unique index enforces one-encounter-per-appointment at the DB level (race-safe).
+- Retry count: `MAX_SERIALIZATION_RETRIES = 3` (3 total attempts) — preserved from existing pattern, NOT regressed.
+- Both `Prisma P2034` and `@prisma/adapter-pg DriverAdapterError / cause.kind === 'TransactionWriteConflict'` are detected and retried. Expected serialization conflicts do NOT escape as HTTP 500.
+
+### Schema / Migration
+
+- **Migration name:** `20260811000000_bc02_encounter_foundation` (forward-only, non-destructive; creates enums + table + indexes; no DROP/TRUNCATE; no edit of old migrations; no backfill).
+- **New table:** `encounters` (no FKs — state isolation preserved).
+- **New enums:** `EncounterStatus`, `EncounterType`, `EncounterPriority`.
+- **New indexes/constraints:** composite unique (tenant,org,facility,id); partial unique (tenant,appointment_id) WHERE appointment_id IS NOT NULL; tenant, tenant+org, tenant+facility, tenant+patient, tenant+provider, tenant+appointment, tenant+facility+status indexes.
+- **Historical/backfill:** NONE — no encounters manufactured for historical appointments.
+
+### Files Created
+
+- `apps/api/prisma/migrations/20260811000000_bc02_encounter_foundation/migration.sql`
+- `apps/api/src/infrastructure/database/mappers/encounter.mapper.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-encounter.repository.ts`
+- `apps/api/src/modules/encounters/` (consent-gate-feature.config.ts, encounters.controller.ts, encounters.errors.ts, encounters.module.ts, encounters.service.ts, index.ts, + spec files)
+- `apps/api/test/encounters/encounters.integration.spec.ts`
+- `apps/api/vitest.encounters.config.ts`
+- `packages/contracts/src/encounters/` (encounters.schema.ts, index.ts)
+- `packages/domain/src/encounter/` (encounter.ts, repositories.ts, index.ts)
+
+### Files Modified
+
+- `.github/workflows/main-ci.yml` (added `pnpm test:encounters` step + suite-count comment)
+- `apps/api/package.json` (added `test:encounters` + `pretest:encounters` scripts)
+- `apps/api/prisma/schema.prisma` (added Encounter enums + model; additive only, 0 deletions)
+- `apps/api/src/app.module.ts` (registered EncountersModule)
+- `apps/api/src/infrastructure/database/database.module.ts` (registered ENCOUNTER_REPOSITORY provider + export)
+- `apps/api/src/infrastructure/database/index.ts` (exported PrismaEncounterRepository)
+- `packages/contracts/src/index.ts` (exported encounters contracts)
+- `packages/domain/src/authorization/authorization.spec.ts` (encounter permission tests)
+- `packages/domain/src/authorization/permissions.ts` (encounters:* permission codes)
+- `packages/domain/src/authorization/role-permissions.ts` (R01 full lifecycle write+view; R02 create/arrive/cancel/view; R06/R07 read (`encounters:view`); R03-R05/R08/R10/R12 read; R09 read; R11/R13 no encounter access — canonical per USER_ROLES.md §10.1)
+- `packages/domain/src/index.ts` (exported encounter domain)
+- `packages/observability/src/audit/action-codes.ts` (encounter audit action codes)
+- `packages/observability/src/audit/audit-event-builder.spec.ts` (encounter action-code tests)
+
+### Files Deleted
+
+None.
+
+### Tests
+
+- 33 encounter unit tests (encounters.service.spec.ts + consent-gate-feature.config.spec.ts) — all passing.
+- 42 encounter PostgreSQL-17 integration tests (encounters.integration.spec.ts, including R06/R07 read + write-denial and R13 view-denial) — collected/skip locally (no PG17); run in CI via `pnpm test:encounters`.
+- Authorization/role-permission unit tests in domain package (74 authorization tests) — passing.
+
+### Validation (local, Node v22 — CI uses Node v24)
+
+- Prisma format: PASS. Prisma validate: PASS. Prisma generate: PASS.
+- Typecheck (full monorepo, includes test/): PASS.
+- Lint (src + test): PASS.
+- Unit tests (`pnpm test`): 467 passed (was 434; +33 encounter). No regressions.
+- Contracts tests: 208 passed.
+- Production build (`pnpm run build`): PASS.
+- Local PostgreSQL 17 status: NOT RUN locally (PG17 unavailable in this environment).
+- git diff --check: clean. No conflict markers. No secrets.
+
+### Known Risks
+
+- PostgreSQL 17 integration tests (42) NOT RUN locally — authoritative CI on the exact PR head must validate against real PostgreSQL 17 with SERIALIZABLE isolation before readiness. The authorization correction (R06/R07 `encounters:view`) re-runs exact-head CI; merge only after the new head is green.
+- Consent gate is a truthful policy seam: it REJECTS non-emergency encounters when enforced because no persistent consent verification source exists yet (BC01 deferred). This is fail-safe by design, not a fabrication. BC01 will provide the real verification source.
+- Node v22 locally vs Node v24 in CI — environment difference; CI is authoritative.
+
+### Deferred Scope
+
+BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinical documentation (BC03), orders (BC04), pharmacy (BC05), billing (BC07), no-show, provider schedules, frontend — all excluded.
+
+### Merge Status
+
+**Stage 2A is NOT merged.** PR #24 is OPEN as DRAFT for final operator review. The authorization correction (aligning R06/R07 with canonical Encounter read access and correcting the PR metadata/continuity record) is committed on `feature/bc02-encounter-foundation`; exact-head CI must re-run green before merge. main was NOT pushed. No force operation occurred. No rebase occurred. Stage 1C/1D/1E/1F branches and BC01/BC10 historical branches NOT modified.
+
+### Immediate Next Step
+
+Exact-head Main CI must pass on the corrected head (static/build + PostgreSQL 17, including the new R06/R07 read and R13 view-denial tests). Once green, mark PR #24 ready for review and merge via normal merge-commit. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.

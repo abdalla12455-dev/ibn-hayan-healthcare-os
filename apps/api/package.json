@@ -62,7 +62,9 @@
     "predev": "prisma generate && prisma generate --schema prisma-audit/schema.prisma && pnpm build:generated",
     "prestart:dev": "prisma generate && prisma generate --schema prisma-audit/schema.prisma && pnpm build:generated",
     "prestart:debug": "prisma generate && prisma generate --schema prisma-audit/schema.prisma && pnpm build:generated",
-    "prestart:prod": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
+    "prestart:prod": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
+    "test:encounters": "vitest run --config vitest.encounters.config.ts",
+    "pretest:encounters": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
   },
   "dependencies": {
     "@ibn-hayan/contracts": "workspace:*",

@@ -154,6 +154,105 @@ const CLINICAL_VISIT_PERMISSIONS: readonly PermissionCode[] = [
 ] as const;
 
 /**
+ * The encounter lifecycle write permissions granted to R01 Physician:
+ * the clinical authority to open an encounter, progress it through its
+ * canonical lifecycle, and conclude it.
+ *
+ * Per USER_ROLES.md §10.1 (Role-Permission Matrix), R01 Physician has
+ * "Read/Write" on Encounter Records. Per STATUS_CODES.md §10.2
+ * (Encounter Transition Map), the encounter lifecycle edges are
+ * clinical actions: arrive (patient check-in), start (practitioner
+ * starts encounter), on_leave/resume (encounter pause/resume), finish
+ * (practitioner concludes encounter), cancel (with reason).
+ *
+ * The encounter is the platform's central clinical organizing entity
+ * (PRODUCT_BIBLE.md §13.3, SYSTEM_ARCHITECTURE.md §12.6). Opening and
+ * progressing an encounter is a clinical act; R01 Physician is the
+ * canonical clinical role that performs it. These permissions are NOT
+ * granted to R13 System Administrator — platform-level identity must
+ * not gain clinical-encounter access.
+ */
+const PHYSICIAN_ENCOUNTER_PERMISSIONS: readonly PermissionCode[] = [
+  ...CLINICAL_VISIT_PERMISSIONS,
+  'encounters:create',
+  'encounters:arrive',
+  'encounters:start',
+  'encounters:finish',
+  'encounters:cancel',
+  'encounters:on_leave',
+  'encounters:resume',
+  'encounters:view',
+] as const;
+
+/**
+ * The encounter permissions granted to R02 Nurse: clinical read/write
+ * on encounter records, per USER_ROLES.md §10.1 (R02 Nurse Encounter
+ * Records = "Read/Write"). Nurses participate in encounters (nursing
+ * assessment, care delivery, medication administration) and may open,
+ * arrive, and cancel encounters. The start/finish transitions are the
+ * practitioner's clinical conclusion authority; per the Stage 1F
+ * precedent (where appointment start/complete are R01-only), and to
+ * preserve least privilege, R02 does NOT receive encounters:start or
+ * encounters:finish in this stage. A future stage may extend these if
+ * canonical evidence authorizes it.
+ *
+ * These permissions are NOT granted to R13 System Administrator.
+ */
+const NURSE_ENCOUNTER_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'encounters:create',
+  'encounters:arrive',
+  'encounters:cancel',
+  'encounters:view',
+] as const;
+
+/**
+ * The encounter read-only permissions granted to the clinical and
+ * operational read roles (R03 Pharmacist, R04 Technician, R05 Allied
+ * Health, R06 Receptionist, R07 Scheduler, R08 Biller, R09
+ * Administrator, R10 Compliance Officer, R12 Executive). Per
+ * USER_ROLES.md §10.1, each of these roles has a Read variant on
+ * Encounter Records ("Read", "Read (med)", "Read (sched)",
+ * "Read (bill)", "Read (audit)", "Read (summary)"). The
+ * `encounters:view` permission is the read-only authorisation gate for
+ * GET /api/v1/encounters/:id.
+ *
+ * This list is EXPLICIT: it does NOT use `PERMISSION_CODES.filter(...)`.
+ * R13 System Administrator is deliberately EXCLUDED: per
+ * USER_ROLES.md §10.1, R13's Encounter Records cell is "–" (no
+ * encounter permissions). R13 must NOT inherit clinical operational
+ * permissions.
+ */
+const ENCOUNTER_READ_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'encounters:view',
+] as const;
+
+/**
+ * The permissions granted to R06 Receptionist and R07 Scheduler: the
+ * clinic booking permissions PLUS `encounters:view` (read on Encounter
+ * Records). Per USER_ROLES.md 10.1, R06's Encounter Records cell is
+ * "Read (sched)" and R07's is "Read/Write (sched)". The "(sched)"
+ * qualifier scopes the access to the scheduling context; the
+ * `encounters:view` permission is the read-only gate for
+ * GET /api/v1/encounters/:id.
+ *
+ * Stage 2A defines NO scheduling-scoped encounter write command. The
+ * encounter lifecycle writes (create/arrive/start/finish/cancel/
+ * on_leave/resume) are clinical actions, not scheduling actions, so
+ * R07's "Write (sched)" grants NO encounter lifecycle write in
+ * Stage 2A. A future stage may define a scheduling-scoped encounter
+ * write if canonical evidence authorizes one; until then R06 and R07
+ * receive `encounters:view` ONLY (read), plus their existing booking
+ * permissions. This list is EXPLICIT.
+ */
+const CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS: readonly PermissionCode[] =
+  [
+    ...CLINIC_BOOKING_PERMISSIONS,
+    'encounters:view',
+  ] as const;
+
+/**
  * The twelve permissions granted to R09 Clinic Administrator: the
  * seven context permissions plus `clinic_admin_overview:view`,
  * `appointments:view`, `appointments:book`, `appointments:cancel`,
@@ -185,6 +284,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:reschedule',
   'appointments:confirm',
   'appointments:check_in',
+  'encounters:view',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -255,20 +355,30 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
-  R01_PHYSICIAN: CLINICAL_VISIT_PERMISSIONS,
-  R02_NURSE: HUMAN_CONTEXT_PERMISSIONS,
-  R03_PHARMACIST: HUMAN_CONTEXT_PERMISSIONS,
-  R04_TECHNICIAN: HUMAN_CONTEXT_PERMISSIONS,
-  R05_ALLIED_HEALTH_PROFESSIONAL: HUMAN_CONTEXT_PERMISSIONS,
+  R01_PHYSICIAN: PHYSICIAN_ENCOUNTER_PERMISSIONS,
+  R02_NURSE: NURSE_ENCOUNTER_PERMISSIONS,
+  R03_PHARMACIST: ENCOUNTER_READ_PERMISSIONS,
+  R04_TECHNICIAN: ENCOUNTER_READ_PERMISSIONS,
+  R05_ALLIED_HEALTH_PROFESSIONAL: ENCOUNTER_READ_PERMISSIONS,
   // R06 Receptionist is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification,
-  // R06 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
-  R06_RECEPTIONIST: CLINIC_BOOKING_PERMISSIONS,
+  // `POST /api/v1/appointments`. Per the Stage 1C specification, R06
+  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R06's
+  // Encounter Records cell is "Read (sched)", so R06 additionally
+  // receives `encounters:view` (read-only; no encounter lifecycle
+  // write). R06 therefore uses
+  // CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS (13 permissions).
+  R06_RECEPTIONIST: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
   // R07 Scheduler is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification,
-  // R07 receives CLINIC_BOOKING_PERMISSIONS (8 permissions).
-  R07_SCHEDULER: CLINIC_BOOKING_PERMISSIONS,
-  R08_BILLER: HUMAN_CONTEXT_PERMISSIONS,
+  // `POST /api/v1/appointments`. Per the Stage 1C specification, R07
+  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R07's
+  // Encounter Records cell is "Read/Write (sched)"; the "(sched)"
+  // write is a scheduling-scoped write that Stage 2A does NOT define
+  // as an encounter command, so R07 receives `encounters:view` ONLY
+  // (read) on encounters, plus its existing booking permissions.
+  // R07 therefore uses CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS
+  // (13 permissions).
+  R07_SCHEDULER: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
+  R08_BILLER: ENCOUNTER_READ_PERMISSIONS,
   // R09 Clinic Administrator is the SOLE holder of the
   // `clinic_admin_overview:view` and `appointments:view` permissions,
   // and also receives `appointments:book` for creating appointments
@@ -278,9 +388,9 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   // (explicit 10 permissions), NOT `PERMISSION_CODES` (which would
   // grant ALL future permissions automatically).
   R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,
-  R10_COMPLIANCE_OFFICER: HUMAN_CONTEXT_PERMISSIONS,
+  R10_COMPLIANCE_OFFICER: ENCOUNTER_READ_PERMISSIONS,
   R11_HR_MANAGER: HUMAN_CONTEXT_PERMISSIONS,
-  R12_EXECUTIVE: HUMAN_CONTEXT_PERMISSIONS,
+  R12_EXECUTIVE: ENCOUNTER_READ_PERMISSIONS,
   // R13 System Administrator (Platform Super Admin) is explicitly
   // NOT granted `clinic_admin_overview:view`. R13 has a different
   // product surface (Platform Super Admin Overview, DESIGN_BIBLE.md
