@@ -563,7 +563,7 @@ async function buildFixture(): Promise<Fixture> {
     'platform@example.com',
     'Platform',
   );
-  await createMembership(platformAdminId, tenantId, 'R13_PLATFORM_ADMIN');
+  await createMembership(platformAdminId, tenantId, 'R13_SYSTEM_ADMINISTRATOR');
   const platformAdminCookie = await loginUser(
     'platform@example.com',
     TEST_PASSWORD,
