@@ -6,7 +6,7 @@ import type {
   PatientId,
   TenantId,
 } from '@ibn-hayan/domain';
-import { PATIENT_CONSENT_REPOSITORY } from '../database.module.js';
+import { PATIENT_CONSENT_REPOSITORY } from '../tokens.js';
 
 /**
  * BC01-owned implementation of {@link TreatmentConsentVerificationPort}

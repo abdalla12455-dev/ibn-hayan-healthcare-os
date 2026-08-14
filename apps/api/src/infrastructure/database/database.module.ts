@@ -58,26 +58,42 @@ import {
  * implementation. Using Symbol tokens (rather than the interface
  * itself) avoids TypeScript's structural-identity pitfall where two
  * interfaces with the same shape are treated as interchangeable.
+ *
+ * The token `const` declarations live in the cycle-free `tokens.ts`
+ * module (see that file for the rationale) and are re-exported here so
+ * existing imports from `database.module.js` and the
+ * `infrastructure/database/index.js` barrel continue to work unchanged.
  */
-export const TENANT_REPOSITORY = Symbol('TENANT_REPOSITORY');
-export const ORGANISATION_REPOSITORY = Symbol('ORGANISATION_REPOSITORY');
-export const FACILITY_REPOSITORY = Symbol('FACILITY_REPOSITORY');
-export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
-export const TENANT_MEMBERSHIP_REPOSITORY = Symbol(
-  'TENANT_MEMBERSHIP_REPOSITORY',
-);
-export const SESSION_REPOSITORY = Symbol('SESSION_REPOSITORY');
-export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
-  'TENANT_ROLE_ASSIGNMENT_REPOSITORY',
-);
-export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
-export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
-export const PATIENT_IDENTIFIER_REPOSITORY = Symbol(
-  'PATIENT_IDENTIFIER_REPOSITORY',
-);
-export const PATIENT_CONSENT_REPOSITORY = Symbol('PATIENT_CONSENT_REPOSITORY');
-export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
-export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
+export {
+  TENANT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+  USER_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  SESSION_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  APPOINTMENT_REPOSITORY,
+  PATIENT_REPOSITORY,
+  PATIENT_IDENTIFIER_REPOSITORY,
+  PATIENT_CONSENT_REPOSITORY,
+  WORKFORCE_REPOSITORY,
+  ENCOUNTER_REPOSITORY,
+} from './tokens.js';
+import {
+  TENANT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+  USER_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  SESSION_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  APPOINTMENT_REPOSITORY,
+  PATIENT_REPOSITORY,
+  PATIENT_IDENTIFIER_REPOSITORY,
+  PATIENT_CONSENT_REPOSITORY,
+  WORKFORCE_REPOSITORY,
+  ENCOUNTER_REPOSITORY,
+} from './tokens.js';
 
 @Module({
   providers: [
