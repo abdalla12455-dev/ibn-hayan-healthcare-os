@@ -839,7 +839,7 @@ model Patient {
   // age is stored (architecture gate 6D). Nullable for historical rows.
   dateOfBirth          DateTime?              @map("date_of_birth") @db.Date
   sex                  PatientSex?
-  genderIdentity       PatientGenderIdentity?
+  genderIdentity       PatientGenderIdentity? @map("gender_identity")
   genderIdentityDetail String?                @map("gender_identity_detail") @db.VarChar(100)
   createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime               @updatedAt @map("updated_at") @db.Timestamptz
