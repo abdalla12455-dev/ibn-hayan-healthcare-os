@@ -6901,7 +6901,7 @@ None.
 
 ### Deferred Scope
 
-BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinical documentation (BC03), orders (BC04), pharmacy (BC05), billing (BC07), no-show, provider schedules, frontend — all excluded.
+BC01 Patient Demographics / Registration / Consent was the ratified next stage after Stage 2A and has since been MERGED (PR #26, merge `8d7c8767`). Clinical documentation (BC03), orders (BC04), pharmacy (BC05), billing (BC07), no-show, provider schedules, frontend — all excluded from Stage 2A (and from BC01).
 
 ### Merge Status
 
@@ -6913,12 +6913,12 @@ BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinic
 
 ### Immediate Next Step
 
-Stage 2A is complete on `main`. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
+Stage 2A is complete on `main`. The ratified next substantive stage after Stage 2A was BC01 Patient Demographics / Registration / Consent — now MERGED / CLOSED (PR #26, merge `8d7c8767bef7c57830ac1b11117e347345a76066`). See the **BC01 Patient Demographics / Registration / Consent — MERGED / CLOSED** section below for the authoritative closeout record and the current next step (read-only discovery for the next substantive production stage).
 
 
 ---
 
-## BC01 Patient Demographics / Registration / Consent — In Progress
+## BC01 Patient Demographics / Registration / Consent — MERGED / CLOSED
 
 ### Ratification
 
@@ -6927,6 +6927,7 @@ Stage 2A is complete on `main`. The ratified next substantive stage is BC01 Pati
 - **Branch:** `feature/bc01-patient-demographics-registration-consent`
 - **Verified base main SHA (pre-task):** `262cd6fd3151dce037c1e28c743b1697e6f4ac71` (also confirmed as current direct remote `origin/main` HEAD before branching)
 - **Ratified by operator** as the next substantive stage after the completed and MERGED Stage 2A (BC02 Encounter Foundation).
+- **Stage status:** ✅ MERGED / CLOSED. PR #26 was merged into `main` via a normal merge commit on 2026-08-14. This stage is now part of the verified `main` history. See the **Merge Record** subsection below for the authoritative post-merge facts.
 
 ### Architecture-Gate Resolutions
 
@@ -7061,45 +7062,92 @@ None.
 
 Fuzzy duplicate matching, automatic patient merge, patient portal, de-identification, communication preferences, insurance coverage workflow, PatientCoverage, full PatientRelationship subsystem, full address/contact-history subsystem, frontend/UI, billing, clinical documentation, orders, pharmacy, provider availability, no-show, production deployment, configuration platform redesign, field-level identifier encryption.
 
+### Merge Record (post-merge — authoritative)
+
+**This stage is MERGED / CLOSED.** PR #26 (`feat(patients): add demographics registration and consent`) was merged into `main` via a normal merge commit on 2026-08-14.
+
+- **PR:** #26 — https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/26 (state: MERGED)
+- **Feature head (final, merged):** `a4239c68e219b9bba4f8430e10117dbb01b06852`
+- **Actual merge SHA:** `8d7c8767bef7c57830ac1b11117e347345a76066` (now on `origin/main` and verified as the local `main` HEAD at closeout time)
+- **Merge strategy:** normal merge commit (no squash, no rebase, no force, no direct `main` push)
+- **Merge commit parents:** `262cd6fd3151dce037c1e28c743b1697e6f4ac71` (pre-task base `main`) and `a4239c68e219b9bba4f8430e10117dbb01b06852` (final feature head)
+- **Exact-head Main CI:** run `31842869371` on head SHA `a4239c68e219b9bba4f8430e10117dbb01b06852` — **SUCCESS**
+  - `Static analysis, lint, unit tests, and build`: SUCCESS
+  - `PostgreSQL 17 validation suites`: SUCCESS (all suites green against real PostgreSQL 17 with SERIALIZABLE isolation)
+- **PostgreSQL 17:** SUCCESS on the exact merged head (CI-authoritative; not run locally in this environment)
+- **Historical branches:** Stage 1C/1D/1E/1F, Stage 2A, BC01/BC10 reference branches NOT modified by the merge. The feature branch is preserved on the remote after merge.
+- **No direct `main` push, no force, no rebase, no branch deletion occurred.**
+
 ### Merge Status
 
-NOT MERGED. This stage is on the feature branch only. main was NOT pushed. No force operation occurred. No rebase occurred. Historical branches (Stage 1C/1D/1E/1F, Stage 2A, BC01/BC10 reference) NOT modified.
+**MERGED / CLOSED.** PR #26 was merged into `main` via a normal merge commit. `main` was NOT directly pushed during this stage. No force operation occurred. No rebase occurred. Historical branches (Stage 1C/1D/1E/1F, Stage 2A, BC01/BC10 reference) NOT modified. The feature branch is preserved on the remote after merge.
 
 ### Verified Git Backup
 
 - **Branch:** `feature/bc01-patient-demographics-registration-consent`
-- **Latest verified feature commit (local):** `489fda8556c07d899adcc3d39e053548d88cf35f`
-- **Direct remote feature SHA:** `489fda8556c07d899adcc3d39e053548d88cf35f` (exact match with local)
-- **Commits on branch (4):**
-  1. `7d40d3489add047fbcb81c4238b590c3459021ec` — `feat(patients): add demographics registration and consent` (37 files; the full BC01 stage)
+- **Final feature head (merged):** `a4239c68e219b9bba4f8430e10117dbb01b06852`
+- **Direct remote feature head:** `a4239c68e219b9bba4f8430e10117dbb01b06852` (exact match with local)
+- **Commits on branch (6):**
+  1. `7d40d3489add047fbcb81c4238b590c3459021ec` — `feat(patients): add demographics registration and consent` (the full BC01 stage)
   2. `cf0dbf66782b3f67b1d7b074cdf21d242e6052a0` — `fix(database): break DI token circular import for consent verification` (created cycle-free `tokens.ts`; resolved `Nest can't resolve dependencies of the TreatmentConsentVerificationService`)
   3. `aee010ff51b120e7b489f3de7bbf26e0d5ea2d06` — `fix(patients): map genderIdentity field to snake_case column` (added missing `@map("gender_identity")`; resolved `The column patients.genderIdentity does not exist`)
   4. `489fda8556c07d899adcc3d39e053548d88cf35f` — `fix(database): import ConfigModule for AgeOfMajorityPolicyService DI` (added `ConfigModule` to DatabaseModule imports; resolved `Nest can't resolve dependencies of the AgeOfMajorityPolicyService`)
-- **Push:** succeeded (fast-forward, no force). Local/direct-remote SHAs match exactly.
+  5. `10b90986e7c738013bbe33d30b4338b8aaae9b88` — `docs(continuity): record BC01 CI-green state, PR #26, and fix commits`
+  6. `a4239c68e219b9bba4f8430e10117dbb01b06852` — `fix(patients): align final BC01 policy invariants`
+- **Push:** succeeded (fast-forward, no force). Local/direct-remote feature head SHAs match exactly.
 
 ### Pull Request
 
 - **PR number:** #26
 - **PR URL:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/26
-- **PR head SHA:** `489fda8556c07d899adcc3d39e053548d88cf35f`
-- **Draft state:** DRAFT (ready for operator review; NOT merged)
+- **PR final head SHA:** `a4239c68e219b9bba4f8430e10117dbb01b06852`
+- **State:** MERGED (merged at 2026-08-14T21:58:56Z)
+- **Merge commit SHA:** `8d7c8767bef7c57830ac1b11117e347345a76066`
 
-### Authoritative CI (exact-head)
+### Authoritative CI (exact-head — final merged head)
 
-- **CI run ID:** `31840388101` on head SHA `489fda8556c07d899adcc3d39e053548d88cf35f`
-- **Static analysis, lint, unit tests, and build:** SUCCESS (Node 24, pnpm 11.14.0 frozen lockfile, Prisma validate/generate, typecheck, lint, 491 API + 142 domain + 208 contracts + 96 observability + 227 web unit tests, production build)
-- **PostgreSQL 17 validation suites:** SUCCESS — all suites green against real PostgreSQL 17:
+- **Final exact-head CI run ID:** `31842869371` on head SHA `a4239c68e219b9bba4f8430e10117dbb01b06852` — **SUCCESS**
+- **Static analysis, lint, unit tests, and build:** SUCCESS (Node 24, pnpm 11.14.0 frozen lockfile, Prisma validate/generate, typecheck, lint, unit tests, production build)
+- **PostgreSQL 17 validation suites:** SUCCESS — all suites green against real PostgreSQL 17 with SERIALIZABLE isolation:
   - context (55 tests), database/tenancy+patient+identity+provider+rbac (173 tests, incl. patient.db-spec.ts 33 tests), clinic-admin (24), appointments (206), encounters (42), role-preview (53), audit:atomicity (9), audit:integration (29), audit:database (16), audit:concurrency (11), audit:verify (7)
   - P2034 and DriverAdapterError TransactionWriteConflict retry paths exercised by the concurrency/serialization suites.
   - Stage 1C/1D/1E/1F (appointments 206), Stage 2A (encounters 42), BC10 (workforce/provider in database suite) regressions green.
+- **Earlier CI run (historical, pre-final-head):** `31840388101` on head `489fda8556c07d899adcc3d39e053548d88cf35f` — SUCCESS. This was superseded by the final-head run `31842869371` after the final two commits (continuity record + policy-invariant alignment) were pushed; the final-head run is the authoritative gate that passed immediately before merge.
 
 ### Local PostgreSQL 17 Status
 
-NOT RUN locally — PostgreSQL 17 was unavailable in this environment. CI on GitHub Actions Docker (PostgreSQL 17, SERIALIZABLE isolation) is authoritative and is GREEN on the exact head SHA.
+NOT RUN locally — PostgreSQL 17 was unavailable in this environment. CI on GitHub Actions Docker (PostgreSQL 17, SERIALIZABLE isolation) is authoritative and is GREEN on the exact final merged head SHA `a4239c68e219b9bba4f8430e10117dbb01b06852`.
+
+### Implemented Capabilities
+
+- **Patient demographics / registration / identifiers:** Structured legal/preferred names, date of birth, sex, gender identity, optional identifiers (NationalID/Passport with tenant-scoped uniqueness and partial unique duplicate-protection index), tenant-wide Patient identity preserved (no `organisationId`/`facilityId` added). Registration requires validated `medicalRecordNumber` (no MRN generator invented).
+- **Treatment consent:** Dedicated `PatientConsent` model (not a boolean on Patient). Consent grant via `POST /api/v1/patients/:id/consents`; withdraw via `POST /api/v1/patients/:id/consents/:consentId/withdraw`; history-preserving lifecycle (no destructive deletes).
+- **Consent expiry / re-consent and concurrency protections:** Transactional reconciliation-before-grant under SERIALIZABLE isolation. Before inserting a new `granted` Treatment consent, prior `granted` rows whose `expiresAt < now` durably transition to `status = 'expired'`. Partial unique index `patient_consents_treatment_active_key` uses a STABLE predicate (no `NOW()`), so expired/withdrawn rows no longer occupy the active-treatment uniqueness constraint. Concurrent grants cannot create two active consents; re-consent after expiry works; history is retained. Bounded retry recognises both `P2034` and `DriverAdapterError`/`TransactionWriteConflict`.
+- **Adult guardian-field rejection:** An adult (age ≥ age-of-majority) supplying guardian fields is REJECTED with `PATIENT_GUARDIAN_FIELDS_FOR_ADULT` (422). A minor MUST supply guardian fields; a patient with no DOB cannot have minority determined and the grant is rejected (fail-safe).
+- **Age-of-majority configuration seam:** Injectable `AgeOfMajorityPolicyPort` implemented by `AgeOfMajorityPolicyService` (configuration-backed via `IBN_HAYAN_AGE_OF_MAJORITY`). `18` is a NON-CANONICAL INTERIM OPERATIONAL DEFAULT used only when the configured value is absent/invalid (so the consent-grant path does not fail closed). Operators SHOULD set the environment variable to the correct regional value; the Localization BC19 adapter is the future authoritative source. `BR-BC01-CLIN-005` states only "Age of majority configurable per region" — it does NOT define a numeric default.
+- **R13 has NO Patient access:** `patients:*` permissions are granted only to R01/R02/R06/R07/R09; R13 Platform/System Administrator has no Patient access (never confused with R09 Clinic Administrator).
+- **BC02 uses `TreatmentConsentVerificationPort`:** The Stage 2A (BC02 Encounter) consent-gate seam consults the BC01-owned `TreatmentConsentVerificationPort` (`hasActiveTreatmentConsent(tenantId, patientId, effectiveAt)`) — NOT BC01 Prisma tables directly. Returns `granted | not_granted | expired | withdrawn | unknown`; infrastructure failure fails safely. Encounter does NOT mutate Patient consent; no BC02→BC01 database FK added.
+- **One forward-only migration:** `20260812000000_bc01_patient_demographics_consent_foundation` — single additive, forward-only migration (nullable demographic columns, `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, new enums, `patient_identifiers` and `patient_consents` tables, safe indexes, partial unique indexes with stable predicates). No existing migration edited; no `DROP`, no `TRUNCATE`, no destructive type rewrite, no backfill.
+
+### Not in Scope (NOT implemented by this stage)
+
+No frontend/UI, Billing (BC07), No-Show, provider availability/schedules, clinical documentation (BC03), orders (BC04), pharmacy (BC05), production deployment, configuration-platform redesign, or field-level identifier encryption was implemented in this stage.
+
+### Remaining Known Risks / Deferred Items
+
+- Field-level encryption for sensitive identifiers (NationalID/Passport) is NOT yet implemented; the canonical security baseline is documented as a deferred prerequisite. No custom cryptography invented; no silent plaintext-acceptable decision.
+- `single_encounter` consent duration is excluded from the Stage API (deferred) — no canonical integration event to expire it truthfully.
+- Age-of-majority is configuration-backed via the `AgeOfMajorityPolicyPort` seam but the full per-region/tenant configuration platform is not redesigned in this stage (BC19 Localization adapter is the future authoritative source).
+- Fuzzy duplicate matching, automatic patient merge, patient portal, de-identification, communication preferences, insurance coverage workflow, PatientCoverage, full PatientRelationship subsystem, and full address/contact-history subsystem remain deferred.
+- No production deployment was performed.
+
+### Recovery Checkpoint
+
+- **Verified merged `main` HEAD (closeout baseline):** `8d7c8767bef7c57830ac1b11117e347345a76066` (PR #26 merge commit). This is the recovery checkpoint for the BC01 Patient Demographics / Registration / Consent stage. To resume, fetch and verify `origin/main` is at or ahead of this SHA before editing.
 
 ### Immediate Next Step
 
-The stage is ready for final operator review. The operator should review PR #26 and, when satisfied, merge it into `main` through the GitHub PR using the **normal merge-commit** strategy (no squash, no rebase, no force, no direct `main` push). The feature branch is preserved on the remote after merge. Do NOT merge until the operator has approved. `main` was NOT pushed during this task.
+BC01 Patient Demographics / Registration / Consent is MERGED / CLOSED on `main`. The immediate next step is **read-only discovery for the next substantive production stage**: fetch `origin/main`, confirm it is at or ahead of `8d7c8767bef7c57830ac1b11117e347345a76066`, then perform a read-only review of the canonical roadmap, BUSINESS_RULES, ADRs, and the current `main` tree to identify and ratify (with the operator) the next substantive stage. No code, schema, migration, or test file should be modified until the next stage is ratified.
 
 ### Final Pre-Merge Review Corrections
 
