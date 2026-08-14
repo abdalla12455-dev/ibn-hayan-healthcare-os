@@ -978,6 +978,87 @@ describe('PatientRepository', () => {
       expect(result.consent.expiresAt).toBeNull();
     });
 
+    it('persists an adult (self) consent with null guardian fields', async () => {
+      await prisma.tenant.create({
+        data: {
+          id: tenant1.id,
+          slug: tenant1.slug,
+          displayName: tenant1.displayName,
+        },
+      });
+      const created = await patientRepo.register({
+        tenantId: tenant1.id,
+        medicalRecordNumber: 'MRN-CON-ADULT-001',
+        demographics: {
+          legalGivenName: 'A',
+          legalFamilyName: 'B',
+          dateOfBirth: '1990-01-01',
+          sex: 'male',
+        },
+      });
+      if (created.outcome !== 'registered') return;
+
+      const result = await consentRepo.grant(tenant1.id, {
+        patientId: created.patient.id,
+        scope: 'general',
+        duration: 'indefinite',
+        expiresAt: null,
+        capturedBy: '00000000-0000-0000-0000-000000000099',
+        captureMethod: 'in_person',
+        policyVersion: 'v1.0',
+        // An adult grants self-consent: guardian fields are null.
+        guardianName: null,
+        guardianRelationship: null,
+        guardianCaptureMethod: null,
+      });
+      expect(result.outcome).toBe('granted');
+      if (result.outcome !== 'granted') return;
+      expect(result.consent.guardianName).toBeNull();
+      expect(result.consent.guardianRelationship).toBeNull();
+      expect(result.consent.guardianCaptureMethod).toBeNull();
+    });
+
+    it('persists a minor consent with guardian authorization fields', async () => {
+      await prisma.tenant.create({
+        data: {
+          id: tenant1.id,
+          slug: tenant1.slug,
+          displayName: tenant1.displayName,
+        },
+      });
+      const created = await patientRepo.register({
+        tenantId: tenant1.id,
+        medicalRecordNumber: 'MRN-CON-MINOR-001',
+        demographics: {
+          legalGivenName: 'A',
+          legalFamilyName: 'B',
+          dateOfBirth: '2020-01-01',
+          sex: 'female',
+        },
+      });
+      if (created.outcome !== 'registered') return;
+
+      const result = await consentRepo.grant(tenant1.id, {
+        patientId: created.patient.id,
+        scope: 'general',
+        duration: 'indefinite',
+        expiresAt: null,
+        capturedBy: '00000000-0000-0000-0000-000000000099',
+        captureMethod: 'in_person',
+        policyVersion: 'v1.0',
+        // A minor requires guardian authorization: all three guardian
+        // fields are supplied and persisted.
+        guardianName: 'Guardian Name',
+        guardianRelationship: 'parent',
+        guardianCaptureMethod: 'in_person',
+      });
+      expect(result.outcome).toBe('granted');
+      if (result.outcome !== 'granted') return;
+      expect(result.consent.guardianName).toBe('Guardian Name');
+      expect(result.consent.guardianRelationship).toBe('parent');
+      expect(result.consent.guardianCaptureMethod).toBe('in_person');
+    });
+
     it('rejects a second active treatment consent (one-active invariant)', async () => {
       await prisma.tenant.create({
         data: {

@@ -7099,5 +7099,15 @@ NOT RUN locally — PostgreSQL 17 was unavailable in this environment. CI on Git
 
 ### Immediate Next Step
 
-The stage is ready for final operator review. The operator should review PR #26 and, when satisfied, merge it into `main` via a fast-forward merge. Do NOT merge until the operator has reviewed. main was NOT pushed during this task.
+The stage is ready for final operator review. The operator should review PR #26 and, when satisfied, merge it into `main` through the GitHub PR using the **normal merge-commit** strategy (no squash, no rebase, no force, no direct `main` push). The feature branch is preserved on the remote after merge. Do NOT merge until the operator has approved. `main` was NOT pushed during this task.
+
+### Final Pre-Merge Review Corrections
+
+A final architecture/metadata/merge-readiness review identified and corrected two defects (new child commit, no history rewrite):
+
+1. **Age-of-majority canonicality (gate 6M):** The `AgeOfMajorityPolicyService` comments falsely claimed that `18` is "the most common canonical regional default documented in BUSINESS_RULES.md." Direct canonical review confirms BR-BC01-CLIN-005 states only "Age of majority configurable per region" — it does NOT define a numeric default. The comments and domain port doc were corrected to reframe `18` as a NON-CANONICAL INTERIM OPERATIONAL DEFAULT (used only when `IBN_HAYAN_AGE_OF_MAJORITY` is absent/invalid, so the consent-grant path does not fail closed). Operators SHOULD set the environment variable to the correct regional value; the Localization BC19 adapter is the future authoritative source.
+
+2. **Adult guardian-field consistency (gate 6N):** The documented contract stated "If the patient is an adult, guardian fields must NOT be supplied," but the service silently discarded guardian fields supplied for an adult (behavior B). Corrected to REJECT the request with `PATIENT_GUARDIAN_FIELDS_FOR_ADULT` (422, behavior A). Added unit test + two PostgreSQL integration tests (adult self-consent null guardian persistence; minor consent guardian-field persistence).
+
+Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS (+1 adult-guardian rejection test), Prisma validate/format/generate PASS, production build PASS. PostgreSQL 17 NOT RUN locally (CI authoritative).
 

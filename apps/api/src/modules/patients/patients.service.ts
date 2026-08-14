@@ -40,6 +40,7 @@ import {
   patientDuplicateMrn,
   patientDuplicateIdentifier,
   patientMinorGuardianRequired,
+  patientGuardianFieldsForAdult,
   patientConsentDuplicate,
   patientConsentNotGranted,
   patientConsentNotFound,
@@ -641,14 +642,35 @@ export class PatientsService {
     }
 
     const isMinor = patientAge < ageOfMajority;
-    const hasGuardian =
+    // A guardian field is "supplied" when it is a non-null, non-empty
+    // value. The contract schema's all-or-nothing refine guarantees the
+    // three guardian fields are either all supplied or all absent, but
+    // each is checked independently here for defensive correctness.
+    const hasGuardianName =
       request.guardianName !== null &&
       request.guardianName !== undefined &&
       request.guardianName.length > 0;
+    const hasGuardianRelationship =
+      request.guardianRelationship !== null &&
+      request.guardianRelationship !== undefined &&
+      request.guardianRelationship.length > 0;
+    const hasGuardianCaptureMethod =
+      request.guardianCaptureMethod !== null &&
+      request.guardianCaptureMethod !== undefined;
+    const hasAnyGuardianField =
+      hasGuardianName || hasGuardianRelationship || hasGuardianCaptureMethod;
 
-    if (isMinor && !hasGuardian) {
+    if (isMinor && !hasAnyGuardianField) {
       // A minor requires guardian authorization.
       throw patientMinorGuardianRequired();
+    }
+
+    if (!isMinor && hasAnyGuardianField) {
+      // An adult grants their own consent; guardian fields must NOT be
+      // supplied. The request is rejected (not silently discarded) so the
+      // caller is informed that the authorization provenance is
+      // self-consent (architecture gate 6N).
+      throw patientGuardianFieldsForAdult();
     }
 
     // Parse the expiresAt for fixed_term duration. The contract schema
@@ -667,6 +689,9 @@ export class PatientsService {
       capturedBy: ctx.userId,
       captureMethod: request.captureMethod,
       policyVersion: request.policyVersion,
+      // Guardian fields are only carried for a minor. An adult supplying
+      // guardian fields is rejected above, so an adult always has null
+      // guardian fields here (self-consent).
       guardianName: isMinor ? (request.guardianName ?? null) : null,
       guardianRelationship: isMinor
         ? (request.guardianRelationship ?? null)

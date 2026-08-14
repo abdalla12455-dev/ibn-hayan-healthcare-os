@@ -443,7 +443,8 @@ export interface TreatmentConsentVerificationPort {
  * Age-of-majority policy port (architecture gate 6M).
  *
  * BR-BC01-CLIN-005: "Age of majority configurable per region." The age
- * of majority is NOT hard-coded in the Patient domain. This port is the
+ * of majority is NOT hard-coded in the Patient domain. Canonical
+ * documentation does NOT define a numeric default. This port is the
  * injectable policy/configuration seam that resolves the age of majority
  * for the current tenant/region context. The implementation reads a
  * configuration value (following the established `*.feature.config.ts`
@@ -451,7 +452,7 @@ export interface TreatmentConsentVerificationPort {
  * overridable in tests. A future stage wires the Localization BC19
  * regulatory-framework adapter as the authoritative source; until then,
  * this port is the safe interim configuration seam that avoids
- * hard-coding 18 in the Patient domain.
+ * hard-coding any numeric age-of-majority value in the Patient domain.
  *
  * The port returns the age of majority as a positive integer. The
  * consent grant command computes the patient's age from their DOB and
@@ -461,8 +462,9 @@ export interface TreatmentConsentVerificationPort {
 export interface AgeOfMajorityPolicyPort {
   /**
    * Returns the age of majority for the current tenant/region context.
-   * A positive integer (e.g. 18). The value is configuration-driven, not
-   * hard-coded in the domain.
+   * A positive integer whose value is configuration-driven (per region),
+   * not hard-coded in the domain. Canonical documentation does not
+   * define a numeric default.
    */
   getAgeOfMajority(): number;
 }

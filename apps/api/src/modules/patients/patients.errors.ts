@@ -92,6 +92,24 @@ export function patientMinorGuardianRequired(): UnprocessableEntityException {
 }
 
 /**
+ * Return a 422 when a consent grant supplies guardian authorization
+ * fields for an adult patient (architecture gate 6N). An adult grants
+ * their own consent; guardian fields must NOT be supplied for an adult.
+ * The request is rejected rather than silently discarding the fields, so
+ * the caller is informed that the authorization provenance is
+ * self-consent, not guardian-consent.
+ */
+export function patientGuardianFieldsForAdult(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'PATIENT_GUARDIAN_FIELDS_FOR_ADULT',
+      message:
+        'Guardian authorization fields must not be supplied for an adult patient.',
+    },
+  });
+}
+
+/**
  * Return a 422 when the `single_encounter` consent duration is
  * rejected because it is not enforceable in this stage (architecture
  * gate 6K).

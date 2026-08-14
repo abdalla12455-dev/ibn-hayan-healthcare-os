@@ -446,6 +446,35 @@ describe('PatientsService', () => {
       expect(mocks.auditHelper.emitDirect).toHaveBeenCalledTimes(1);
     });
 
+    it('rejects guardian fields supplied for an adult patient (self-consent only)', async () => {
+      // The default patient (DOB 1990-01-01) is an adult under the
+      // default age-of-majority (18). Supplying guardian authorization
+      // fields for an adult must be rejected, not silently discarded.
+      await expect(
+        mocks.service.grantConsent(
+          PATIENT_ID,
+          {
+            consentType: 'treatment',
+            scope: 'general',
+            duration: 'indefinite',
+            captureMethod: 'in_person',
+            policyVersion: 'v1.0',
+            guardianName: 'Guardian Name',
+            guardianRelationship: 'parent',
+            guardianCaptureMethod: 'in_person',
+          },
+          'cookie',
+          auditContext,
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'PATIENT_GUARDIAN_FIELDS_FOR_ADULT' } },
+      });
+      // The grant must not proceed, and no audit event is emitted for
+      // a rejected grant.
+      expect(mocks.consents.grant).not.toHaveBeenCalled();
+      expect(mocks.auditHelper.emitDirect).not.toHaveBeenCalled();
+    });
+
     it('requires guardian authorization for a minor (age-of-majority from the policy port)', async () => {
       // A patient born recently → a minor under age of majority 18.
       mocks = makeMocks(18);
