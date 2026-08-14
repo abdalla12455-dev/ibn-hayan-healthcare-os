@@ -7065,7 +7065,39 @@ Fuzzy duplicate matching, automatic patient merge, patient portal, de-identifica
 
 NOT MERGED. This stage is on the feature branch only. main was NOT pushed. No force operation occurred. No rebase occurred. Historical branches (Stage 1C/1D/1E/1F, Stage 2A, BC01/BC10 reference) NOT modified.
 
+### Verified Git Backup
+
+- **Branch:** `feature/bc01-patient-demographics-registration-consent`
+- **Latest verified feature commit (local):** `489fda8556c07d899adcc3d39e053548d88cf35f`
+- **Direct remote feature SHA:** `489fda8556c07d899adcc3d39e053548d88cf35f` (exact match with local)
+- **Commits on branch (4):**
+  1. `7d40d3489add047fbcb81c4238b590c3459021ec` — `feat(patients): add demographics registration and consent` (37 files; the full BC01 stage)
+  2. `cf0dbf66782b3f67b1d7b074cdf21d242e6052a0` — `fix(database): break DI token circular import for consent verification` (created cycle-free `tokens.ts`; resolved `Nest can't resolve dependencies of the TreatmentConsentVerificationService`)
+  3. `aee010ff51b120e7b489f3de7bbf26e0d5ea2d06` — `fix(patients): map genderIdentity field to snake_case column` (added missing `@map("gender_identity")`; resolved `The column patients.genderIdentity does not exist`)
+  4. `489fda8556c07d899adcc3d39e053548d88cf35f` — `fix(database): import ConfigModule for AgeOfMajorityPolicyService DI` (added `ConfigModule` to DatabaseModule imports; resolved `Nest can't resolve dependencies of the AgeOfMajorityPolicyService`)
+- **Push:** succeeded (fast-forward, no force). Local/direct-remote SHAs match exactly.
+
+### Pull Request
+
+- **PR number:** #26
+- **PR URL:** https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/26
+- **PR head SHA:** `489fda8556c07d899adcc3d39e053548d88cf35f`
+- **Draft state:** DRAFT (ready for operator review; NOT merged)
+
+### Authoritative CI (exact-head)
+
+- **CI run ID:** `31840388101` on head SHA `489fda8556c07d899adcc3d39e053548d88cf35f`
+- **Static analysis, lint, unit tests, and build:** SUCCESS (Node 24, pnpm 11.14.0 frozen lockfile, Prisma validate/generate, typecheck, lint, 491 API + 142 domain + 208 contracts + 96 observability + 227 web unit tests, production build)
+- **PostgreSQL 17 validation suites:** SUCCESS — all suites green against real PostgreSQL 17:
+  - context (55 tests), database/tenancy+patient+identity+provider+rbac (173 tests, incl. patient.db-spec.ts 33 tests), clinic-admin (24), appointments (206), encounters (42), role-preview (53), audit:atomicity (9), audit:integration (29), audit:database (16), audit:concurrency (11), audit:verify (7)
+  - P2034 and DriverAdapterError TransactionWriteConflict retry paths exercised by the concurrency/serialization suites.
+  - Stage 1C/1D/1E/1F (appointments 206), Stage 2A (encounters 42), BC10 (workforce/provider in database suite) regressions green.
+
+### Local PostgreSQL 17 Status
+
+NOT RUN locally — PostgreSQL 17 was unavailable in this environment. CI on GitHub Actions Docker (PostgreSQL 17, SERIALIZABLE isolation) is authoritative and is GREEN on the exact head SHA.
+
 ### Immediate Next Step
 
-Commit and push `feature/bc01-patient-demographics-registration-consent`, create a draft PR to `main`, and run/wait for Main CI on the exact PR head SHA. Merge only after exact-head CI is green on real PostgreSQL 17 with SERIALIZABLE isolation and the operator has reviewed.
+The stage is ready for final operator review. The operator should review PR #26 and, when satisfied, merge it into `main` via a fast-forward merge. Do NOT merge until the operator has reviewed. main was NOT pushed during this task.
 
