@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma.service.js';
 import { PrismaTenantRepository } from './repositories/prisma-tenant.repository.js';
 import { PrismaOrganisationRepository } from './repositories/prisma-organisation.repository.js';
@@ -96,6 +97,7 @@ import {
 } from './tokens.js';
 
 @Module({
+  imports: [ConfigModule],
   providers: [
     PrismaService,
     LocalCredentialService,
