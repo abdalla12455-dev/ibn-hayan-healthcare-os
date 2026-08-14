@@ -93,7 +93,15 @@ export type PermissionCode =
   | 'encounters:cancel'
   | 'encounters:on_leave'
   | 'encounters:resume'
-  | 'encounters:view';
+  | 'encounters:view'
+  | 'patients:register'
+  | 'patients:view'
+  | 'patients:search'
+  | 'patients:update_demographics'
+  | 'patients:manage_identifiers'
+  | 'patients:consent_grant'
+  | 'patients:consent_view'
+  | 'patients:consent_withdraw';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -140,6 +148,14 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'encounters:on_leave',
   'encounters:resume',
   'encounters:view',
+  'patients:register',
+  'patients:view',
+  'patients:search',
+  'patients:update_demographics',
+  'patients:manage_identifiers',
+  'patients:consent_grant',
+  'patients:consent_view',
+  'patients:consent_withdraw',
 ] as const;
 
 /**

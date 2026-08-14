@@ -31,7 +31,9 @@ export {
   TENANT_ROLE_ASSIGNMENT_REPOSITORY,
   APPOINTMENT_REPOSITORY,
   PATIENT_REPOSITORY,
+  PATIENT_IDENTIFIER_REPOSITORY,
+  PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
   ENCOUNTER_REPOSITORY,
-} from './database.module.js';
+} from './tokens.js';
 export { LocalCredentialService } from './repositories/local-credential.service.js';

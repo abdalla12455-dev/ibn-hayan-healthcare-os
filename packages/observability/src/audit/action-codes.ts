@@ -497,6 +497,52 @@ export const ENCOUNTERS_ACTION_CODES = [
 export type EncountersActionCode = (typeof ENCOUNTERS_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Patients (Patient bounded context — BC01 Demographics/Registration/Consent)
+// ---------------------------------------------------------------------------
+
+/**
+ * Patients action codes.
+ *
+ * Emitted by the Patients module after successful patient registration,
+ * view, search, demographic update, identifier add, and treatment-consent
+ * grant/withdraw (BC01 Demographics/Registration/Consent).
+ *
+ * Per the ninth canonical batch specification and architecture gate 21,
+ * events are emitted ONLY after the operation succeeds; they are NOT
+ * emitted when validation fails, when the service throws, when a duplicate
+ * is rejected, when a cross-tenant access returns not-found, when a
+ * transaction rolls back, or for a no-op (e.g. an already-withdrawn
+ * consent re-withdrawal is an idempotent no-op and emits no event).
+ *
+ * All actions are mapped to the `tenant_context` category (see
+ * `inferCategoryFromAction`): Patient identity is tenant-wide (architecture
+ * gate 6A), and the patient commands operate within the authenticated
+ * tenant scope (no facility/organisation scoping on Patient, unlike
+ * encounters/appointments which are facility-scoped). The `tenant_context`
+ * category is the narrowest semantically correct existing category for
+ * tenant-scoped patient operations.
+ *
+ * Audit metadata (architecture gate 21): the metadata carries ONLY the
+ * `endpoint` and the patient/identifier/consent internal ID for
+ * traceability. NO PHI/PII is carried in the metadata. Forbidden from
+ * metadata: names, DOB, sex/gender, NationalID, Passport, phone, email,
+ * address, consent text, raw request body. The audit metadata
+ * forbidden-key detector enforces this at emission time as
+ * defence-in-depth.
+ */
+export const PATIENTS_ACTION_CODES = [
+  'patients.registered',
+  'patients.viewed',
+  'patients.searched',
+  'patients.demographics_updated',
+  'patients.identifier_added',
+  'patients.consent_granted',
+  'patients.consent_withdrawn',
+] as const;
+
+export type PatientsActionCode = (typeof PATIENTS_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -519,6 +565,7 @@ export const AUDIT_ACTION_CODES = [
   ...CLINIC_ADMIN_ACTION_CODES,
   ...APPOINTMENTS_ACTION_CODES,
   ...ENCOUNTERS_ACTION_CODES,
+  ...PATIENTS_ACTION_CODES,
 ] as const;
 
 /**
@@ -605,6 +652,15 @@ export function inferCategoryFromAction(
   // the authenticated tenant/organisation/facility scope).
   if (action.startsWith('encounters.')) {
     return 'facility_context';
+  }
+  // Patients actions are mapped to the `tenant_context` category: Patient
+  // identity is tenant-wide (architecture gate 6A), and patient commands
+  // operate within the authenticated tenant scope (no facility/organisation
+  // scoping on Patient, unlike encounters/appointments). The
+  // `tenant_context` category is the narrowest semantically correct existing
+  // category for tenant-scoped patient operations.
+  if (action.startsWith('patients.')) {
+    return 'tenant_context';
   }
   return null;
 }

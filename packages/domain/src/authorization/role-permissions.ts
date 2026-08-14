@@ -285,6 +285,38 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:confirm',
   'appointments:check_in',
   'encounters:view',
+  'patients:view',
+  'patients:search',
+  'patients:consent_view',
+] as const;
+
+/**
+ * The patient registration/demographics/consent-capture permissions
+ * granted to R06 Receptionist. Per USER_ROLES.md §10.1, R06
+ * Receptionist has "Write" on Patient Records. Per RECEPTION.md, the
+ * receptionist is the primary demographic registration and update role,
+ * and the canonical consent-capture role at the registration desk. R06
+ * receives the full patient write permissions: register, view, search,
+ * update demographics, manage identifiers, and grant/view/withdraw
+ * treatment consent.
+ *
+ * These permissions are NOT granted to R07 Scheduler (R07's Patient
+ * Records cell is "Read (sched)" — scheduling-scoped read only, no
+ * demographic/consent write), NOT granted to R09 Clinic Administrator
+ * (R09's Patient Records cell is "Read" — operational oversight, no
+ * demographic/consent write), and NOT granted to R13 System
+ * Administrator (R13's Patient Records cell is "—" — no patient access).
+ */
+const RECEPTION_PATIENT_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'patients:register',
+  'patients:view',
+  'patients:search',
+  'patients:update_demographics',
+  'patients:manage_identifiers',
+  'patients:consent_grant',
+  'patients:consent_view',
+  'patients:consent_withdraw',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -355,51 +387,83 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
 export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
-  R01_PHYSICIAN: PHYSICIAN_ENCOUNTER_PERMISSIONS,
-  R02_NURSE: NURSE_ENCOUNTER_PERMISSIONS,
-  R03_PHARMACIST: ENCOUNTER_READ_PERMISSIONS,
-  R04_TECHNICIAN: ENCOUNTER_READ_PERMISSIONS,
-  R05_ALLIED_HEALTH_PROFESSIONAL: ENCOUNTER_READ_PERMISSIONS,
-  // R06 Receptionist is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification, R06
-  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R06's
-  // Encounter Records cell is "Read (sched)", so R06 additionally
-  // receives `encounters:view` (read-only; no encounter lifecycle
-  // write). R06 therefore uses
-  // CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS (13 permissions).
-  R06_RECEPTIONIST: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
-  // R07 Scheduler is authorized to create appointments via
-  // `POST /api/v1/appointments`. Per the Stage 1C specification, R07
-  // receives CLINIC_BOOKING_PERMISSIONS. Per USER_ROLES.md 10.1, R07's
-  // Encounter Records cell is "Read/Write (sched)"; the "(sched)"
-  // write is a scheduling-scoped write that Stage 2A does NOT define
-  // as an encounter command, so R07 receives `encounters:view` ONLY
-  // (read) on encounters, plus its existing booking permissions.
-  // R07 therefore uses CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS
-  // (13 permissions).
-  R07_SCHEDULER: CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
-  R08_BILLER: ENCOUNTER_READ_PERMISSIONS,
-  // R09 Clinic Administrator is the SOLE holder of the
-  // `clinic_admin_overview:view` and `appointments:view` permissions,
-  // and also receives `appointments:book` for creating appointments
-  // via `POST /api/v1/appointments`. The Clinic Admin Overview surface
-  // at `/clinic-admin` is the canonical application route for this role
-  // (per DESIGN_BIBLE.md Â§17.1). R09 receives CLINIC_ADMIN_PERMISSIONS
-  // (explicit 10 permissions), NOT `PERMISSION_CODES` (which would
-  // grant ALL future permissions automatically).
+  // R01 Physician: clinical encounter lifecycle + clinical patient read
+  // (own panel). Per USER_ROLES.md 10.1, R01's Patient Records cell is
+  // "Read (own panel)" - read/search/consent_view only; NO demographic
+  // write, NO consent write, NO registration.
+  R01_PHYSICIAN: [
+    ...PHYSICIAN_ENCOUNTER_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+    'patients:consent_view',
+  ],
+  // R02 Nurse: clinical encounter read/write + clinical patient read.
+  // Per USER_ROLES.md 10.1, R02's Patient Records cell is "Read". Same
+  // patient read permissions as R01; NO demographic/consent write.
+  R02_NURSE: [
+    ...NURSE_ENCOUNTER_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+    'patients:consent_view',
+  ],
+  // R03 Pharmacist: encounter read + patient read (med).
+  R03_PHARMACIST: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R04 Technician: encounter read + patient read.
+  R04_TECHNICIAN: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R05 Allied Health: encounter read + patient read.
+  R05_ALLIED_HEALTH_PROFESSIONAL: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R06 Receptionist: clinic booking + encounter read (sched) + FULL
+  // patient registration/demographics/consent-capture write. Per
+  // USER_ROLES.md 10.1, R06's Patient Records cell is "Write" - the
+  // primary demographic registration/update role and the canonical
+  // consent-capture role at the registration desk. The context
+  // permissions are deduplicated by the Set union in
+  // `permissionsForRoles`.
+  R06_RECEPTIONIST: [
+    ...CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
+    ...RECEPTION_PATIENT_PERMISSIONS,
+  ],
+  // R07 Scheduler: clinic booking + encounter read (sched) + patient
+  // read (sched). Per USER_ROLES.md 10.1, R07's Patient Records cell
+  // is "Read/Write (sched)" but Stage BC01 defines NO scheduling-scoped
+  // patient write command. The patient write permissions (register,
+  // update demographics, manage identifiers, consent grant/withdraw)
+  // are registration-desk actions, NOT scheduling actions, so R07
+  // receives `patients:view` and `patients:search` ONLY (read), plus
+  // its existing booking permissions.
+  R07_SCHEDULER: [
+    ...CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+  ],
+  // R08 Biller: encounter read + patient read (bill).
+  R08_BILLER: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R09 Clinic Administrator: clinic admin overview + appointments +
+  // encounter read + patient read (operational oversight) +
+  // consent_view. Per USER_ROLES.md 10.1, R09's Patient Records cell
+  // is "Read" - operational oversight, NO demographic/consent write.
+  // R09 may view consent state (operational oversight of the consent
+  // gate) but may NOT grant/withdraw consent or register/update
+  // demographics. R09 receives CLINIC_ADMIN_PERMISSIONS (which now
+  // includes patients:view, patients:search, patients:consent_view).
   R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,
-  R10_COMPLIANCE_OFFICER: ENCOUNTER_READ_PERMISSIONS,
+  // R10 Compliance Officer: encounter read + patient read (audit) +
+  // consent_view.
+  R10_COMPLIANCE_OFFICER: [
+    ...ENCOUNTER_READ_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+    'patients:consent_view',
+  ],
+  // R11 HR Manager: context permissions only (no patient/encounter access).
   R11_HR_MANAGER: HUMAN_CONTEXT_PERMISSIONS,
-  R12_EXECUTIVE: ENCOUNTER_READ_PERMISSIONS,
-  // R13 System Administrator (Platform Super Admin) is explicitly
-  // NOT granted `clinic_admin_overview:view`. R13 has a different
-  // product surface (Platform Super Admin Overview, DESIGN_BIBLE.md
-  // Â§15/Â§16). Allowing R13 to view the Clinic Admin Overview would
-  // conflate two distinct surfaces and violate Phase 7 item 6 of
-  // the live-data task specification. R13 receives
-  // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions), NOT
-  // `PERMISSION_CODES.filter(...)` (which would grant all future
-  // permissions except `clinic_admin_overview:view`).
+  // R12 Executive: encounter read + patient read (summary).
+  R12_EXECUTIVE: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R13 System Administrator (Platform Super Admin) is explicitly NOT
+  // granted any patient permissions. Per USER_ROLES.md 10.1, R13's
+  // Patient Records cell is "-" (no patient access). R13 receives
+  // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions) ONLY. R13 must
+  // NOT inherit clinical operational permissions or patient PHI access.
   R13_SYSTEM_ADMINISTRATOR: HUMAN_CONTEXT_PERMISSIONS,
   // R14 Integration Account is denied the interactive workspace
   // context permissions. The integration account is non-human and

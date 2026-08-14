@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { PrismaService } from './prisma.service.js';
 import { PrismaTenantRepository } from './repositories/prisma-tenant.repository.js';
 import { PrismaOrganisationRepository } from './repositories/prisma-organisation.repository.js';
@@ -9,9 +10,17 @@ import { PrismaSessionRepository } from './repositories/prisma-session.repositor
 import { PrismaTenantRoleAssignmentRepository } from './repositories/prisma-tenant-role-assignment.repository.js';
 import { PrismaAppointmentRepository } from './repositories/prisma-appointment.repository.js';
 import { PrismaPatientRepository } from './repositories/prisma-patient.repository.js';
+import { PrismaPatientIdentifierRepository } from './repositories/prisma-patient-identifier.repository.js';
+import { PrismaPatientConsentRepository } from './repositories/prisma-patient-consent.repository.js';
 import { PrismaProviderRepository } from './repositories/prisma-provider.repository.js';
 import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
+import { TreatmentConsentVerificationService } from './services/treatment-consent-verification.service.js';
+import { AgeOfMajorityPolicyService } from './services/age-of-majority-policy.service.js';
+import {
+  AGE_OF_MAJORITY_POLICY_PORT,
+  TREATMENT_CONSENT_VERIFICATION_PORT,
+} from '@ibn-hayan/domain';
 
 /**
  * Database infrastructure module.
@@ -50,24 +59,45 @@ import { LocalCredentialService } from './repositories/local-credential.service.
  * implementation. Using Symbol tokens (rather than the interface
  * itself) avoids TypeScript's structural-identity pitfall where two
  * interfaces with the same shape are treated as interchangeable.
+ *
+ * The token `const` declarations live in the cycle-free `tokens.ts`
+ * module (see that file for the rationale) and are re-exported here so
+ * existing imports from `database.module.js` and the
+ * `infrastructure/database/index.js` barrel continue to work unchanged.
  */
-export const TENANT_REPOSITORY = Symbol('TENANT_REPOSITORY');
-export const ORGANISATION_REPOSITORY = Symbol('ORGANISATION_REPOSITORY');
-export const FACILITY_REPOSITORY = Symbol('FACILITY_REPOSITORY');
-export const USER_REPOSITORY = Symbol('USER_REPOSITORY');
-export const TENANT_MEMBERSHIP_REPOSITORY = Symbol(
-  'TENANT_MEMBERSHIP_REPOSITORY',
-);
-export const SESSION_REPOSITORY = Symbol('SESSION_REPOSITORY');
-export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
-  'TENANT_ROLE_ASSIGNMENT_REPOSITORY',
-);
-export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
-export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
-export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
-export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
+export {
+  TENANT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+  USER_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  SESSION_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  APPOINTMENT_REPOSITORY,
+  PATIENT_REPOSITORY,
+  PATIENT_IDENTIFIER_REPOSITORY,
+  PATIENT_CONSENT_REPOSITORY,
+  WORKFORCE_REPOSITORY,
+  ENCOUNTER_REPOSITORY,
+} from './tokens.js';
+import {
+  TENANT_REPOSITORY,
+  ORGANISATION_REPOSITORY,
+  FACILITY_REPOSITORY,
+  USER_REPOSITORY,
+  TENANT_MEMBERSHIP_REPOSITORY,
+  SESSION_REPOSITORY,
+  TENANT_ROLE_ASSIGNMENT_REPOSITORY,
+  APPOINTMENT_REPOSITORY,
+  PATIENT_REPOSITORY,
+  PATIENT_IDENTIFIER_REPOSITORY,
+  PATIENT_CONSENT_REPOSITORY,
+  WORKFORCE_REPOSITORY,
+  ENCOUNTER_REPOSITORY,
+} from './tokens.js';
 
 @Module({
+  imports: [ConfigModule],
   providers: [
     PrismaService,
     LocalCredentialService,
@@ -106,6 +136,22 @@ export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
     {
       provide: PATIENT_REPOSITORY,
       useClass: PrismaPatientRepository,
+    },
+    {
+      provide: PATIENT_IDENTIFIER_REPOSITORY,
+      useClass: PrismaPatientIdentifierRepository,
+    },
+    {
+      provide: PATIENT_CONSENT_REPOSITORY,
+      useClass: PrismaPatientConsentRepository,
+    },
+    {
+      provide: TREATMENT_CONSENT_VERIFICATION_PORT,
+      useClass: TreatmentConsentVerificationService,
+    },
+    {
+      provide: AGE_OF_MAJORITY_POLICY_PORT,
+      useClass: AgeOfMajorityPolicyService,
     },
     {
       provide: WORKFORCE_REPOSITORY,
@@ -147,6 +193,10 @@ export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
     TENANT_ROLE_ASSIGNMENT_REPOSITORY,
     APPOINTMENT_REPOSITORY,
     PATIENT_REPOSITORY,
+    PATIENT_IDENTIFIER_REPOSITORY,
+    PATIENT_CONSENT_REPOSITORY,
+    TREATMENT_CONSENT_VERIFICATION_PORT,
+    AGE_OF_MAJORITY_POLICY_PORT,
     WORKFORCE_REPOSITORY,
     ENCOUNTER_REPOSITORY,
     LocalCredentialService,
@@ -176,6 +226,10 @@ export type {
   TenantRoleAssignmentRepository,
   AppointmentRepository,
   PatientRepository,
+  PatientIdentifierRepository,
+  PatientConsentRepository,
+  TreatmentConsentVerificationPort,
+  AgeOfMajorityPolicyPort,
   ProviderRepository,
   EncounterRepository,
 } from '@ibn-hayan/domain';
