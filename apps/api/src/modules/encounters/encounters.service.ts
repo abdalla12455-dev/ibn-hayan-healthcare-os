@@ -1,18 +1,20 @@
 import { Injectable, Inject } from '@nestjs/common';
-import type {
-  EncounterRepository,
-  AppointmentRepository,
-  PatientRepository,
-  ProviderRepository,
-  TenantRepository,
-  OrganisationRepository,
-  FacilityRepository,
-  EncounterId,
-  EncounterCreateInput,
-  EncounterTransitionInput,
-  PatientId,
-  ProviderId,
-  AppointmentId,
+import {
+  type EncounterRepository,
+  type AppointmentRepository,
+  type PatientRepository,
+  type ProviderRepository,
+  type TenantRepository,
+  type OrganisationRepository,
+  type FacilityRepository,
+  type TreatmentConsentVerificationPort,
+  type EncounterId,
+  type EncounterCreateInput,
+  type EncounterTransitionInput,
+  type PatientId,
+  type ProviderId,
+  type AppointmentId,
+  TREATMENT_CONSENT_VERIFICATION_PORT,
 } from '@ibn-hayan/domain';
 import {
   TENANT_REPOSITORY,
@@ -80,12 +82,14 @@ type EncounterAuditAction =
  *   cross-scope appointment returns not-found, no existence leak).
  * - Enforces the consent gate (operator-ratified product rule) at
  *   encounter creation. The gate is a configuration-gated safety
- *   check; when enforced, consent cannot be verified (BC01 does not
- *   persist consent records yet), so a non-emergency encounter is
+ *   check; when enforced, the BC01 TreatmentConsentVerificationPort is
+ *   consulted to verify an active granted treatment consent. A
+ *   non-emergency encounter without an active granted consent is
  *   blocked (fail-safe). The emergency carve-out (emergency
  *   encounterType or priority with required justification) is the
- *   ONLY path through the enforced gate. The gate never fabricates
- *   consent and never treats missing consent as granted.
+ *   ONLY path through the enforced gate without an active granted
+ *   consent. The gate never fabricates consent and never treats
+ *   missing consent as granted.
  * - Enforces the canonical lifecycle transition graph
  *   (STATUS_CODES.md §10.2) via the repository's atomic conditional
  *   `transitionStatus` primitive.
@@ -137,6 +141,8 @@ export class EncountersService {
     private readonly authService: AuthService,
     private readonly auditHelper: AuditHelperService,
     private readonly consentGate: ConsentGateFeatureConfig,
+    @Inject(TREATMENT_CONSENT_VERIFICATION_PORT)
+    private readonly consentVerification: TreatmentConsentVerificationPort,
   ) {}
 
   /**
@@ -149,14 +155,17 @@ export class EncountersService {
    * Consent gate (operator-ratified product rule):
    * - If the gate is enforced AND the encounter is NOT an emergency
    *   (encounterType !== 'emergency' AND priority !== 'emergency'),
-   *   the encounter is blocked (fail-safe): consent cannot be
-   *   verified because BC01 does not persist consent records yet.
+   *   the BC01 TreatmentConsentVerificationPort is consulted. If the
+   *   verification returns `granted`, the encounter proceeds. If it
+   *   returns `not_granted`, `expired`, `withdrawn`, or `unknown`
+   *   (infrastructure failure), the encounter is blocked (fail-safe).
    *   Missing consent is NEVER silently treated as granted.
    * - If the gate is enforced AND the encounter IS an emergency, the
    *   emergency carve-out applies: the encounter is created, and the
    *   `encounters.created` audit event carries the
    *   `emergencyJustification` in its metadata (the canonical basis
    *   for the carve-out, BR-BC15-REG-003 "documented with reason").
+   *   No fake consent record is created.
    * - If the gate is disabled (development only), the encounter is
    *   created and the audit event carries `consentGateEnforced: false`
    *   so the disablement is auditable.
@@ -224,19 +233,42 @@ export class EncountersService {
       request.encounterType === 'emergency' || request.priority === 'emergency';
 
     // Consent gate (operator-ratified product rule). The gate runs at
-    // encounter creation, before patient/provider/appointment
-    // validation, because it is a clinical-safety check that gates the
-    // entire creation. When enforced and the encounter is NOT an
-    // emergency, the encounter is blocked (fail-safe). The contract
-    // schema already rejected an emergency encounter without a
-    // non-empty justification (the .refine), so by here an emergency
-    // encounter has a valid justification.
+    // encounter creation. When enforced and the encounter is NOT an
+    // emergency, the BC01 TreatmentConsentVerificationPort is consulted
+    // to verify an active granted treatment consent. The emergency
+    // carve-out (emergency encounterType or priority with required
+    // justification) is the ONLY path through the enforced gate without
+    // an active granted consent.
+    //
+    // Per architecture gate 11/12 (BC01 consent-verification port):
+    // BC02 consumes the BC01-owned port; it does NOT query BC01 Prisma
+    // tables directly. The port returns a typed result so the encounter
+    // gate can fail safely and audit the precise reason for the block:
+    // - granted → proceed
+    // - not_granted / expired / withdrawn / unknown → fail safely
+    //   (encounterConsentRequired). An infrastructure failure (unknown)
+    //   is NEVER treated as consent granted.
+    //
+    // The emergency carve-out never creates fake consent: an emergency
+    // encounter proceeds WITHOUT a consent record under BR-BC15-REG-003;
+    // the audit event carries `emergency: true` and the justification.
+    // The Encounter does NOT mutate Patient consent.
     const consentGateEnforced = this.consentGate.isConsentGateEnabled();
+    let consentVerified = false;
     if (consentGateEnforced && !isEmergency) {
-      // Fail-safe: consent cannot be verified (BC01 does not persist
-      // consent records yet). Missing consent is NEVER treated as
-      // granted. The emergency carve-out is the ONLY path through.
-      throw encounterConsentRequired();
+      const consentResult =
+        await this.consentVerification.verifyActiveTreatmentConsent(
+          tenantId,
+          request.patientId as PatientId,
+          new Date(),
+        );
+      if (consentResult.status !== 'granted') {
+        // Fail-safe: no active granted treatment consent. Missing,
+        // expired, withdrawn, or unknown consent is NEVER treated as
+        // granted. The emergency carve-out is the ONLY path through.
+        throw encounterConsentRequired();
+      }
+      consentVerified = true;
     }
 
     // Validate patient exists in the authenticated tenant. Uses
@@ -312,6 +344,7 @@ export class EncountersService {
         endpoint: 'encounters_create',
         encounterId: result.encounter.id,
         consentGateEnforced,
+        consentVerified,
       };
       if (isEmergency) {
         metadata.emergency = true;

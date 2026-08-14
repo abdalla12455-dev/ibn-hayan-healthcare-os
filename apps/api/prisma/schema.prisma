@@ -278,10 +278,10 @@ model Facility {
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  organisation    Organisation                   @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  roleAssignments TenantRoleAssignment[]       @relation("TenantRoleAssignmentScopeFacility")
-  activeSessions  AuthSession[]              @relation("AuthSessionActiveFacility")
-  appointments    Appointment[]
+  organisation        Organisation                 @relation(fields: [organisationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  roleAssignments     TenantRoleAssignment[]       @relation("TenantRoleAssignmentScopeFacility")
+  activeSessions      AuthSession[]                @relation("AuthSessionActiveFacility")
+  appointments        Appointment[]
   providerAssignments ProviderFacilityAssignment[]
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
@@ -789,6 +789,8 @@ model Appointment {
 enum PatientStatus {
   active
   inactive
+  deceased
+  transferred_out
   archived
 }
 
@@ -816,16 +818,218 @@ enum PatientStatus {
 /// These fields will be added in subsequent batches as patient registration
 /// and demographics are implemented.
 model Patient {
-  id                     String       @id @default(uuid()) @db.Uuid
-  tenantId               String       @map("tenant_id") @db.Uuid
-  medicalRecordNumber    String       @map("medical_record_number") @db.VarChar(50)
-  status                 PatientStatus @default(active)
-  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String                 @id @default(uuid()) @db.Uuid
+  tenantId             String                 @map("tenant_id") @db.Uuid
+  medicalRecordNumber  String                 @map("medical_record_number") @db.VarChar(50)
+  status               PatientStatus          @default(active)
+  // Demographic columns (BC01 Demographics/Registration/Consent). All are
+  // nullable at the database level so that existing minimal Patient rows
+  // (created by the reference foundation) remain valid (architecture gate
+  // 24). A new complete registration API requires the canonical identity
+  // demographics (name, DOB, sex); the historical minimal rows keep null
+  // demographics. Database nullability is separated from new-registration
+  // API validation.
+  legalGivenName       String?                @map("legal_given_name") @db.VarChar(100)
+  legalMiddleName      String?                @map("legal_middle_name") @db.VarChar(100)
+  legalFamilyName      String?                @map("legal_family_name") @db.VarChar(100)
+  preferredName        String?                @map("preferred_name") @db.VarChar(100)
+  // Exact date of birth as an ISO 8601 calendar date (YYYY-MM-DD). Stored
+  // as a DATE (not TIMESTAMPTZ) because DOB is a calendar date, not an
+  // instant; a DATE avoids timezone-interpretation ambiguity. No computed
+  // age is stored (architecture gate 6D). Nullable for historical rows.
+  dateOfBirth          DateTime?              @map("date_of_birth") @db.Date
+  sex                  PatientSex?
+  genderIdentity       PatientGenderIdentity?
+  genderIdentityDetail String?                @map("gender_identity_detail") @db.VarChar(100)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+
+  identifiers PatientIdentifier[]
+  consents    PatientConsent[]
 
   @@unique([tenantId, medicalRecordNumber], map: "patients_tenant_id_medical_record_number_key")
   @@index([tenantId], map: "patients_tenant_id_idx")
+  @@index([tenantId, legalFamilyName], map: "patients_tenant_id_legal_family_name_idx")
+  @@index([tenantId, legalGivenName], map: "patients_tenant_id_legal_given_name_idx")
   @@map("patients")
+}
+
+// ---------------------------------------------------------------------------
+// Patient demographics & consent (BC01 Demographics/Registration/Consent)
+// ---------------------------------------------------------------------------
+
+/// Canonical patient sex (biological sex) per ENUMS.md §3 (PatientSex,
+/// Closed). Distinct from gender identity.
+enum PatientSex {
+  male
+  female
+  intersex
+  unknown
+  not_declared
+}
+
+/// Canonical patient gender identity per ENUMS.md §3 (PatientGenderIdentity,
+/// Open-with-Council). Distinct from biological sex.
+enum PatientGenderIdentity {
+  male
+  female
+  transgender_male
+  transgender_female
+  non_binary
+  prefer_not_to_say
+  other
+}
+
+/// Canonical patient identifier type per ENUMS.md §3
+/// (PatientIdentifierType, Open-with-Council). The
+/// `medical_record_number` value is NOT used by the PatientIdentifier
+/// model — the MRN remains on the Patient table.
+enum PatientIdentifierType {
+  national_id
+  passport
+  medical_record_number
+  insurance_number
+  driver_licence
+}
+
+/// Canonical consent type per ENUMS.md §3 (ConsentType). The BC01 API
+/// accepts `treatment` only in this stage; the other types are canonical
+/// but deferred.
+enum ConsentType {
+  treatment
+  information_disclosure
+  research
+  marketing
+  data_sharing
+}
+
+/// Canonical consent status per ENUMS.md §3 (ConsentStatus). NO
+/// `declined` value exists (architecture gate 6L). Refusal is the
+/// absence of an active granted consent.
+enum ConsentStatus {
+  granted
+  withdrawn
+  pending
+  expired
+}
+
+/// Canonical consent scope per ENUMS.md §3 (ConsentScope).
+enum ConsentScope {
+  general
+  specific
+  emergency
+}
+
+/// Canonical consent duration per ENUMS.md §3 (ConsentDuration).
+/// `single_encounter` is REJECTED by the BC01 API (architecture gate 6K)
+/// because no canonical integration event exists to expire it at
+/// encounter completion. The enum value exists in the database catalogue
+/// but the API rejects it; a future stage wires the encounter-completion
+/// event and enables it truthfully.
+enum ConsentDuration {
+  indefinite
+  fixed_term
+  single_encounter
+}
+
+/// The method by which consent was captured (compliance provenance).
+enum ConsentCaptureMethod {
+  in_person
+  written
+  verbal
+  electronic
+  guardian_authorization
+}
+
+/// A secondary patient identifier (NationalID, Passport, InsuranceNumber,
+/// DriverLicence) distinct from the MRN (which remains on the Patient
+/// table for backward compatibility, per architecture gate 6G). Within
+/// BC01, a foreign key to Patient is permitted (same bounded context).
+///
+/// Per architecture gate 6O, sensitive identifiers (NationalID, Passport)
+/// are stored as plaintext in the transactional database (consistent with
+/// all other patient PHI), protected by tenant isolation, authorization,
+/// and audit-metadata forbidden-key rules. No custom field-level
+/// cryptography is invented. The `normalized_value` is NEVER placed in
+/// audit metadata or application logs.
+///
+/// Deterministic duplicate prevention (architecture gate 6H): NationalID
+/// and Passport have a partial unique index on
+/// `(tenant_id, type, normalized_value)` added by the migration (Prisma 7
+/// cannot express partial unique indexes with type-predicates in the
+/// schema language). The `@@unique` declaration is omitted here in favour
+/// of the raw-SQL partial unique index in the migration, matching the
+/// ProviderFacilityAssignment convention.
+model PatientIdentifier {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @map("tenant_id") @db.Uuid
+  patientId       String                @map("patient_id") @db.Uuid
+  type            PatientIdentifierType
+  normalizedValue String                @map("normalized_value") @db.VarChar(100)
+  issuingCountry  String?               @map("issuing_country") @db.VarChar(2)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId], map: "patient_identifiers_tenant_id_idx")
+  @@index([tenantId, patientId], map: "patient_identifiers_tenant_id_patient_id_idx")
+  @@index([tenantId, type, normalizedValue], map: "patient_identifiers_tenant_type_value_idx")
+  @@map("patient_identifiers")
+}
+
+/// A dedicated consent model (NOT a boolean field on Patient), per
+/// architecture gate 6I. Consent is a first-class, history-preserving
+/// lifecycle entity owned by BC01. This stage implements Treatment consent
+/// only.
+///
+/// Consent history semantics (architecture gate 6P): consent records are
+/// history-preserving MUTABLE lifecycle records, NOT append-only events.
+/// The `status` field transitions (Granted → Withdrawn, Granted → Expired).
+/// Every record is retained (no destructive delete). Every status
+/// transition is audited. The `grantedAt`, `withdrawnAt`, and `expiresAt`
+/// timestamps are preserved across transitions.
+///
+/// Consent expiry / unique-constraint gate (architecture gate 6J): the
+/// one-active-treatment-consent invariant is enforced by a partial unique
+/// index on `(tenant_id, patient_id) WHERE consent_type = 'treatment'
+/// AND status = 'granted'` added by the migration (Prisma 7 cannot express
+/// partial unique indexes in the schema language). The
+/// transactional reconciliation-before-grant strategy (run by the
+/// repository's grant method within a SERIALIZABLE transaction) ensures
+/// expired rows transition to `status = 'expired'` BEFORE a new granted
+/// record is inserted, so re-consent after expiry works. No NOW()/
+/// current-time predicate is used in the partial unique index (the
+/// predicate is `status = 'granted'`, immutable per-row state).
+///
+/// `capturedBy` is a logical cross-BC reference to the Identity/Access
+/// user (a UUID, NOT a FK) because Identity/Access owns User state.
+model PatientConsent {
+  id                    String                @id @default(uuid()) @db.Uuid
+  tenantId              String                @map("tenant_id") @db.Uuid
+  patientId             String                @map("patient_id") @db.Uuid
+  consentType           ConsentType           @map("consent_type")
+  status                ConsentStatus         @default(granted)
+  scope                 ConsentScope
+  duration              ConsentDuration
+  grantedAt             DateTime              @default(now()) @map("granted_at") @db.Timestamptz
+  withdrawnAt           DateTime?             @map("withdrawn_at") @db.Timestamptz
+  expiresAt             DateTime?             @map("expires_at") @db.Timestamptz
+  capturedBy            String                @map("captured_by") @db.Uuid
+  captureMethod         ConsentCaptureMethod  @map("capture_method")
+  policyVersion         String                @map("policy_version") @db.VarChar(50)
+  guardianName          String?               @map("guardian_name") @db.VarChar(100)
+  guardianRelationship  String?               @map("guardian_relationship") @db.VarChar(50)
+  guardianCaptureMethod ConsentCaptureMethod? @map("guardian_capture_method")
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([tenantId], map: "patient_consents_tenant_id_idx")
+  @@index([tenantId, patientId], map: "patient_consents_tenant_id_patient_id_idx")
+  @@index([tenantId, patientId, consentType, status], map: "patient_consents_tenant_patient_type_status_idx")
+  @@map("patient_consents")
 }
 
 // ---------------------------------------------------------------------------
@@ -875,11 +1079,11 @@ enum ProviderStatus {
 /// These fields will be added in subsequent batches as provider profiles
 /// and credentialing are implemented.
 model Provider {
-  id        String        @id @default(uuid()) @db.Uuid
-  tenantId  String        @map("tenant_id") @db.Uuid
+  id        String         @id @default(uuid()) @db.Uuid
+  tenantId  String         @map("tenant_id") @db.Uuid
   status    ProviderStatus @default(candidate)
-  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
   facilityAssignments ProviderFacilityAssignment[]
 
@@ -933,8 +1137,8 @@ model ProviderFacilityAssignment {
   assignedAt     DateTime  @default(now()) @map("assigned_at") @db.Timestamptz
   revokedAt      DateTime? @map("revoked_at") @db.Timestamptz
 
-  provider  Provider  @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  facility  Facility  @relation(fields: [facilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   // Note: Full unique constraint removed. See migration for partial unique index
   // that enforces only one active (non-revoked) assignment per tenant/provider/facility.

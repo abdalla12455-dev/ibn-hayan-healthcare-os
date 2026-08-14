@@ -9,9 +9,17 @@ import { PrismaSessionRepository } from './repositories/prisma-session.repositor
 import { PrismaTenantRoleAssignmentRepository } from './repositories/prisma-tenant-role-assignment.repository.js';
 import { PrismaAppointmentRepository } from './repositories/prisma-appointment.repository.js';
 import { PrismaPatientRepository } from './repositories/prisma-patient.repository.js';
+import { PrismaPatientIdentifierRepository } from './repositories/prisma-patient-identifier.repository.js';
+import { PrismaPatientConsentRepository } from './repositories/prisma-patient-consent.repository.js';
 import { PrismaProviderRepository } from './repositories/prisma-provider.repository.js';
 import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
+import { TreatmentConsentVerificationService } from './services/treatment-consent-verification.service.js';
+import { AgeOfMajorityPolicyService } from './services/age-of-majority-policy.service.js';
+import {
+  AGE_OF_MAJORITY_POLICY_PORT,
+  TREATMENT_CONSENT_VERIFICATION_PORT,
+} from '@ibn-hayan/domain';
 
 /**
  * Database infrastructure module.
@@ -64,6 +72,10 @@ export const TENANT_ROLE_ASSIGNMENT_REPOSITORY = Symbol(
 );
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
 export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
+export const PATIENT_IDENTIFIER_REPOSITORY = Symbol(
+  'PATIENT_IDENTIFIER_REPOSITORY',
+);
+export const PATIENT_CONSENT_REPOSITORY = Symbol('PATIENT_CONSENT_REPOSITORY');
 export const WORKFORCE_REPOSITORY = Symbol('WORKFORCE_REPOSITORY');
 export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
 
@@ -108,6 +120,22 @@ export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
       useClass: PrismaPatientRepository,
     },
     {
+      provide: PATIENT_IDENTIFIER_REPOSITORY,
+      useClass: PrismaPatientIdentifierRepository,
+    },
+    {
+      provide: PATIENT_CONSENT_REPOSITORY,
+      useClass: PrismaPatientConsentRepository,
+    },
+    {
+      provide: TREATMENT_CONSENT_VERIFICATION_PORT,
+      useClass: TreatmentConsentVerificationService,
+    },
+    {
+      provide: AGE_OF_MAJORITY_POLICY_PORT,
+      useClass: AgeOfMajorityPolicyService,
+    },
+    {
       provide: WORKFORCE_REPOSITORY,
       useClass: PrismaProviderRepository,
     },
@@ -147,6 +175,10 @@ export const ENCOUNTER_REPOSITORY = Symbol('ENCOUNTER_REPOSITORY');
     TENANT_ROLE_ASSIGNMENT_REPOSITORY,
     APPOINTMENT_REPOSITORY,
     PATIENT_REPOSITORY,
+    PATIENT_IDENTIFIER_REPOSITORY,
+    PATIENT_CONSENT_REPOSITORY,
+    TREATMENT_CONSENT_VERIFICATION_PORT,
+    AGE_OF_MAJORITY_POLICY_PORT,
     WORKFORCE_REPOSITORY,
     ENCOUNTER_REPOSITORY,
     LocalCredentialService,
@@ -176,6 +208,10 @@ export type {
   TenantRoleAssignmentRepository,
   AppointmentRepository,
   PatientRepository,
+  PatientIdentifierRepository,
+  PatientConsentRepository,
+  TreatmentConsentVerificationPort,
+  AgeOfMajorityPolicyPort,
   ProviderRepository,
   EncounterRepository,
 } from '@ibn-hayan/domain';

@@ -140,6 +140,11 @@ function makeMocks() {
   const consentGateMock = {
     isConsentGateEnabled: vi.fn().mockReturnValue(true),
   };
+  const consentVerificationMock = {
+    verifyActiveTreatmentConsent: vi
+      .fn()
+      .mockResolvedValue({ status: 'not_granted' }),
+  };
   const service = new EncountersService(
     tenantsMock as unknown as TenantRepository,
     organisationsMock as unknown as OrganisationRepository,
@@ -151,6 +156,7 @@ function makeMocks() {
     authServiceMock as never,
     auditHelperMock as never,
     consentGateMock as unknown as ConsentGateFeatureConfig,
+    consentVerificationMock,
   );
   return {
     service,
@@ -164,6 +170,7 @@ function makeMocks() {
     authService: authServiceMock,
     auditHelper: auditHelperMock,
     consentGate: consentGateMock,
+    consentVerification: consentVerificationMock,
   };
 }
 
@@ -223,7 +230,109 @@ describe('EncountersService', () => {
       });
     });
 
-    it('allows an emergency encounter through the enforced gate (carve-out)', async () => {
+    it('allows a non-emergency encounter when the gate is enforced and consent is granted', async () => {
+      mocks.consentGate.isConsentGateEnabled.mockReturnValue(true);
+      mocks.consentVerification.verifyActiveTreatmentConsent.mockResolvedValue({
+        status: 'granted',
+        consentId: 'consent-1',
+      });
+      mocks.encounters.create.mockResolvedValue({
+        outcome: 'created',
+        encounter: makeEncounter(),
+        transitioned: true,
+      });
+      const result = await mocks.service.createEncounter(
+        {
+          patientId: PATIENT_ID,
+          providerId: PROVIDER_ID,
+          encounterType: 'outpatient',
+          priority: 'routine',
+        },
+        'cookie',
+        auditContext,
+      );
+      expect(result!.status).toBe('planned');
+      expect(
+        mocks.consentVerification.verifyActiveTreatmentConsent,
+      ).toHaveBeenCalledTimes(1);
+      expect(mocks.auditHelper.emitDirect).toHaveBeenCalledTimes(1);
+      expect(mocks.auditHelper.emitDirect).toHaveBeenCalledWith(
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          metadata: expect.objectContaining({
+            consentGateEnforced: true,
+            consentVerified: true,
+          }),
+        }),
+      );
+    });
+
+    it('blocks a non-emergency encounter when consent is expired (fail-safe)', async () => {
+      mocks.consentGate.isConsentGateEnabled.mockReturnValue(true);
+      mocks.consentVerification.verifyActiveTreatmentConsent.mockResolvedValue({
+        status: 'expired',
+      });
+      await expect(
+        mocks.service.createEncounter(
+          {
+            patientId: PATIENT_ID,
+            providerId: PROVIDER_ID,
+            encounterType: 'outpatient',
+            priority: 'routine',
+          },
+          'cookie',
+          auditContext,
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'ENCOUNTER_CONSENT_REQUIRED' } },
+      });
+      expect(mocks.encounters.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks a non-emergency encounter when consent is withdrawn (fail-safe)', async () => {
+      mocks.consentGate.isConsentGateEnabled.mockReturnValue(true);
+      mocks.consentVerification.verifyActiveTreatmentConsent.mockResolvedValue({
+        status: 'withdrawn',
+      });
+      await expect(
+        mocks.service.createEncounter(
+          {
+            patientId: PATIENT_ID,
+            providerId: PROVIDER_ID,
+            encounterType: 'outpatient',
+            priority: 'routine',
+          },
+          'cookie',
+          auditContext,
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'ENCOUNTER_CONSENT_REQUIRED' } },
+      });
+    });
+
+    it('blocks a non-emergency encounter when verification returns unknown (infrastructure failure, fail-safe)', async () => {
+      mocks.consentGate.isConsentGateEnabled.mockReturnValue(true);
+      mocks.consentVerification.verifyActiveTreatmentConsent.mockResolvedValue({
+        status: 'unknown',
+      });
+      await expect(
+        mocks.service.createEncounter(
+          {
+            patientId: PATIENT_ID,
+            providerId: PROVIDER_ID,
+            encounterType: 'outpatient',
+            priority: 'routine',
+          },
+          'cookie',
+          auditContext,
+        ),
+      ).rejects.toMatchObject({
+        response: { error: { code: 'ENCOUNTER_CONSENT_REQUIRED' } },
+      });
+      expect(mocks.encounters.create).not.toHaveBeenCalled();
+    });
+
+    it('allows an emergency encounter through the enforced gate (carve-out) and does not verify consent', async () => {
       mocks.consentGate.isConsentGateEnabled.mockReturnValue(true);
       mocks.encounters.create.mockResolvedValue({
         outcome: 'created',
@@ -245,6 +354,12 @@ describe('EncountersService', () => {
         auditContext,
       );
       expect(result!.encounterType).toBe('emergency');
+      // The consent verification port is NOT consulted for an emergency
+      // encounter (the carve-out bypasses consent verification entirely;
+      // it never fabricates consent).
+      expect(
+        mocks.consentVerification.verifyActiveTreatmentConsent,
+      ).not.toHaveBeenCalled();
       // The audit event must carry the emergency justification.
       expect(mocks.auditHelper.emitDirect).toHaveBeenCalledTimes(1);
       expect(mocks.auditHelper.emitDirect).toHaveBeenCalledWith(
@@ -254,6 +369,7 @@ describe('EncountersService', () => {
             emergency: true,
             emergencyJustification: 'Patient unconscious, no consent available',
             consentGateEnforced: true,
+            consentVerified: false,
           }),
         }),
       );
@@ -277,12 +393,18 @@ describe('EncountersService', () => {
         auditContext,
       );
       expect(result!.status).toBe('planned');
+      // The consent verification port is NOT consulted when the gate is
+      // disabled.
+      expect(
+        mocks.consentVerification.verifyActiveTreatmentConsent,
+      ).not.toHaveBeenCalled();
       expect(mocks.auditHelper.emitDirect).toHaveBeenCalledTimes(1);
       expect(mocks.auditHelper.emitDirect).toHaveBeenCalledWith(
         expect.objectContaining({
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata: expect.objectContaining({
             consentGateEnforced: false,
+            consentVerified: false,
           }),
         }),
       );

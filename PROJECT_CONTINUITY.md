@@ -6914,3 +6914,158 @@ BC01 Patient Demographics / Registration / Consent (ratified next stage). Clinic
 ### Immediate Next Step
 
 Stage 2A is complete on `main`. The ratified next substantive stage is BC01 Patient Demographics / Registration / Consent.
+
+
+---
+
+## BC01 Patient Demographics / Registration / Consent — In Progress
+
+### Ratification
+
+- **Stage:** BC01 Patient Demographics / Registration / Consent
+- **Repository:** abdalla12455-dev/ibn-hayan-healthcare-os
+- **Branch:** `feature/bc01-patient-demographics-registration-consent`
+- **Verified base main SHA (pre-task):** `262cd6fd3151dce037c1e28c743b1697e6f4ac71` (also confirmed as current direct remote `origin/main` HEAD before branching)
+- **Ratified by operator** as the next substantive stage after the completed and MERGED Stage 2A (BC02 Encounter Foundation).
+
+### Architecture-Gate Resolutions
+
+- **Patient ownership:** Patient remains a TENANT-wide identity. No `organisationId`/`facilityId` added to the Patient record. Registration facility/organisation is session/audit provenance only (architecture gate 6A). Cross-facility identity resolution preserved.
+- **Existing Patient compatibility:** All demographic columns are nullable at the DB level. Historical minimal Patient rows (id/tenantId/MRN/status) remain valid. No backfill, no fake name/DOB/consent (gates 6B/24).
+- **Required registration fields (NEW API validation):** `medicalRecordNumber`, `legalGivenName`, `legalFamilyName`, `dateOfBirth` (YYYY-MM-DD, not future), `sex`. `genderIdentity` defaults to `prefer_not_to_say`. DB nullability is separated from new-registration API validation (gate 6B).
+- **Name model:** Structured columns `legalGivenName`, `legalMiddleName?`, `legalFamilyName`, `preferredName?` on Patient. No multi-name `PatientName` entity created in this stage (gate 6C).
+- **DOB model:** Exact `dateOfBirth` (ISO date string, not future). No computed age stored. No placeholder DOB for historical patients (gate 6D).
+- **PatientSex:** `male | female | intersex | unknown | not_declared` (canonical, distinct from gender identity) (gate 6E).
+- **PatientGenderIdentity:** `male | female | transgender_male | transgender_female | non_binary | prefer_not_to_say | other` (with `genderIdentityDetail` required when `other`) (gate 6E).
+- **PatientStatus expansion:** Added `deceased` and `transferred_out` via forward-only `ALTER TYPE ... ADD VALUE IF NOT EXISTS`. No value removed; lifecycle not redesigned (gate 6F).
+- **Identifier model:** One `PatientIdentifier` entity (id/tenantId/patientId/type/value/normalizedValue/issuingCountry?/timestamps). MRN remains on Patient (not migrated out). Tenant-scoped uniqueness on (tenantId, type, normalizedValue) (gate 6G).
+- **Duplicate detection:** Deterministic only. Existing tenant+MRN uniqueness retained. Exact NationalID/Passport duplicate protection via partial unique index. No fuzzy/ML/merge (gate 6H).
+- **Consent entity:** Dedicated `PatientConsent` model (id/tenantId/patientId/consentType/status/scope/duration/grantedAt/withdrawnAt?/expiresAt?/capturedBy/captureMethod/policyVersion/guardian fields?/timestamps). NOT a boolean on Patient. Intra-BC FK to Patient (consistent with BC01 schema conventions). No destructive deletes (gate 6I).
+- **Consent statuses used:** `granted`, `withdrawn`, `expired`, `pending`. NO `declined` fabricated (gate 6L). Refusal = absence of an active granted consent; the non-emergency Encounter gate fails safely.
+- **Consent durations supported:** `indefinite`, `fixed_term` only. `single_encounter` REJECTED at the contract layer (no canonical integration event to expire it truthfully) (gate 6K). Enum exists in catalogue but excluded from Stage API values.
+- **Expiry/re-consent invariant (gate 6J):** Resolved via **transactional reconciliation-before-grant**: the `grant` repository method runs a SERIALIZABLE transaction that, BEFORE inserting a new `granted` row, durably transitions any prior `granted` Treatment consent whose `expiresAt < now` to `status = 'expired'`. The partial unique index `patient_consents_treatment_active_key` is defined on `(tenantId, patientId) WHERE (consentType = 'treatment' AND status = 'granted' AND withdrawnAt IS NULL)` — a STABLE predicate (no NOW()). Expired rows transition to `status='expired'` BEFORE a new grant, so they no longer occupy the unique constraint. Withdrawn rows (`status='withdrawn'` OR `withdrawnAt IS NOT NULL`) are also excluded. Re-consent after expiry works; concurrent grants cannot create two active consents; expired/withdrawn consent is not a permanent uniqueness blocker; history is retained; no destructive delete.
+- **Refusal/Declined decision:** No `declined` status. No "decline consent" endpoint. If a patient does not grant treatment consent, there is simply no active granted consent and the non-emergency Encounter gate fails safely (gate 6L).
+- **Age-of-majority configuration (gate 6M):** Resolved via an injectable `AgeOfMajorityPolicyPort` (`getAgeOfMajority(): number`) implemented by `AgeOfMajorityPolicyService` (configuration-backed, NOT hard-coded in the domain). The port is the canonical seam for future per-region/tenant configuration. No hard-coded unverified age threshold in the Patient domain.
+- **Guardian model (gate 6N):** Minimal guardian representation on `PatientConsent`: `guardianName?`, `guardianRelationship?`, `guardianCaptureMethod?` (all required together when supplied). A minor (age < age-of-majority) MUST supply guardian fields; an adult MUST NOT. A patient with no DOB cannot have minority determined → grant is rejected (fail-safe). No full `PatientRelationship` subsystem created in this stage.
+- **Sensitive-identifier security (gate 6O):** NationalID/Passport values are normalised (trim + uppercase) before storage and are NEVER placed in audit metadata or logs (only identifier TYPE and IDs are audited). Field-level encryption is NOT yet implemented in the repository; the canonical security baseline is documented as a deferred prerequisite — no custom cryptography was invented and no plaintext-was-acceptable decision was made silently. Identifier values are not returned in search responses (minimum-necessary output).
+- **Consent history semantics (gate 6P):** History-preserving lifecycle records (NOT append-only events): every record is retained, never deleted; every status transition is audited; `grantedAt`/`withdrawnAt`/`expiresAt` are preserved. `listForPatient` returns ALL records (history).
+- **MRN policy (gate 15):** No MRN generator invented. Registration requires a validated `medicalRecordNumber` in the input (canonical acceptance — the existing Patient foundation already required an MRN). No prefixes/digit-lengths/random/sequential format invented.
+
+### Registration / Consent Transaction Boundary (gate 19)
+
+Patient registration and consent capture are SEPARATE commands. Registration succeeds independently; Treatment consent is captured via a dedicated `POST /api/v1/patients/:id/consents` command. A registered Patient with no active treatment consent remains a valid Patient and remains appointment-bookable, but cannot start/create a non-emergency Encounter while consent enforcement is active.
+
+### API Surface
+
+- `POST /api/v1/patients` — register (R06)
+- `GET /api/v1/patients/:id` — view (R01/R02/R06/R07/R09)
+- `GET /api/v1/patients` — bounded search (R01/R02/R06/R07/R09)
+- `PATCH /api/v1/patients/:id` — bounded demographic update (R06)
+- `POST /api/v1/patients/:id/identifiers` — add identifier (R06)
+- `GET /api/v1/patients/:id/identifiers` — list identifiers (R06)
+- `POST /api/v1/patients/:id/consents` — grant Treatment consent (R01/R02/R06)
+- `GET /api/v1/patients/:id/consents` — list consents (R01/R02/R06)
+- `POST /api/v1/patients/:id/consents/:consentId/withdraw` — withdraw consent (R01/R02/R06)
+
+### Authorization Matrix (gate 20)
+
+Permission codes (added to `packages/domain/src/authorization/permissions.ts` and `role-permissions.ts`):
+- `patients:register` — R06 Receptionist only.
+- `patients:view` — R01 Physician, R02 Nurse, R06 Receptionist, R07 Scheduler, R09 Clinic Administrator.
+- `patients:search` — R01, R02, R06, R07, R09.
+- `patients:update_demographics` — R06 only.
+- `patients:manage_identifiers` — R06 only.
+- `patients:consent_grant` — R01, R02, R06.
+- `patients:consent_view` — R01, R02, R06.
+- `patients:consent_withdraw` — R01, R02, R06.
+- R13 Platform/System Administrator: NO Patient access (never confused with R09).
+
+### Audit Action Codes (gate 21)
+
+Added to `packages/observability/src/audit/action-codes.ts`:
+- `patients.registered`, `patients.viewed`, `patients.searched`, `patients.demographics_updated`, `patients.identifier_added`, `patients.consent_granted`, `patients.consent_withdrawn`.
+- Exactly one success event per actual action. No success event on auth/validation/duplicate/cross-tenant failure or rollback. No PHI/PII in metadata (names, DOB, NationalID, Passport, phone, email, address, consent text, raw body are forbidden — only internal IDs and non-sensitive lifecycle fields).
+
+### Consent Verification Port (gate 11)
+
+- `TreatmentConsentVerificationPort` (`hasActiveTreatmentConsent(tenantId, patientId, effectiveAt)`) — BC01-owned query/port for BC02.
+- Implemented by `TreatmentConsentVerificationService` (injects `PATIENT_CONSENT_REPOSITORY`).
+- Returns typed result: `granted | not_granted | expired | withdrawn | unknown`. Infrastructure failure fails safely.
+
+### Stage 2A Encounter Integration (gate 12)
+
+- The Stage 2A consent-gate seam (truthful temporary policy) is EVOLVED: when enforcement is enabled, the Encounter service consults `TreatmentConsentVerificationPort` (NOT BC01 Prisma tables directly).
+- `granted` → proceed; `not_granted`/`expired`/`withdrawn`/`unknown` → fail safely.
+- Emergency carve-out remains governed by Stage 2A rules; NO fake consent is created for emergency encounters.
+- Encounter does NOT mutate Patient consent; no BC02→BC01 database FK added. Encounter lifecycle/concurrency/authorization/tenant isolation/audit unchanged.
+
+### Appointment Compatibility (gate 13)
+
+- Stage 1C/1D/1E/1F behaviour unchanged. Consent gates the clinical Encounter, not appointment booking. Existing minimal Patient fixtures remain valid.
+
+### Migration (gate 23)
+
+- **Name:** `20260812000000_bc01_patient_demographics_consent_foundation`
+- ONE forward-only migration. No existing migration edited. No DROP, no TRUNCATE, no destructive type rewrite, no backfill.
+- Additive: nullable demographic columns on `patients`; `ALTER TYPE PatientStatus ADD VALUE IF NOT EXISTS`; new enums (PatientSex, PatientGenderIdentity, PatientIdentifierType, ConsentType, ConsentStatus, ConsentScope, ConsentDuration, ConsentCaptureMethod); `patient_identifiers` table; `patient_consents` table; safe indexes; partial unique indexes for identifier uniqueness and active-treatment-consent uniqueness (stable predicates only).
+
+### Concurrency (gate 25)
+
+- SERIALIZABLE transactions with bounded retry for: registration duplicate races, consent grant races, grant-vs-withdraw, double-withdraw, identifier creation races.
+- Both serialization conflict forms recognised: Prisma `P2034` and `DriverAdapterError` with `cause.kind === 'TransactionWriteConflict'`. No unbounded retry.
+
+### Validation (local, Node v24)
+
+- Prisma format: PASS. Prisma validate (schema + audit schema): PASS. Prisma generate: PASS.
+- Migration SQL inspected: forward-only additive, no destructive DDL.
+- Typecheck (full monorepo): PASS.
+- Lint (src + test): PASS.
+- API unit tests (`pnpm test`): 491 passed (was 471; +20 patients service spec). No regressions.
+- Domain tests: 142 passed. Contracts tests: 208 passed. Observability: PASS. Web tests: 227 passed.
+- Encounters service spec: 28 passed (including consent verification tests: granted/blocked/emergency-carve-out/gate-disabled).
+- Production build (API + Web): PASS.
+- Local PostgreSQL 17 status: NOT RUN locally (PG17 unavailable in this environment — no psql, no DATABASE_URL). CI (GitHub Actions Docker) is authoritative. `patient.db-spec.ts` (~1200 lines, comprehensive register/search/identifiers/consent/verification coverage) collected locally but not run against a real PG17.
+- git diff --check: clean. No conflict markers. No secrets scanned in diff.
+
+### Files Created
+
+- `packages/domain/src/patient/patient-consent.ts`, `patient-identifier.ts`
+- `packages/contracts/src/patients/index.ts`, `patients.schema.ts`
+- `apps/api/src/infrastructure/database/mappers/patient-consent.mapper.ts`, `patient-identifier.mapper.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-patient-consent.repository.ts`, `prisma-patient-identifier.repository.ts`
+- `apps/api/src/infrastructure/database/services/age-of-majority-policy.service.ts`, `treatment-consent-verification.service.ts`
+- `apps/api/src/modules/patients/` (index, controller, errors, mappers, module, service, service spec)
+- `apps/api/prisma/migrations/20260812000000_bc01_patient_demographics_consent_foundation/migration.sql`
+
+### Files Modified
+
+- `apps/api/prisma/schema.prisma` (Patient demographics, PatientStatus expansion, PatientIdentifier, PatientConsent models/enums/indexes)
+- `apps/api/src/app.module.ts`, `database.module.ts`, `database/index.ts` (DI wiring)
+- `apps/api/src/infrastructure/database/mappers/patient.mapper.ts`, `repositories/prisma-patient.repository.ts` (demographics, register, updateDemographics, search)
+- `apps/api/src/modules/encounters/encounters.service.ts`, `encounters.service.spec.ts` (consent-gate evolution)
+- `apps/api/test/database/patient.db-spec.ts` (integration coverage)
+- `packages/contracts/src/index.ts`, `packages/domain/src/patient/index.ts`, `packages/domain/src/authorization/permissions.ts`, `role-permissions.ts`, `authorization.spec.ts`, `patient.spec.ts`, `packages/observability/src/audit/action-codes.ts`
+
+### Files Deleted
+
+None.
+
+### Known Risks
+
+- PostgreSQL 17 integration tests NOT RUN locally — authoritative CI on the exact PR head must validate against real PostgreSQL 17 with SERIALIZABLE isolation before readiness.
+- Field-level encryption for sensitive identifiers (NationalID/Passport) is NOT yet implemented; the canonical security baseline is documented as a deferred prerequisite. No custom cryptography invented; no silent plaintext-acceptable decision.
+- `single_encounter` consent duration is excluded from the Stage API (deferred) — no canonical integration event to expire it truthfully.
+- Age-of-majority is configuration-backed via the `AgeOfMajorityPolicyPort` seam but the full per-region/tenant configuration platform is not redesigned in this stage.
+
+### Deferred Scope
+
+Fuzzy duplicate matching, automatic patient merge, patient portal, de-identification, communication preferences, insurance coverage workflow, PatientCoverage, full PatientRelationship subsystem, full address/contact-history subsystem, frontend/UI, billing, clinical documentation, orders, pharmacy, provider availability, no-show, production deployment, configuration platform redesign, field-level identifier encryption.
+
+### Merge Status
+
+NOT MERGED. This stage is on the feature branch only. main was NOT pushed. No force operation occurred. No rebase occurred. Historical branches (Stage 1C/1D/1E/1F, Stage 2A, BC01/BC10 reference) NOT modified.
+
+### Immediate Next Step
+
+Commit and push `feature/bc01-patient-demographics-registration-consent`, create a draft PR to `main`, and run/wait for Main CI on the exact PR head SHA. Merge only after exact-head CI is green on real PostgreSQL 17 with SERIALIZABLE isolation and the operator has reviewed.
+

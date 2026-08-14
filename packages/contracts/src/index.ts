@@ -31,3 +31,4 @@ export * from './role-preview/index.js';
 export * from './clinic-admin/index.js';
 export * from './appointments/index.js';
 export * from './encounters/index.js';
+export * from './patients/index.js';

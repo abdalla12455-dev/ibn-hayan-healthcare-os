@@ -9,6 +9,7 @@ import { RolePreviewModule } from './modules/dev/index.js';
 import { ClinicAdminModule } from './modules/clinic-admin/index.js';
 import { AppointmentsModule } from './modules/appointments/index.js';
 import { EncountersModule } from './modules/encounters/index.js';
+import { PatientsModule } from './modules/patients/index.js';
 
 /**
  * Root application module.
@@ -81,6 +82,7 @@ import { EncountersModule } from './modules/encounters/index.js';
     ClinicAdminModule,
     AppointmentsModule,
     EncountersModule,
+    PatientsModule,
   ],
 })
 export class AppModule implements NestModule {
