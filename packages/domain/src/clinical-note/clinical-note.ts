@@ -54,6 +54,7 @@ import type { OrganisationId } from '../tenancy/organisation.js';
 import type { FacilityId } from '../tenancy/facility.js';
 import type { PatientId, ProviderId } from '../scheduling/appointment.js';
 import type { EncounterId } from '../encounter/encounter.js';
+import type { ClinicalNoteAuthorRole } from '../workforce/clinical-author-role.js';
 
 /**
  * Stable identifier for a ClinicalNote. Branded so it cannot be confused
@@ -106,20 +107,6 @@ export type ClinicalNoteStatus =
   | 'amended'
   | 'addendum'
   | 'withdrawn';
-
-/**
- * Canonical clinical note author role per ENUMS.md §4.2
- * (ClinicalNoteAuthorRole, Open-with-Council). The author role governs
- * signing authority. The database stores lowercase values; the canonical
- * default is `physician`.
- */
-export type ClinicalNoteAuthorRole =
-  | 'physician'
-  | 'nurse'
-  | 'pharmacist'
-  | 'therapist'
-  | 'midlevel'
-  | 'student';
 
 /**
  * The lifecycle action that produced a revision. Each revision records

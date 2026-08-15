@@ -21,7 +21,6 @@ export type {
   ClinicalNoteRevision,
   ClinicalNoteType,
   ClinicalNoteStatus,
-  ClinicalNoteAuthorRole,
   ClinicalNoteRevisionAction,
   ClinicalNoteCreateInput,
   ClinicalNoteCreateResult,
@@ -32,6 +31,13 @@ export type {
   ClinicalNoteTransitionResult,
   CLINICAL_NOTE_TRANSITIONS,
 } from './clinical-note.js';
+
+// ClinicalNoteAuthorRole is owned by the Workforce bounded context
+// (BC10) as a trusted Provider attribute
+// (packages/domain/src/workforce/clinical-author-role.ts). Re-exported
+// here so BC03 consumers can import it from the clinical-note surface,
+// but there is a single canonical definition (no duplicate catalogue).
+export type { ClinicalNoteAuthorRole } from '../workforce/clinical-author-role.js';
 
 export type {
   ClinicalNoteRepository,
