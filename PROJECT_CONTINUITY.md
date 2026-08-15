@@ -7241,7 +7241,7 @@ Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS
 - `@ibn-hayan/contracts` tests: 208 passed.
 - API unit tests (`src/**/*.spec.ts`): 492 passed (Patient/Encounter/Workforce regression intact).
 - Production build (`pnpm -r run build`): PASS (api + web + shared packages).
-- **PostgreSQL 17 integration tests: NOT RUN locally** (no PG17 in this environment — CI authoritative). The clinical-notes integration test file `test/clinical-notes/clinical-notes.integration.spec.ts` is written and typechecks/lints clean; it runs against real PG17 via `setupDatabaseTests()` in CI.
+- **PostgreSQL 17 integration tests: PASS on exact-head CI** (no PG17 locally — CI authoritative). The clinical-notes integration test file `test/clinical-notes/clinical-notes.integration.spec.ts` runs against real PG17 via `setupDatabaseTests()` in CI.
 
 ### Regression Results
 
@@ -7251,15 +7251,16 @@ Patient (BC01), Appointment (Stages 1C/1D/1E/1F), Encounter (Stage 2A), and BC10
 
 - Per-facility signing-authority matrix (BR-BC03-CLIN-031) is deferred — only the universal "author signs own note" baseline is enforced; no medical/legal policy invented.
 - Discharge summaries, structured allergy/problem lists, care plans, templates engine, Orders BC04, Pharmacy BC05, Billing BC07, No-Show, provider schedules, frontend/UI: all deferred.
-- PostgreSQL 17 integration tests not run locally — pending exact-head CI validation.
 - R13 denial of clinical_notes:view is enforced at the permission layer; no R13 clinical PHI access path exists.
 
 ### Recovery Information
 
 - **Verified pre-task base commit:** `c49d53f38e7ade280ce449cb1c8fe4d681765609` (feature branch point; == `origin/main` at authoring time).
 - **Feature branch:** `feature/bc03-clinical-documentation-foundation`. To resume, `git fetch origin`, verify the branch tip, and confirm `origin/main` has not advanced past the base without re-integration.
+- **Latest feature SHA:** `d67b37c2d4de3bb64c6694cbb8a24baefe7e3e03` (local HEAD == `origin` feature branch == PR #28 head; all three match exactly).
+- **Commits on the feature branch:** `4ad6198` (feat: clinical notes foundation) → `37ff708` (fix: import DatabaseModule/Audit/Auth/Authorization in ClinicalNotesModule) → `d67b37c` (fix: source CLINICAL_NOTE DI tokens from database/tokens, not domain). All forward-only; no force/rebase.
 
 ### Immediate Next Step
 
-Push the `feature/bc03-clinical-documentation-foundation` branch, open/reuse ONE draft PR to `main`, and wait for Main CI on the exact PR head. Require the `static-and-build` and `postgresql17-validation` jobs to succeed. If CI fails, diagnose root cause, fix only legitimate defects in a new child commit (no history rewrite), push normally, and rerun exact-head CI. Do NOT merge.
+BC03 implementation, push, exact-head CI, and PR are complete. Main CI on the exact PR head `d67b37c` is GREEN for both `static-and-build` and `postgresql17-validation` jobs. PR #28 (draft, `https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/28`) is open and unmerged with `mergeable_state: clean`. Await operator review; mark PR #28 ready-for-review when the operator authorises. Do NOT merge until the operator explicitly approves. No force, rebase, or main push performed.
 
