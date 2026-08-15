@@ -7178,7 +7178,7 @@ Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS
 
 ### Schema / Cardinality Design
 
-- New `UserProviderBinding` table (`user_provider_bindings`): columns `id`, `tenant_id`, `user_id`, `provider_id`, `created_at`, `revoked_at`. `revoked_at` is nullable; a non-null value marks a revoked (historical) binding.
+- New `UserProviderBinding` table (`user_provider_bindings`): columns `id`, `tenant_id`, `user_id`, `provider_id`, `activated_at`, `revoked_at`, `created_at`, `updated_at`. `revoked_at` is nullable; a non-null value marks a revoked (historical) binding. `activated_at`, `created_at`, and `updated_at` are non-null with defaults.
 - **Provider FK design (retained, matches repository convention):** the binding has BOTH a simple `provider_id → providers(id)` foreign key AND a composite `(tenant_id, provider_id) → providers(tenant_id, id)` foreign key. This is identical to the pattern established by the BC10 Workforce Reference Foundation for `provider_facility_assignments` (`provider_facility_assignments_tenant_provider_fkey`). The composite FK is backed by the existing `providers_tenant_id_id_key` unique index and prevents a binding from referencing a provider that belongs to a different tenant (no cross-tenant provider resolution). The simple FK preserves referential integrity on provider deletion. This design was reviewed and retained as intentional and consistent; no redundancy was removed because repository evidence shows the composite FK serves a distinct tenant-isolation purpose the simple FK does not.
 - The `User` model gained a `userProviderBindings UserProviderBinding[]` relation. The `Provider` model gained `clinicalAuthorRole ClinicalNoteAuthorRole?` (nullable, mapped to `clinical_author_role`).
 - Partial unique indexes use a STABLE predicate (`WHERE revoked_at IS NULL`) — no `NOW()`, so revoked rows no longer occupy the active uniqueness constraint, allowing re-binding after revocation.
@@ -7187,7 +7187,7 @@ Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS
 
 The domain port `UserProviderBindingRepository` exposes:
 - `findActiveProviderForUser(tenantId, userId)` → `ActiveProviderIdentity | null`
-- `findActiveProviderForUserAtFacility(tenantId, userId, facilityId)` → `ActiveProviderIdentityAtFacility | null`
+- `findActiveProviderForUserAtFacility(tenantId, userId, facilityId)` → `FacilityScopedActiveProviderIdentity | null`
 - `create(input)` / `revoke({ tenantId, userId, revokedAt })`
 
 The resolver trusts ONLY the authenticated `userId` and the tenant context (server-side). It never trusts caller-supplied Provider identity. Fail-closed conditions (all return `null`, no fake fallback):
@@ -7209,8 +7209,8 @@ The returned `ActiveProviderIdentity` carries `providerId`, `tenantId`, `provide
 ### Migration Design
 
 - **ONE forward-only additive migration:** `20260815000000_bc10_user_provider_identity_binding/migration.sql` (hand-written, inspected manually).
-- Additive only: new enum `ClinicalNoteAuthorRole`, `ALTER TABLE providers ADD COLUMN clinical_author_role`, new `user_provider_bindings` table, composite + simple foreign keys, two partial unique indexes, supporting indexes.
-- No existing migration edited. No `DROP`, no `TRUNCATE`, no reset, no backfill, no destructive type rewrite. `ALTER TYPE ... ADD VALUE IF NOT EXISTS` used for the enum.
+- Additive only: new enum `ClinicalNoteAuthorRole` (created with `CREATE TYPE`), `ALTER TABLE providers ADD COLUMN clinical_author_role`, new `user_provider_bindings` table, composite + simple foreign keys, two partial unique indexes, supporting indexes.
+- No existing migration edited. No `DROP`, no `TRUNCATE`, no reset, no backfill, no destructive type rewrite. The `ClinicalNoteAuthorRole` enum is created fresh with `CREATE TYPE` (no `ALTER TYPE ... ADD VALUE` was used, since the enum is new in this migration).
 
 ### Validation (local, PostgreSQL 17.11)
 
