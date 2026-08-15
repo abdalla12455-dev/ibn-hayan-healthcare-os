@@ -117,11 +117,33 @@ type ClinicalNoteAuditAction =
  * ports are the only cross-BC touchpoints.
  *
  * The authenticated session carries a UserId, not a ProviderId; the
- * user->provider linkage is NOT yet implemented in the schema. Therefore
- * the clinical actor's providerId (authorId/actorId) is supplied in the
- * request body and scope-validated via `isEligibleForFacility`, matching
- * the encounter-creation providerId pattern. This is the honest
- * non-inventing baseline; the user->provider linkage is deferred scope.
+ * user->provider linkage is NOT yet implemented in the schema (the
+ * `Provider` model has no `userId` field; the `Session` carries only a
+ * `userId`). Therefore the clinical actor's providerId
+ * (authorId/actorId) is supplied in the request body and scope-validated
+ * via `isEligibleForFacility`, and `authorRole` is supplied in the
+ * request body and validated only against the contract enum.
+ *
+ * SECURITY GATE — KNOWN BLOCKING LIMITATION (do not merge until
+ * resolved): because there is no canonical, trustworthy UserId->ProviderId
+ * binding, the server CANNOT prove that a caller-supplied authorId /
+ * actorId belongs to the authenticated principal. The checks here verify
+ * only that the supplied providerId is facility-eligible — NOT that it is
+ * the authenticated user's own provider identity. An authenticated
+ * clinical user can therefore supply another eligible provider's providerId
+ * and create / sign / amend / add addendum to / withdraw a note AS that
+ * provider. The `ClinicalNoteSigningAuthorityPort` baseline
+ * (`actorId === authorId`) does NOT prevent this, because both identities
+ * are caller-supplied. `authorRole` is likewise caller-supplied and is not
+ * derivable server-side (the `Provider` model has no role/specialty field
+ * in this foundation). This spoofing surface is a blocking pre-merge
+ * security/architecture flaw. BC03 must NOT merge until a canonical
+ * User->Provider identity-binding prerequisite is ratified and
+ * implemented (owned by BC10/identity), at which point authorship and
+ * signing identity must be derived from — or trustworthily bound to —
+ * the authenticated principal, not caller-selected. No fake provider
+ * ownership, custom mapping, or temporary insecure fallback is introduced
+ * here; the limitation is documented rather than papered over.
  */
 @Injectable()
 export class ClinicalNotesService {

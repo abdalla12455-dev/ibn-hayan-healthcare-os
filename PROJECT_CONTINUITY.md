@@ -7179,14 +7179,40 @@ Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS
 
 ### Architecture-Gate Decisions (resolved from canonical evidence)
 
-1. **ClinicalNote fields/statuses/note types:** `ClinicalNoteType` enum (progress, history, physical, consultation, discharge, procedure, nursing — Open-with-Council per ENUMS.md §4.2, bound to LOINC document ontology; default `progress`). `ClinicalNoteStatus` enum (draft, in_progress, signed, amended, addendum, withdrawn — Closed per STATUS_CODES.md §5.3; default `draft`; terminal: `addendum`, `withdrawn`). Author role enum: physician, nurse, allied_health (per ENUMS.md §4.2).
-2. **Signing authority:** BR-BC03-CLIN-031 — the signer must have signing authority for the note type (per-facility authority matrix). The per-facility authority matrix is NOT documented canonically; the universal baseline enforced is "the author signs their own note" via `ClinicalNoteSigningAuthorityPort` (`isSigningAuthority(note, actorId)`). No medical/legal policy invented; per-facility matrix deferred.
+1. **ClinicalNote fields/statuses/note types:** `ClinicalNoteType` enum (progress, history, physical, consultation, discharge, procedure, nursing — Open-with-Council per ENUMS.md §4.2, bound to LOINC document ontology; default `progress`). `ClinicalNoteStatus` enum (draft, in_progress, signed, amended, addendum, withdrawn — Closed per STATUS_CODES.md §5.3; default `draft`; terminal: `addendum`, `withdrawn`). `ClinicalNoteAuthorRole` enum (verified consistent across `packages/domain`, `packages/contracts`, and Prisma): `physician | nurse | pharmacist | therapist | midlevel | student` (Open-with-Council per ENUMS.md §4.2; default `physician`).
+2. **Signing authority:** BR-BC03-CLIN-031 — the signer must have signing authority for the note type (per-facility authority matrix). The per-facility authority matrix is NOT documented canonically; the universal baseline enforced is "the author signs their own note" via `ClinicalNoteSigningAuthorityPort` (`canSign(...)` checks `authorId === actorId`). No medical/legal policy invented; per-facility matrix deferred. **NOTE — see the Blocking Identity-Binding Security Gate below: this baseline does NOT establish that the actor is the authenticated principal's own provider identity.**
 3. **Note lifecycle and signing rules:** draft → signed (author signs); signed → amended (with reason+author); signed|amended → addendum_added (with reason+author); draft|in_progress → withdrawn (with reason). Invalid transitions rejected (422). A signed note is never destructively rewritten.
 4. **Amendment/versioning semantics:** BR-BC03-CLIN-032 — amendment must include reason and author. Each state change appends a new `ClinicalNoteRevision` (append-only, monotonically increasing `revisionNumber`); the prior revision body/content is preserved unchanged (immutable history). Amendment/addendum/withdraw each record `reason` and `authorId`.
 5. **Tenant/org/facility ownership:** `clinical_notes` and `clinical_note_revisions` carry `tenantId`, `organisationId`, `facilityId`. Tenant-scoped composite indexes. All scoped lookups filter by `tenantId` (+ optional org/facility); cross-tenant access returns safe 404 (no existence leak).
 6. **Logical cross-BC reference rules:** `encounterId`, `patientId`, `authorId` are logical UUID references with NO relational foreign keys (BC03 does not own or constrain BC02/BC01/BC10 state at the DB level). The application layer validates references via owning modules' repositories: `EncounterRepository.findByIdInTenant`, `PatientRepository.existsInTenant`, `ProviderRepository.isEligibleForFacility`. Patient must match the referenced encounter's patient.
 7. **Audit requirements:** Every successful clinical-note state change emits exactly one audit outbox event via the established audit infrastructure. Action codes: `clinical_notes.created`, `clinical_notes.viewed`, `clinical_notes.signed`, `clinical_notes.amended`, `clinical_notes.addendum_added`, `clinical_notes.withdrawn`, `clinical_notes.history_viewed`. Audit metadata carries `{ endpoint, noteId }` ONLY — NO note body, diagnosis text, patient names, DOB, identifiers, or other PHI/PII. R13 Platform/System Administrator does NOT inherit clinical PHI access.
 8. **Required API surface:** `POST /api/v1/clinical-notes` (create draft), `GET /:id` (view), `GET /:id/history` (history), `POST /:id/sign`, `POST /:id/amend`, `POST /:id/addendum`, `POST /:id/withdraw`.
+
+### ⛔ Blocking Identity-Binding Security Gate — BC03 is NOT safe to merge
+
+> A final independent pre-merge review (2026-08-14) identified a blocking authorship/signing identity flaw. **PR #28 must NOT be merged until this is resolved.** The exact-head Main CI run (31854289380) on `f29b648` is GREEN, but green CI does NOT clear the security gate.
+
+**Problem.** The current BC03 contracts allow the caller to supply, in the request body:
+- `authorId` during note **creation**;
+- `actorId` during **sign / amend / addendum / withdraw**;
+- `authorRole` during **creation**.
+
+The service scope-validates those provider IDs only via `ProviderRepository.isEligibleForFacility(tenantId, providerId, facilityId)` — i.e. **facility eligibility**, not ownership. The authenticated session carries a `UserId` only (`packages/domain/src/identity/session.ts`); the `Provider` model (`apps/api/prisma/schema.prisma`) has **no `userId` field**; there is **no schema relation, domain port, or auth path that binds a `UserId` to a `ProviderId`**. The DOCTORS.md (BC10 Workforce) canonical doc confirms provider identity is owned by BC10 but the foundation `Provider` carries only `id / tenantId / status / timestamps` — no user linkage, no role/specialty field.
+
+**Therefore (verified from the actual repository):**
+- **A.** Is there a canonical, trustworthy mapping from authenticated `UserId`/session to `ProviderId`? **NO.**
+- **B.** Can the server independently prove that a caller-supplied `authorId`/`actorId` belongs to the authenticated user? **NO** — only facility eligibility is checked.
+- **C.** Can `authorRole` be derived/verified server-side rather than trusted from the request? **NO** — the `Provider` model has no role/specialty field in this foundation; `authorRole` is validated only against the contract enum, not against the actor's actual role.
+- **D.** Does the current implementation permit identity spoofing between two eligible providers in the same facility? **YES.** An authenticated clinical user can supply another eligible provider's `providerId` as `authorId` (creation) and `actorId` (signing), and the `ClinicalNoteSigningAuthorityPort` baseline (`authorId === actorId`) is satisfied trivially because **both** identities are caller-supplied. The user can author AND sign a note as a different provider.
+
+**Root cause.** No `User -> Provider` identity-binding exists in the schema, domain, or auth layer. Clinical authorship/signing identity is freely caller-selected rather than derived from — or trustworthily bound to — the authenticated principal.
+
+**Resolution required (NOT implemented here — no binding invented).** A canonical `User -> Provider` identity-binding prerequisite must be **ratified and implemented** (owned by BC10 Workforce / identity), after which BC03 must:
+- derive/verify `authorId` and signing `actorId` from the authenticated principal's bound provider identity (reject caller-supplied provider identity for authorship/signing);
+- derive/validate `authorRole` server-side from the bound provider's role/specialty;
+- add spoofing-negative tests proving an authenticated user cannot act as another eligible provider.
+
+No fake provider ownership, custom mapping, or temporary insecure fallback has been introduced. The flaw is documented (in `apps/api/src/modules/clinical-notes/clinical-notes.service.ts` and here) rather than papered over. The signing-family endpoints remain functionally present but are **not trustworthy** until the binding prerequisite lands.
 
 ### Note Lifecycle / Versioning / Signing / Amendment Rules
 
@@ -7249,7 +7275,8 @@ Patient (BC01), Appointment (Stages 1C/1D/1E/1F), Encounter (Stage 2A), and BC10
 
 ### Deferred Scope / Risks
 
-- Per-facility signing-authority matrix (BR-BC03-CLIN-031) is deferred — only the universal "author signs own note" baseline is enforced; no medical/legal policy invented.
+- **BLOCKING (not deferred) — see "Blocking Identity-Binding Security Gate" above:** no `User -> Provider` binding exists; clinical authorship/signing identity (`authorId`/`actorId`) and `authorRole` are caller-supplied and only facility-validated, enabling cross-provider spoofing. BC03 is NOT safe to merge until a canonical identity-binding prerequisite is ratified and implemented. This is a blocking security/architecture flaw, not deferred scope.
+- Per-facility signing-authority matrix (BR-BC03-CLIN-031) is deferred — only the universal "author signs own note" baseline is enforced; no medical/legal policy invented. (Even this baseline is untrustworthy until the identity-binding prerequisite lands — see the blocking gate.)
 - Discharge summaries, structured allergy/problem lists, care plans, templates engine, Orders BC04, Pharmacy BC05, Billing BC07, No-Show, provider schedules, frontend/UI: all deferred.
 - R13 denial of clinical_notes:view is enforced at the permission layer; no R13 clinical PHI access path exists.
 
@@ -7257,10 +7284,10 @@ Patient (BC01), Appointment (Stages 1C/1D/1E/1F), Encounter (Stage 2A), and BC10
 
 - **Verified pre-task base commit:** `c49d53f38e7ade280ce449cb1c8fe4d681765609` (feature branch point; == `origin/main` at authoring time).
 - **Feature branch:** `feature/bc03-clinical-documentation-foundation`. To resume, `git fetch origin`, verify the branch tip, and confirm `origin/main` has not advanced past the base without re-integration.
-- **Latest feature SHA:** `d67b37c2d4de3bb64c6694cbb8a24baefe7e3e03` (local HEAD == `origin` feature branch == PR #28 head; all three match exactly).
-- **Commits on the feature branch:** `4ad6198` (feat: clinical notes foundation) → `37ff708` (fix: import DatabaseModule/Audit/Auth/Authorization in ClinicalNotesModule) → `d67b37c` (fix: source CLINICAL_NOTE DI tokens from database/tokens, not domain). All forward-only; no force/rebase.
+- **Pre-correction head (green CI run 31854289380):** `f29b64836e2053638c78f596a9a7fad2644f2811`.
+- **Commits on the feature branch (forward-only; no force/rebase):** `4ad6198` (feat: clinical notes foundation) → `37ff708` (fix: import DatabaseModule/Audit/Auth/Authorization in ClinicalNotesModule) → `d67b37c` (fix: source CLINICAL_NOTE DI tokens from database/tokens, not domain) → `f29b648` (docs: record BC03 CI-green state) → `<security-gate docs correction>` (this child commit). The exact SHA of this child commit is recorded in the external completion report; see `git log --oneline c49d53f..HEAD`.
 
 ### Immediate Next Step
 
-BC03 implementation, push, exact-head CI, and PR are complete. Main CI on the exact PR head `d67b37c` is GREEN for both `static-and-build` and `postgresql17-validation` jobs. PR #28 (draft, `https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/28`) is open and unmerged with `mergeable_state: clean`. Await operator review; mark PR #28 ready-for-review when the operator authorises. Do NOT merge until the operator explicitly approves. No force, rebase, or main push performed.
+**BC03 is BLOCKED — do NOT merge PR #28.** The blocking identity-binding security gate above must be resolved first: ratify and implement (owned by BC10 Workforce / identity) a canonical `User -> Provider` identity-binding, then rework BC03 so `authorId`/signing `actorId` are derived from the authenticated principal's bound provider and `authorRole` is derived server-side, plus spoofing-negative tests. The exact-head Main CI on `f29b648` (run 31854289380) is GREEN for both `static-and-build` and `postgresql17-validation`, but green CI does NOT clear the security gate. PR #28 (`https://github.com/abdalla12455-dev/ibn-hayan-healthcare-os/pull/28`) remains a DRAFT and unmerged. No force, rebase, or main push performed.
 
