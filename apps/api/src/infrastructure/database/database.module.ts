@@ -14,6 +14,8 @@ import { PrismaPatientIdentifierRepository } from './repositories/prisma-patient
 import { PrismaPatientConsentRepository } from './repositories/prisma-patient-consent.repository.js';
 import { PrismaProviderRepository } from './repositories/prisma-provider.repository.js';
 import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
+import { PrismaClinicalNoteRepository } from './repositories/prisma-clinical-note.repository.js';
+import { ClinicalNoteSigningAuthorityService } from './services/clinical-note-signing-authority.service.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
 import { TreatmentConsentVerificationService } from './services/treatment-consent-verification.service.js';
 import { AgeOfMajorityPolicyService } from './services/age-of-majority-policy.service.js';
@@ -79,6 +81,8 @@ export {
   PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
   ENCOUNTER_REPOSITORY,
+  CLINICAL_NOTE_REPOSITORY,
+  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
 } from './tokens.js';
 import {
   TENANT_REPOSITORY,
@@ -94,6 +98,8 @@ import {
   PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
   ENCOUNTER_REPOSITORY,
+  CLINICAL_NOTE_REPOSITORY,
+  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
 } from './tokens.js';
 
 @Module({
@@ -161,6 +167,14 @@ import {
       provide: ENCOUNTER_REPOSITORY,
       useClass: PrismaEncounterRepository,
     },
+    {
+      provide: CLINICAL_NOTE_REPOSITORY,
+      useClass: PrismaClinicalNoteRepository,
+    },
+    {
+      provide: CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
+      useClass: ClinicalNoteSigningAuthorityService,
+    },
   ],
   // PrismaService and the repository implementations are not exported
   // directly. Feature modules that need persistence inject the
@@ -199,6 +213,8 @@ import {
     AGE_OF_MAJORITY_POLICY_PORT,
     WORKFORCE_REPOSITORY,
     ENCOUNTER_REPOSITORY,
+    CLINICAL_NOTE_REPOSITORY,
+    CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
     LocalCredentialService,
   ],
 })
@@ -232,4 +248,6 @@ export type {
   AgeOfMajorityPolicyPort,
   ProviderRepository,
   EncounterRepository,
+  ClinicalNoteRepository,
+  ClinicalNoteSigningAuthorityPort,
 } from '@ibn-hayan/domain';

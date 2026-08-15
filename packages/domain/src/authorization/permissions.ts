@@ -101,7 +101,11 @@ export type PermissionCode =
   | 'patients:manage_identifiers'
   | 'patients:consent_grant'
   | 'patients:consent_view'
-  | 'patients:consent_withdraw';
+  | 'patients:consent_withdraw'
+  | 'clinical_notes:create'
+  | 'clinical_notes:view'
+  | 'clinical_notes:sign'
+  | 'clinical_notes:amend';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -156,6 +160,10 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'patients:consent_grant',
   'patients:consent_view',
   'patients:consent_withdraw',
+  'clinical_notes:create',
+  'clinical_notes:view',
+  'clinical_notes:sign',
+  'clinical_notes:amend',
 ] as const;
 
 /**

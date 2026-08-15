@@ -1236,3 +1236,168 @@ model Encounter {
   @@index([tenantId, facilityId, status], map: "encounters_tenant_id_facility_id_status_idx")
   @@map("encounters")
 }
+
+// ---------------------------------------------------------------------------
+// Clinical Note (BC03 — Clinical Documentation Foundation)
+// ---------------------------------------------------------------------------
+
+/// Canonical clinical note type per ENUMS.md §4.2 (ClinicalNoteType,
+/// Open-with-Council). Bound to the LOINC document ontology. The database
+/// stores lowercase values; the canonical default is `progress`.
+enum ClinicalNoteType {
+  progress
+  history
+  physical
+  consultation
+  discharge
+  procedure
+  nursing
+}
+
+/// Canonical clinical note lifecycle status per ENUMS.md §4.2 and
+/// STATUS_CODES.md §5.3 (ClinicalNoteStatus, Closed). The database stores
+/// lowercase values; the canonical default is `draft`. Terminal statuses:
+/// `addendum`, `withdrawn`.
+enum ClinicalNoteStatus {
+  draft
+  in_progress
+  signed
+  amended
+  addendum
+  withdrawn
+}
+
+/// Canonical clinical note author role per ENUMS.md §4.2
+/// (ClinicalNoteAuthorRole, Open-with-Council). The database stores
+/// lowercase values; the canonical default is `physician`.
+enum ClinicalNoteAuthorRole {
+  physician
+  nurse
+  pharmacist
+  therapist
+  midlevel
+  student
+}
+
+/// The lifecycle action that produced a ClinicalNoteRevision. Records
+/// which canonical lifecycle event created a revision, so the full
+/// medico-legal history is reconstructable from the revision sequence.
+enum ClinicalNoteRevisionAction {
+  draft_created
+  signed
+  amended
+  addendum_added
+  withdrawn
+}
+
+/// A clinical note (BC03 — Clinical Documentation Foundation).
+///
+/// A ClinicalNote is a signed clinical document attached to an Encounter
+/// (BC02). BC03 owns ClinicalNote state exclusively. The note references —
+/// but does NOT foreign-key to — the Encounter (BC02), Patient (BC01), and
+/// author Provider (BC10). Those contexts own their own authoritative
+/// state; this table holds logical identifiers only, per the cross-BC
+/// state-isolation rule ("Direct data access across context boundaries is a
+/// defect and is rejected at code review"). No foreign keys cross BC
+/// boundaries.
+///
+/// `encounterId`, `patientId`, and the author `providerId` (carried on the
+/// revisions) are stored as UUID references WITHOUT relational foreign
+/// keys. The application layer validates these references via the owning
+/// modules' repositories before persisting.
+///
+/// The note's mutable content lives in an append-only sequence of
+/// {@link ClinicalNoteRevision} rows (one-to-many). The current revision is
+/// the latest one (highest `revisionNumber`). A signed revision is never
+/// destructively rewritten: signing, amendment, addendum, and withdrawal
+/// each produce a NEW revision while prior revisions are retained verbatim
+/// (immutable, history-preserving medico-legal record).
+///
+/// The canonical lifecycle is enforced at the application/repository
+/// boundary via a conditional UPDATE ... WHERE status IN (...), NOT by a
+/// database CHECK constraint. The database stores the status; the
+/// repository enforces permitted source → target transitions atomically
+/// and appends a new revision within the same SERIALIZABLE transaction.
+///
+/// `authorRole` is the canonical author role of the note's original author
+/// (the role on the draft revision). Per-revision author roles are carried
+/// on each revision row (the author may differ across revisions for
+/// co-authorship or amendment-by-another-clinician).
+///
+/// `signedAt` is the signing timestamp of the note's signed/current signed
+/// revision; it is denormalised onto the note row for read efficiency but
+/// the authoritative signed timestamp lives on the `signed` revision.
+model ClinicalNote {
+  id             String                 @id @default(uuid()) @db.Uuid
+  tenantId       String                 @map("tenant_id") @db.Uuid
+  organisationId String                 @map("organisation_id") @db.Uuid
+  facilityId     String                 @map("facility_id") @db.Uuid
+  encounterId    String                 @map("encounter_id") @db.Uuid
+  patientId      String                 @map("patient_id") @db.Uuid
+  noteType       ClinicalNoteType       @default(progress) @map("note_type")
+  authorRole     ClinicalNoteAuthorRole @default(physician) @map("author_role")
+  status         ClinicalNoteStatus     @default(draft)
+  signedAt       DateTime?              @map("signed_at") @db.Timestamptz
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz
+
+  revisions ClinicalNoteRevision[]
+
+  @@unique([tenantId, organisationId, facilityId, id], map: "clinical_notes_tenant_org_facility_id_key")
+  @@index([tenantId], map: "clinical_notes_tenant_id_idx")
+  @@index([tenantId, organisationId], map: "clinical_notes_tenant_id_organisation_id_idx")
+  @@index([tenantId, facilityId], map: "clinical_notes_tenant_id_facility_id_idx")
+  @@index([tenantId, encounterId], map: "clinical_notes_tenant_id_encounter_id_idx")
+  @@index([tenantId, patientId], map: "clinical_notes_tenant_id_patient_id_idx")
+  @@index([tenantId, facilityId, status], map: "clinical_notes_tenant_id_facility_id_status_idx")
+  @@map("clinical_notes")
+}
+
+/// An immutable revision in a ClinicalNote's append-only history.
+///
+/// Revisions are append-only: a new revision is created for every
+/// lifecycle action that changes the note's content or status. A signed
+/// revision (`action === 'signed'`) is never mutated; an amendment
+/// (`action === 'amended'`) or addendum (`action === 'addendum_added'`)
+/// creates a NEW revision with the corrected/supplementary content while
+/// the prior signed revision is retained verbatim. The `revisionNumber`
+/// is a 1-based sequence scoped to the note (enforced by a partial unique
+/// index on `(clinical_note_id, revision_number)`); the highest
+/// `revisionNumber` is the current revision.
+///
+/// `body` is the note's free-text clinical content as of this revision.
+/// This is PHI; it is stored in the transactional database but is NEVER
+/// placed in audit metadata.
+///
+/// `authorId` is a logical cross-BC reference to the authoring Provider
+/// (BC10), stored as a UUID WITHOUT a foreign key (the Workforce bounded
+/// context owns Provider state). The author of THIS revision may differ
+/// across revisions for co-authorship or amendment-by-another-clinician.
+///
+/// `reason` is the mandatory reason for amendment/withdrawal/addendum
+/// (BR-BC03-CLIN-032). `null` for draft creation and signing (no reason
+/// required canonically).
+///
+/// `signedAt` is the signing timestamp, set only for `signed` revisions.
+model ClinicalNoteRevision {
+  id             String                     @id @default(uuid()) @db.Uuid
+  clinicalNoteId String                     @map("clinical_note_id") @db.Uuid
+  tenantId       String                     @map("tenant_id") @db.Uuid
+  revisionNumber Int                        @map("revision_number")
+  action         ClinicalNoteRevisionAction
+  status         ClinicalNoteStatus
+  body           String                     @db.Text
+  authorId       String                     @map("author_id") @db.Uuid
+  authorRole     ClinicalNoteAuthorRole     @map("author_role")
+  reason         String?                    @db.Text
+  signedAt       DateTime?                  @map("signed_at") @db.Timestamptz
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz
+
+  clinicalNote ClinicalNote @relation(fields: [clinicalNoteId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([clinicalNoteId, revisionNumber], map: "clinical_note_revisions_note_id_revision_number_key")
+  @@index([tenantId], map: "clinical_note_revisions_tenant_id_idx")
+  @@index([clinicalNoteId], map: "clinical_note_revisions_clinical_note_id_idx")
+  @@index([clinicalNoteId, revisionNumber], map: "clinical_note_revisions_note_id_revision_number_idx")
+  @@map("clinical_note_revisions")
+}

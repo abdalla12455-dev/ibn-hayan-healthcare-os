@@ -9,6 +9,7 @@ import { RolePreviewModule } from './modules/dev/index.js';
 import { ClinicAdminModule } from './modules/clinic-admin/index.js';
 import { AppointmentsModule } from './modules/appointments/index.js';
 import { EncountersModule } from './modules/encounters/index.js';
+import { ClinicalNotesModule } from './modules/clinical-notes/index.js';
 import { PatientsModule } from './modules/patients/index.js';
 
 /**
@@ -82,6 +83,7 @@ import { PatientsModule } from './modules/patients/index.js';
     ClinicAdminModule,
     AppointmentsModule,
     EncountersModule,
+    ClinicalNotesModule,
     PatientsModule,
   ],
 })

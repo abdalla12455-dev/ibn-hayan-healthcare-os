@@ -278,6 +278,10 @@ describe('authorization permission catalogue', () => {
       'patients:consent_grant',
       'patients:consent_view',
       'patients:consent_withdraw',
+      'clinical_notes:create',
+      'clinical_notes:view',
+      'clinical_notes:sign',
+      'clinical_notes:amend',
     ]);
   });
 
@@ -314,6 +318,10 @@ describe('authorization permission catalogue', () => {
     expect(isPermissionCode('patients:consent_grant')).toBe(true);
     expect(isPermissionCode('patients:consent_view')).toBe(true);
     expect(isPermissionCode('patients:consent_withdraw')).toBe(true);
+    expect(isPermissionCode('clinical_notes:create')).toBe(true);
+    expect(isPermissionCode('clinical_notes:view')).toBe(true);
+    expect(isPermissionCode('clinical_notes:sign')).toBe(true);
+    expect(isPermissionCode('clinical_notes:amend')).toBe(true);
   });
 
   it('isPermissionCode returns false for unknown permission codes', () => {
@@ -378,7 +386,11 @@ describe('authorization role-permission matrix', () => {
         p !== 'patients:manage_identifiers' &&
         p !== 'patients:consent_grant' &&
         p !== 'patients:consent_view' &&
-        p !== 'patients:consent_withdraw',
+        p !== 'patients:consent_withdraw' &&
+        p !== 'clinical_notes:create' &&
+        p !== 'clinical_notes:view' &&
+        p !== 'clinical_notes:sign' &&
+        p !== 'clinical_notes:amend',
     );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
@@ -465,13 +477,17 @@ describe('authorization role-permission matrix', () => {
     // lifecycle, Stage 1F), plus the full encounter lifecycle write
     // set plus encounters:view (Stage 2A, BC02 Encounter Foundation),
     // plus the clinical patient read permissions (patients:view,
-    // patients:search, patients:consent_view — Stage BC01). It does
-    // NOT hold the operational appointments permissions
+    // patients:search, patients:consent_view — Stage BC01), plus the
+    // clinical-note write permissions (clinical_notes:create/view/sign/
+    // amend — Stage BC03). It does NOT hold the operational
+    // appointments permissions
     // (book/cancel/reschedule/confirm/check_in), the R09-only
     // permissions, or the registration-desk patient write permissions
     // (register/update_demographics/manage_identifiers/consent_grant/
-    // consent_withdraw).
-    expect(permissionsForRole('R01_PHYSICIAN')).toEqual(
+    // consent_withdraw). The raw matrix entry contains duplicate
+    // context permissions (re-included by
+    // CLINICAL_NOTE_WRITE_PERMISSIONS); the distinct set is compared.
+    expect([...new Set(permissionsForRole('R01_PHYSICIAN'))].sort()).toEqual(
       PERMISSION_CODES.filter(
         (p) =>
           p !== 'clinic_admin_overview:view' &&
@@ -486,7 +502,7 @@ describe('authorization role-permission matrix', () => {
           p !== 'patients:manage_identifiers' &&
           p !== 'patients:consent_grant' &&
           p !== 'patients:consent_withdraw',
-      ),
+      ).sort(),
     );
     // R13_SYSTEM_ADMINISTRATOR has only the seven context permissions
     // (HUMAN_CONTEXT_PERMISSIONS). It does NOT hold any appointments,
@@ -521,7 +537,11 @@ describe('authorization role-permission matrix', () => {
           p !== 'patients:manage_identifiers' &&
           p !== 'patients:consent_grant' &&
           p !== 'patients:consent_view' &&
-          p !== 'patients:consent_withdraw',
+          p !== 'patients:consent_withdraw' &&
+          p !== 'clinical_notes:create' &&
+          p !== 'clinical_notes:view' &&
+          p !== 'clinical_notes:sign' &&
+          p !== 'clinical_notes:amend',
       ),
     );
     // R09 holds all permissions EXCEPT the clinical visit-progression
@@ -550,7 +570,10 @@ describe('authorization role-permission matrix', () => {
           p !== 'patients:update_demographics' &&
           p !== 'patients:manage_identifiers' &&
           p !== 'patients:consent_grant' &&
-          p !== 'patients:consent_withdraw',
+          p !== 'patients:consent_withdraw' &&
+          p !== 'clinical_notes:create' &&
+          p !== 'clinical_notes:sign' &&
+          p !== 'clinical_notes:amend',
       ),
     );
   });
@@ -566,15 +589,17 @@ describe('authorization role-permission matrix', () => {
     // visit lifecycle) plus the full encounter lifecycle write set
     // plus encounters:view (Stage 2A) plus the clinical patient read
     // permissions (patients:view, patients:search, patients:consent_view
-    // — Stage BC01) = 20 distinct permissions. R13 grants only the
-    // seven context permissions, which are a subset of R01's. The
-    // union is therefore R01's permissions (20), since R13's set adds
-    // nothing R01 does not already hold.
+    // — Stage BC01) plus the clinical-note write permissions
+    // (clinical_notes:create, clinical_notes:view, clinical_notes:sign,
+    // clinical_notes:amend — Stage BC03) = 24 distinct permissions. R13
+    // grants only the seven context permissions, which are a subset of
+    // R01's. The union is therefore R01's permissions (24), since R13's
+    // set adds nothing R01 does not already hold.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
     ]);
-    expect(union.size).toBe(20);
+    expect(union.size).toBe(24);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
@@ -589,6 +614,10 @@ describe('authorization role-permission matrix', () => {
     expect(union.has('patients:view')).toBe(true);
     expect(union.has('patients:search')).toBe(true);
     expect(union.has('patients:consent_view')).toBe(true);
+    expect(union.has('clinical_notes:create')).toBe(true);
+    expect(union.has('clinical_notes:view')).toBe(true);
+    expect(union.has('clinical_notes:sign')).toBe(true);
+    expect(union.has('clinical_notes:amend')).toBe(true);
     expect(union.has('clinic_admin_overview:view')).toBe(false);
     expect(union.has('patients:register')).toBe(false);
     expect(union.has('patients:consent_withdraw')).toBe(false);
@@ -609,7 +638,7 @@ describe('authorization role-permission matrix', () => {
       'R01_PHYSICIAN',
       'owner',
     ]);
-    expect(union.size).toBe(20);
+    expect(union.size).toBe(24);
   });
 
   it('R14 combined with a human role yields the union (R14 does not revoke)', () => {
@@ -617,7 +646,7 @@ describe('authorization role-permission matrix', () => {
       'R14_INTEGRATION_ACCOUNT',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(20);
+    expect(union.size).toBe(24);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
@@ -716,24 +745,27 @@ describe('authorization role-permission matrix', () => {
   // `PERMISSION_CODES.filter(...)` pattern).
   // -------------------------------------------------------------------------
 
-  it('R09 Clinic Administrator receives EXACTLY 18 permissions (not PERMISSION_CODES.length)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 18: 7 context +
+  it('R09 Clinic Administrator receives EXACTLY 19 permissions (not PERMISSION_CODES.length)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 19: 7 context +
     // clinic_admin_overview:view + appointments:view + appointments:book
     // + appointments:cancel + appointments:reschedule +
     // appointments:confirm + appointments:check_in + encounters:view +
-    // patients:view + patients:search + patients:consent_view).
+    // patients:view + patients:search + patients:consent_view +
+    // clinical_notes:view — Stage BC03 clinical-note read).
     // R09 does NOT receive appointments:start or appointments:complete
     // (clinical visit-progression actions reserved for R01 Physician)
     // and does NOT receive encounter write permissions (clinical
     // encounter lifecycle actions reserved for R01/R02) and does NOT
     // receive the registration-desk patient write permissions
     // (register/update_demographics/manage_identifiers/consent_grant/
-    // consent_withdraw, reserved for R06 Receptionist). If a future
-    // change adds a permission to PERMISSION_CODES but forgets to add
-    // it to CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it. This is
-    // the desired least-privilege behaviour.
+    // consent_withdraw, reserved for R06 Receptionist) and does NOT
+    // receive clinical-note write permissions (create/sign/amend,
+    // reserved for R01/R02/R05). If a future change adds a permission
+    // to PERMISSION_CODES but forgets to add it to
+    // CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it. This is the
+    // desired least-privilege behaviour.
     const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
-    expect(r09Permissions).toHaveLength(18);
+    expect(r09Permissions).toHaveLength(19);
     expect(r09Permissions).toEqual([
       'context:view',
       'context:select',
@@ -753,6 +785,7 @@ describe('authorization role-permission matrix', () => {
       'patients:view',
       'patients:search',
       'patients:consent_view',
+      'clinical_notes:view',
     ]);
     expect(r09Permissions).not.toContain('appointments:start');
     expect(r09Permissions).not.toContain('appointments:complete');
@@ -766,6 +799,9 @@ describe('authorization role-permission matrix', () => {
     expect(r09Permissions).not.toContain('patients:manage_identifiers');
     expect(r09Permissions).not.toContain('patients:consent_grant');
     expect(r09Permissions).not.toContain('patients:consent_withdraw');
+    expect(r09Permissions).not.toContain('clinical_notes:create');
+    expect(r09Permissions).not.toContain('clinical_notes:sign');
+    expect(r09Permissions).not.toContain('clinical_notes:amend');
   });
 
   it('R13 System Administrator receives EXACTLY 7 permissions (not PERMISSION_CODES.filter(...))', () => {
@@ -898,21 +934,25 @@ describe('authorization role-permission matrix', () => {
     expect(r07Permissions).not.toContain('patients:consent_withdraw');
   });
 
-  it('R01 Physician receives EXACTLY 20 permissions (7 context + 2 appointment visit + 8 encounter + 3 patient read)', () => {
+  it('R01 Physician receives EXACTLY 24 distinct permissions (7 context + 2 appointment visit + 8 encounter + 3 patient read + 4 clinical-note write)', () => {
     // R01_PHYSICIAN receives PHYSICIAN_ENCOUNTER_PERMISSIONS (17
     // permissions: 7 context + appointments:start + appointments:complete
     // + encounters:create/arrive/start/on_leave/resume/finish/cancel +
-    // encounters:view) PLUS the clinical patient read permissions
+    // encounters:view) PLUS CLINICAL_NOTE_WRITE_PERMISSIONS (11: 7
+    // context [deduplicated] + clinical_notes:create/view/sign/amend —
+    // Stage BC03) PLUS the clinical patient read permissions
     // (patients:view, patients:search, patients:consent_view — Stage
-    // BC01) = 20. These are the clinical visit-progression and
-    // encounter-lifecycle actions plus clinical patient read. R01 does
-    // NOT receive the operational appointments permissions
+    // BC01) = 24 distinct permissions. The raw matrix entry contains
+    // duplicate context permissions (re-included by
+    // CLINICAL_NOTE_WRITE_PERMISSIONS); the Set union in
+    // `permissionsForRoles` deduplicates them. R01 does NOT receive the
+    // operational appointments permissions
     // (book/cancel/reschedule/confirm/check_in), clinic_admin_overview:view,
     // or the registration-desk patient write permissions
     // (register/update_demographics/manage_identifiers/consent_grant/
     // consent_withdraw).
     const r01Permissions = ROLE_PERMISSION_MATRIX.R01_PHYSICIAN;
-    expect(r01Permissions).toHaveLength(20);
+    expect(new Set(r01Permissions).size).toBe(24);
     expect(r01Permissions).toContain('appointments:start');
     expect(r01Permissions).toContain('appointments:complete');
     expect(r01Permissions).toContain('encounters:create');
@@ -926,6 +966,10 @@ describe('authorization role-permission matrix', () => {
     expect(r01Permissions).toContain('patients:view');
     expect(r01Permissions).toContain('patients:search');
     expect(r01Permissions).toContain('patients:consent_view');
+    expect(r01Permissions).toContain('clinical_notes:create');
+    expect(r01Permissions).toContain('clinical_notes:view');
+    expect(r01Permissions).toContain('clinical_notes:sign');
+    expect(r01Permissions).toContain('clinical_notes:amend');
     expect(r01Permissions).not.toContain('clinic_admin_overview:view');
     expect(r01Permissions).not.toContain('appointments:book');
     expect(r01Permissions).not.toContain('appointments:cancel');
@@ -939,17 +983,18 @@ describe('authorization role-permission matrix', () => {
     expect(r01Permissions).not.toContain('patients:consent_withdraw');
   });
 
-  it('R02 Nurse receives 14 permissions (7 context + 4 encounter read/write + 3 patient read)', () => {
+  it('R02 Nurse receives 18 distinct permissions (7 context + 4 encounter read/write + 3 patient read + 4 clinical-note write)', () => {
     // R02_NURSE receives NURSE_ENCOUNTER_PERMISSIONS (11 permissions:
     // 7 context + encounters:create + encounters:arrive +
-    // encounters:cancel + encounters:view) PLUS the clinical patient
-    // read permissions (patients:view, patients:search,
-    // patients:consent_view — Stage BC01) = 14. R02 does NOT receive
-    // encounters:start or encounters:finish (practitioner conclusion
-    // authority reserved for R01 in this stage) and does NOT receive
-    // the registration-desk patient write permissions.
+    // encounters:cancel + encounters:view) PLUS CLINICAL_NOTE_WRITE
+    // (4 clinical-note write perms; context deduplicated) PLUS the
+    // clinical patient read permissions (patients:view, patients:search,
+    // patients:consent_view — Stage BC01) = 18 distinct. R02 does NOT
+    // receive encounters:start or encounters:finish (practitioner
+    // conclusion authority reserved for R01 in this stage) and does NOT
+    // receive the registration-desk patient write permissions.
     const r02Permissions = ROLE_PERMISSION_MATRIX.R02_NURSE;
-    expect(r02Permissions).toHaveLength(14);
+    expect(new Set(r02Permissions).size).toBe(18);
     expect(r02Permissions).toContain('encounters:create');
     expect(r02Permissions).toContain('encounters:arrive');
     expect(r02Permissions).toContain('encounters:cancel');
@@ -957,6 +1002,10 @@ describe('authorization role-permission matrix', () => {
     expect(r02Permissions).toContain('patients:view');
     expect(r02Permissions).toContain('patients:search');
     expect(r02Permissions).toContain('patients:consent_view');
+    expect(r02Permissions).toContain('clinical_notes:create');
+    expect(r02Permissions).toContain('clinical_notes:view');
+    expect(r02Permissions).toContain('clinical_notes:sign');
+    expect(r02Permissions).toContain('clinical_notes:amend');
     expect(r02Permissions).not.toContain('encounters:start');
     expect(r02Permissions).not.toContain('encounters:finish');
     expect(r02Permissions).not.toContain('encounters:on_leave');
@@ -968,30 +1017,72 @@ describe('authorization role-permission matrix', () => {
     expect(r02Permissions).not.toContain('patients:consent_withdraw');
   });
 
-  it('R03-R05, R08, R12 receive EXACTLY 10 permissions (7 context + encounters:view + patients:view + patients:search)', () => {
-    // The clinical/operational read roles (R03 Pharmacist, R04
-    // Technician, R05 Allied Health, R08 Biller, R12 Executive) receive
+  it('R05 Allied Health receives 14 distinct permissions (7 context + encounters:view + 2 patient read + 4 clinical-note write)', () => {
+    // R05_ALLIED_HEALTH_PROFESSIONAL receives ENCOUNTER_READ (8: 7
+    // context + encounters:view) PLUS CLINICAL_NOTE_WRITE (4 clinical-
+    // note write perms; context deduplicated) PLUS patients:view and
+    // patients:search = 14 distinct. Per ROLES_AND_PERMISSIONS.md 4.2,
+    // R05's "Clinical Doc" cell is "RW".
+    const r05Permissions = ROLE_PERMISSION_MATRIX.R05_ALLIED_HEALTH_PROFESSIONAL;
+    expect(new Set(r05Permissions).size).toBe(14);
+    expect(r05Permissions).toContain('encounters:view');
+    expect(r05Permissions).toContain('patients:view');
+    expect(r05Permissions).toContain('patients:search');
+    expect(r05Permissions).toContain('clinical_notes:create');
+    expect(r05Permissions).toContain('clinical_notes:view');
+    expect(r05Permissions).toContain('clinical_notes:sign');
+    expect(r05Permissions).toContain('clinical_notes:amend');
+    expect(r05Permissions).not.toContain('encounters:create');
+    expect(r05Permissions).not.toContain('encounters:arrive');
+    expect(r05Permissions).not.toContain('encounters:start');
+    expect(r05Permissions).not.toContain('encounters:finish');
+    expect(r05Permissions).not.toContain('encounters:cancel');
+    expect(r05Permissions).not.toContain('encounters:on_leave');
+    expect(r05Permissions).not.toContain('encounters:resume');
+  });
+
+  it('R03 Pharmacist and R12 Executive receive 11 distinct permissions (7 context + encounters:view + 2 patient read + clinical_notes:view)', () => {
+    // R03_PHARMACIST and R12_EXECUTIVE receive ENCOUNTER_READ (8: 7
+    // context + encounters:view) PLUS CLINICAL_NOTE_READ (clinical_notes
+    // :view; context deduplicated) PLUS patients:view and patients:search
+    // = 11 distinct. Per ROLES_AND_PERMISSIONS.md 4.2, their "Clinical
+    // Doc" cell is "R" (read).
+    const clinicalNoteReadRoles = ['R03_PHARMACIST', 'R12_EXECUTIVE'] as const;
+    for (const code of clinicalNoteReadRoles) {
+      const permissions = ROLE_PERMISSION_MATRIX[code];
+      expect(new Set(permissions).size).toBe(11);
+      expect(permissions).toContain('encounters:view');
+      expect(permissions).toContain('patients:view');
+      expect(permissions).toContain('patients:search');
+      expect(permissions).toContain('clinical_notes:view');
+      expect(permissions).not.toContain('clinical_notes:create');
+      expect(permissions).not.toContain('clinical_notes:sign');
+      expect(permissions).not.toContain('clinical_notes:amend');
+      expect(permissions).not.toContain('encounters:create');
+      expect(permissions).not.toContain('patients:register');
+      expect(permissions).not.toContain('patients:consent_grant');
+      expect(permissions).not.toContain('patients:consent_withdraw');
+    }
+  });
+
+  it('R04 Technician and R08 Biller receive EXACTLY 10 permissions (7 context + encounters:view + patients:view + patients:search)', () => {
+    // The non-clinical read roles (R04 Technician, R08 Biller) receive
     // ENCOUNTER_READ_PERMISSIONS (8: 7 context + encounters:view) PLUS
     // patients:view and patients:search (Stage BC01 patient read) = 10.
-    // Per USER_ROLES.md §10.1, each has a Read variant on Encounter
-    // Records and Patient Records. They do NOT receive encounter write
-    // permissions, appointments/clinic-admin write permissions, or any
-    // registration-desk patient write permissions (register/
-    // update_demographics/manage_identifiers/consent_grant/
-    // consent_withdraw).
-    const encounterReadRoles = [
-      'R03_PHARMACIST',
-      'R04_TECHNICIAN',
-      'R05_ALLIED_HEALTH_PROFESSIONAL',
-      'R08_BILLER',
-      'R12_EXECUTIVE',
-    ] as const;
+    // Per ROLES_AND_PERMISSIONS.md 4.2, their "Clinical Doc" cell is "-"
+    // (no clinical-documentation access), so they receive NO
+    // clinical_notes permission.
+    const encounterReadRoles = ['R04_TECHNICIAN', 'R08_BILLER'] as const;
     for (const code of encounterReadRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
       expect(permissions).toHaveLength(10);
       expect(permissions).toContain('encounters:view');
       expect(permissions).toContain('patients:view');
       expect(permissions).toContain('patients:search');
+      expect(permissions).not.toContain('clinical_notes:create');
+      expect(permissions).not.toContain('clinical_notes:view');
+      expect(permissions).not.toContain('clinical_notes:sign');
+      expect(permissions).not.toContain('clinical_notes:amend');
       expect(permissions).not.toContain('encounters:create');
       expect(permissions).not.toContain('encounters:arrive');
       expect(permissions).not.toContain('encounters:start');
@@ -1008,21 +1099,24 @@ describe('authorization role-permission matrix', () => {
     }
   });
 
-  it('R10 Compliance Officer receives EXACTLY 11 permissions (7 context + encounters:view + patients:view + patients:search + patients:consent_view)', () => {
+  it('R10 Compliance Officer receives 12 distinct permissions (7 context + encounters:view + patients:view + patients:search + patients:consent_view + clinical_notes:view)', () => {
     // R10 Compliance Officer receives ENCOUNTER_READ_PERMISSIONS (8:
-    // 7 context + encounters:view) PLUS patients:view, patients:search,
-    // and patients:consent_view (Stage BC01 audit/consent oversight)
-    // = 11. Per USER_ROLES.md §10.1, R10's Patient Records cell is
-    // "Read (audit)" — R10 may view patient records and consent state
-    // for audit/compliance oversight but does NOT register patients,
-    // update demographics, manage identifiers, or grant/withdraw
-    // consent.
+    // 7 context + encounters:view) PLUS CLINICAL_NOTE_READ
+    // (clinical_notes:view; context deduplicated) PLUS patients:view,
+    // patients:search, and patients:consent_view (Stage BC01 audit/
+    // consent oversight) = 12 distinct. Per USER_ROLES.md §10.1, R10's
+    // Patient Records cell is "Read (audit)" and per
+    // ROLES_AND_PERMISSIONS.md 4.2 R10's "Clinical Doc" cell is "R".
     const r10Permissions = ROLE_PERMISSION_MATRIX.R10_COMPLIANCE_OFFICER;
-    expect(r10Permissions).toHaveLength(11);
+    expect(new Set(r10Permissions).size).toBe(12);
     expect(r10Permissions).toContain('encounters:view');
     expect(r10Permissions).toContain('patients:view');
     expect(r10Permissions).toContain('patients:search');
     expect(r10Permissions).toContain('patients:consent_view');
+    expect(r10Permissions).toContain('clinical_notes:view');
+    expect(r10Permissions).not.toContain('clinical_notes:create');
+    expect(r10Permissions).not.toContain('clinical_notes:sign');
+    expect(r10Permissions).not.toContain('clinical_notes:amend');
     expect(r10Permissions).not.toContain('encounters:create');
     expect(r10Permissions).not.toContain('encounters:arrive');
     expect(r10Permissions).not.toContain('encounters:start');
@@ -1076,19 +1170,21 @@ describe('authorization role-permission matrix', () => {
   });
 
   it('R09 is NOT a hidden global super-administrator (R09 != PERMISSION_CODES)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 18), NOT
-    // PERMISSION_CODES (which is currently 32). R09 does NOT receive
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 19), NOT
+    // PERMISSION_CODES (which is currently 36). R09 does NOT receive
     // appointments:start or appointments:complete (clinical
     // visit-progression actions reserved for R01 Physician), does NOT
-    // receive encounter write permissions, and does NOT receive the
+    // receive encounter write permissions, does NOT receive the
     // registration-desk patient write permissions (reserved for R06
-    // Receptionist), so R09's permission count is strictly less than
+    // Receptionist), and does NOT receive clinical-note write
+    // permissions (create/sign/amend, reserved for R01/R02/R05), so
+    // R09's permission count is strictly less than
     // PERMISSION_CODES.length. This test verifies R09's matrix entry is
     // NOT a reference to PERMISSION_CODES and that R09 does not silently
-    // inherit clinical visit, encounter write, or patient write
-    // permissions.
-    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(18);
-    expect(PERMISSION_CODES.length).toBe(32);
+    // inherit clinical visit, encounter write, patient write, or
+    // clinical-note write permissions.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(19);
+    expect(PERMISSION_CODES.length).toBe(36);
     // R09 must NOT equal the full PERMISSION_CODES catalogue.
     expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toEqual(
       PERMISSION_CODES,
@@ -1131,6 +1227,16 @@ describe('authorization role-permission matrix', () => {
     );
     expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
       'patients:consent_withdraw',
+    );
+    // R09 must NOT hold clinical-note write permissions.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
+      'clinical_notes:create',
+    );
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
+      'clinical_notes:sign',
+    );
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(
+      'clinical_notes:amend',
     );
   });
 
@@ -1204,15 +1310,16 @@ describe('TenantRoleAssignment domain type', () => {
     // structural enforcement. At the domain level, the same code
     // appearing twice in a principal's role set does not grant the
     // permission twice; the Set<PermissionCode> accumulation
-    // deduplicates implicitly. R01_PHYSICIAN has 20 distinct
+    // deduplicates implicitly. R01_PHYSICIAN has 24 distinct
     // permissions (7 context + appointments:start/complete + 8
-    // encounter lifecycle + patients:view/search/consent_view).
+    // encounter lifecycle + patients:view/search/consent_view + 4
+    // clinical-note write).
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R01_PHYSICIAN',
       'R01_PHYSICIAN',
     ]);
-    expect(union.size).toBe(20);
+    expect(union.size).toBe(24);
   });
 
   it('a catalogue entry is a readonly snapshot', () => {

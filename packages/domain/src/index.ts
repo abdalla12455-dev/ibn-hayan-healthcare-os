@@ -65,3 +65,4 @@ export * from './scheduling/index.js';
 export * from './patient/index.js';
 export * from './workforce/index.js';
 export * from './encounter/index.js';
+export * from './clinical-note/index.js';

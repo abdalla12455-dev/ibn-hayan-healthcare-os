@@ -543,6 +543,76 @@ export const PATIENTS_ACTION_CODES = [
 export type PatientsActionCode = (typeof PATIENTS_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Clinical Notes (Clinical Documentation bounded context — BC03)
+// ---------------------------------------------------------------------------
+
+/**
+ * Clinical Notes action codes.
+ *
+ * Emitted by the Clinical Notes module after successful note creation,
+ * signing, amendment, addendum, withdrawal, view, and history retrieval
+ * (BC03 — Clinical Notes Foundation).
+ *
+ * Per STATUS_CODES.md §5.3 (ClinicalNoteStatus) and BR-BC03-CLIN-031
+ * (signing authority) / BR-BC03-CLIN-032 (amendment documentation), the
+ * canonical clinical-note lifecycle is:
+ *
+ *   draft → in_progress → signed → amended | addendum (terminal)
+ *   draft | in_progress → withdrawn (terminal)
+ *
+ * The `clinical_notes.created` event is emitted after a successful draft
+ * note creation via `POST /api/v1/clinical-notes`. The event metadata
+ * carries `{ endpoint, noteId }` only — the note ID for traceability. No
+ * note body, diagnosis, patient name, DOB, or other PHI/PII is carried
+ * (the audit-metadata forbidden-key detector and the service-layer
+ * metadata construction enforce this).
+ *
+ * The `clinical_notes.signed`, `clinical_notes.amended`,
+ * `clinical_notes.addendum_added`, and `clinical_notes.withdrawn` events
+ * are emitted after a successful FIRST-TIME lifecycle transition. The
+ * event metadata carries `{ endpoint, noteId }` only. No PHI is carried.
+ * The events are emitted ONLY when the note actually transitions; an
+ * idempotent re-application of a terminal transition (`addendum`/
+ * `withdrawn`) is an invalid transition (no event). Non-terminal
+ * same-state re-applications are invalid transitions and emit no event.
+ *
+ * The `clinical_notes.viewed` and `clinical_notes.history_viewed` events
+ * are emitted after a successful read (view a note; view a note's revision
+ * history). Per the established two-event read pattern (cf.
+ * `tenant_context.viewed`, `clinic_admin.overview.viewed`), the read
+ * endpoints emit BOTH the guard's `authorization.decision.allowed` event
+ * AND the service's successful-view event. The event metadata carries
+ * `{ endpoint, noteId }` only — no note body, no PHI.
+ *
+ * All seven actions are mapped to the `facility_context` category (see
+ * `inferCategoryFromAction`): clinical notes are facility-scoped (the
+ * service requires an active facility and operates within the
+ * authenticated tenant/organisation/facility scope), matching the
+ * encounters and appointments action codes.
+ *
+ * Emission semantics:
+ *
+ * Events are emitted via `auditHelper.emitDirect(...)` (best-effort,
+ * non-transactional), matching the existing pattern for encounter and
+ * appointment lifecycle events. Events are emitted ONLY after the
+ * operation succeeds; they are NOT emitted when validation fails, when
+ * authorization denies, when the service throws, or for an invalid
+ * transition. Events do NOT recursively audit themselves.
+ */
+export const CLINICAL_NOTES_ACTION_CODES = [
+  'clinical_notes.created',
+  'clinical_notes.signed',
+  'clinical_notes.amended',
+  'clinical_notes.addendum_added',
+  'clinical_notes.withdrawn',
+  'clinical_notes.viewed',
+  'clinical_notes.history_viewed',
+] as const;
+
+export type ClinicalNotesActionCode =
+  (typeof CLINICAL_NOTES_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -566,6 +636,7 @@ export const AUDIT_ACTION_CODES = [
   ...APPOINTMENTS_ACTION_CODES,
   ...ENCOUNTERS_ACTION_CODES,
   ...PATIENTS_ACTION_CODES,
+  ...CLINICAL_NOTES_ACTION_CODES,
 ] as const;
 
 /**
@@ -661,6 +732,13 @@ export function inferCategoryFromAction(
   // category for tenant-scoped patient operations.
   if (action.startsWith('patients.')) {
     return 'tenant_context';
+  }
+  // Clinical Notes actions are mapped to the `facility_context` category,
+  // matching the encounters and appointments action codes: clinical notes
+  // are facility-scoped (the service requires an active facility and
+  // operates within the authenticated tenant/organisation/facility scope).
+  if (action.startsWith('clinical_notes.')) {
+    return 'facility_context';
   }
   return null;
 }

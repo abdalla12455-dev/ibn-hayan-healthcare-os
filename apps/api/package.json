@@ -64,7 +64,9 @@
     "prestart:debug": "prisma generate && prisma generate --schema prisma-audit/schema.prisma && pnpm build:generated",
     "prestart:prod": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
     "test:encounters": "vitest run --config vitest.encounters.config.ts",
-    "pretest:encounters": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
+    "pretest:encounters": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
+    "test:clinical-notes": "vitest run --config vitest.clinical-notes.config.ts",
+    "pretest:clinical-notes": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
   },
   "dependencies": {
     "@ibn-hayan/contracts": "workspace:*",
