@@ -41,9 +41,23 @@ const RETRY_DELAY_MS = 50;
 
 /**
  * Checks if an error is a Prisma serialization/write conflict that is
- * safe to retry under SERIALIZABLE isolation. Mirrors the encounter
- * repository's recognition of both P2034 and the driver-adapter
- * `TransactionWriteConflict` form.
+ * safe to retry under SERIALIZABLE isolation. Recognizes:
+ *
+ * 1. **P2034** — Prisma's canonical serialization-failure code
+ *    (PostgreSQL SQLSTATE 40001).
+ * 2. **DriverAdapterError** with `cause.kind === 'TransactionWriteConflict'`
+ *    — the `@prisma/adapter-pg` driver-adapter form of (1), which does
+ *    NOT carry a `P2034` code.
+ * 3. **P2002 / UniqueConstraintViolation** on the clinical-note
+ *    revisions table — a revision-number collision that arises when two
+ *    concurrent SERIALIZABLE transitions both read the same prior
+ *    revision and compute the same `revisionNumber`. Under SERIALIZABLE
+ *    this is a write-skew-equivalent race: the duplicate-key violation
+ *    (SQLSTATE 23505) is safe to retry because the retry re-reads the
+ *    now-committed prior revision and either observes the new status
+ *    (→ `invalid_source_state`) or computes the next revision number.
+ *    Without recognizing this form, the race escapes as an HTTP 500
+ *    instead of resolving to a clean 422.
  */
 function isSerializationConflict(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -59,6 +73,18 @@ function isSerializationConflict(error: unknown): boolean {
       'TransactionWriteConflict'
   ) {
     return true;
+  }
+  // Revision-number collision under SERIALIZABLE: a P2002 whose driver
+  // cause is a UniqueConstraintViolation on the revisions table.
+  if ('code' in error && (error as { code?: unknown }).code === 'P2002') {
+    const meta = (error as { meta?: unknown }).meta as
+      { driverAdapterError?: { cause?: { kind?: string } } } | undefined;
+    if (
+      meta?.driverAdapterError instanceof Error &&
+      meta.driverAdapterError.cause?.kind === 'UniqueConstraintViolation'
+    ) {
+      return true;
+    }
   }
   return false;
 }

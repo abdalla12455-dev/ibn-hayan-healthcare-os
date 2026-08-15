@@ -7188,31 +7188,33 @@ Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS
 7. **Audit requirements:** Every successful clinical-note state change emits exactly one audit outbox event via the established audit infrastructure. Action codes: `clinical_notes.created`, `clinical_notes.viewed`, `clinical_notes.signed`, `clinical_notes.amended`, `clinical_notes.addendum_added`, `clinical_notes.withdrawn`, `clinical_notes.history_viewed`. Audit metadata carries `{ endpoint, noteId }` ONLY — NO note body, diagnosis text, patient names, DOB, identifiers, or other PHI/PII. R13 Platform/System Administrator does NOT inherit clinical PHI access.
 8. **Required API surface:** `POST /api/v1/clinical-notes` (create draft), `GET /:id` (view), `GET /:id/history` (history), `POST /:id/sign`, `POST /:id/amend`, `POST /:id/addendum`, `POST /:id/withdraw`.
 
-### ⛔ Blocking Identity-Binding Security Gate — BC03 is NOT safe to merge
+### ✅ Identity-Binding Security Gate — RESOLVED (BC10 integration)
 
-> A final independent pre-merge review (2026-08-14) identified a blocking authorship/signing identity flaw. **PR #28 must NOT be merged until this is resolved.** The exact-head Main CI run (31854289380) on `f29b648` is GREEN, but green CI does NOT clear the security gate.
+> A final independent pre-merge review (2026-08-14) identified a blocking authorship/signing identity flaw. **This gate is now RESOLVED** (2026-08-15) after BC10 User→Provider Identity Binding (PR #29, merged to main `af88a405`) landed. BC03 was rebased onto main and the identity flaw fixed: authorship/signing identity is now derived from the authenticated principal's BC10 bound Provider, never from caller-supplied fields.
 
-**Problem.** The current BC03 contracts allow the caller to supply, in the request body:
+**Problem (now fixed).** The original BC03 contracts allowed the caller to supply, in the request body:
 - `authorId` during note **creation**;
 - `actorId` during **sign / amend / addendum / withdraw**;
 - `authorRole` during **creation**.
 
-The service scope-validates those provider IDs only via `ProviderRepository.isEligibleForFacility(tenantId, providerId, facilityId)` — i.e. **facility eligibility**, not ownership. The authenticated session carries a `UserId` only (`packages/domain/src/identity/session.ts`); the `Provider` model (`apps/api/prisma/schema.prisma`) has **no `userId` field**; there is **no schema relation, domain port, or auth path that binds a `UserId` to a `ProviderId`**. The DOCTORS.md (BC10 Workforce) canonical doc confirms provider identity is owned by BC10 but the foundation `Provider` carries only `id / tenantId / status / timestamps` — no user linkage, no role/specialty field.
+The service only scope-validated those provider IDs via `ProviderRepository.isEligibleForFacility(...)` — facility eligibility, not ownership. There was no schema/domain/auth path binding a `UserId` to a `ProviderId`.
 
-**Therefore (verified from the actual repository):**
-- **A.** Is there a canonical, trustworthy mapping from authenticated `UserId`/session to `ProviderId`? **NO.**
-- **B.** Can the server independently prove that a caller-supplied `authorId`/`actorId` belongs to the authenticated user? **NO** — only facility eligibility is checked.
-- **C.** Can `authorRole` be derived/verified server-side rather than trusted from the request? **NO** — the `Provider` model has no role/specialty field in this foundation; `authorRole` is validated only against the contract enum, not against the actor's actual role.
-- **D.** Does the current implementation permit identity spoofing between two eligible providers in the same facility? **YES.** An authenticated clinical user can supply another eligible provider's `providerId` as `authorId` (creation) and `actorId` (signing), and the `ClinicalNoteSigningAuthorityPort` baseline (`authorId === actorId`) is satisfied trivially because **both** identities are caller-supplied. The user can author AND sign a note as a different provider.
+**Resolution implemented (2026-08-15).** After BC10's `UserProviderBinding` (active binding per provider per tenant, with a facility-scoped resolver `findActiveProviderForUserAtFacility`) landed on main, BC03 now:
+- derives `authorId` and signing `actorId` from the authenticated principal's BC10-bound active Provider via a new `resolveTrustedAuthoringActor()` helper (injected `USER_PROVIDER_BINDING_REPOSITORY`);
+- derives `authorRole` server-side from the bound Provider's `clinicalAuthorRole` (trusted BC10 attribute), never from the request;
+- removes `authorId` / `actorId` / `authorRole` from all create/sign/amend/addendum/withdraw request contracts (strict schema rejects caller-supplied identity → 400);
+- fail-closes when the resolver returns null (no binding / inactive / student binding / null clinicalAuthorRole → 422);
+- adds spoofing-negative integration tests proving an authenticated user cannot act as another eligible provider.
 
-**Root cause.** No `User -> Provider` identity-binding exists in the schema, domain, or auth layer. Clinical authorship/signing identity is freely caller-selected rather than derived from — or trustworthily bound to — the authenticated principal.
+The signing-authority baseline (`authorId === actorId`) is now a genuine anti-spoofing check because both identities are server-resolved from the same bound Provider. The per-facility authority matrix remains deferred (no medical/legal policy invented).
 
-**Resolution required (NOT implemented here — no binding invented).** A canonical `User -> Provider` identity-binding prerequisite must be **ratified and implemented** (owned by BC10 Workforce / identity), after which BC03 must:
-- derive/verify `authorId` and signing `actorId` from the authenticated principal's bound provider identity (reject caller-supplied provider identity for authorship/signing);
-- derive/validate `authorRole` server-side from the bound provider's role/specialty;
-- add spoofing-negative tests proving an authenticated user cannot act as another eligible provider.
+### Merge-Conflict Migration Resolution (2026-08-15)
 
-No fake provider ownership, custom mapping, or temporary insecure fallback has been introduced. The flaw is documented (in `apps/api/src/modules/clinical-notes/clinical-notes.service.ts` and here) rather than papered over. The signing-family endpoints remain functionally present but are **not trustworthy** until the binding prerequisite lands.
+> When BC03 was rebased onto main (BC10), both BC03 (`20260814000000`) and BC10 (`20260815000000`) migrations created the identical `ClinicalNoteAuthorRole` enum. BC03 (earlier timestamp) owns the enum as the canonical clinical-note bounded context; BC10 only references it. The BC10 migration's `CREATE TYPE` was made idempotent via `DO $$ ... IF to_regtype(...) IS NULL ...` so application succeeds regardless of ordering. This is a forward-only, additive, non-destructive correction of an unapplied migration (no shared/production DB applied it). No `DROP`, no `TRUNCATE`, no history rewrite.
+
+### Concurrency Race Fix (2026-08-15)
+
+> The sign-vs-sign / amend-vs-amend concurrency tests revealed that two concurrent SERIALIZABLE transitions both read the same prior revision and computed the same `revisionNumber`, producing a P2002 / `UniqueConstraintViolation` (SQLSTATE 23505) on `(clinical_note_id, revision_number)` that escaped as HTTP 500 because `isSerializationConflict` only recognized P2034 / `TransactionWriteConflict`. The clinical-note repository's `isSerializationConflict` was extended to also recognize this revision-number collision as a safe-to-retry serialization-equivalent conflict; on retry the losing transaction re-reads the now-committed state and returns a clean `invalid_source_state` (422). Concurrency tests now pass (one transition succeeds, one rejected, exactly one audit event).
 
 ### Note Lifecycle / Versioning / Signing / Amendment Rules
 
@@ -7257,17 +7259,18 @@ No fake provider ownership, custom mapping, or temporary insecure fallback has b
 - `packages/domain/src/authorization/authorization.spec.ts` (updated permission-count assertions for the new matrix)
 - `packages/observability/src/audit/action-codes.ts` (7 clinical_notes audit action codes)
 
-### Validation Results
+### Validation Results (security-fix + BC10 integration, 2026-08-15)
 
 - `git diff --check`: PASS (no whitespace errors). Conflict-marker scan: clean.
 - Prisma format / validate / generate: PASS. Migration SQL inspected: forward-only, no destructive ops.
 - Typecheck (`tsc --noEmit -p tsconfig.json`, includes `test/**`): PASS (exit 0).
 - Lint (`eslint "{src,test}/**/*.ts"`): PASS (exit 0).
-- `@ibn-hayan/domain` tests: 144 passed (permission-count assertions updated for the new matrix; no test weakened — all clinical_notes grants/denials positively and negatively asserted).
-- `@ibn-hayan/contracts` tests: 208 passed.
+- `@ibn-hayan/domain` tests: 156 passed. `@ibn-hayan/contracts` tests: 208 passed.
 - API unit tests (`src/**/*.spec.ts`): 492 passed (Patient/Encounter/Workforce regression intact).
+- **PostgreSQL 17 clinical-notes integration tests: 52 passed** (local PG17, real DB via `setupDatabaseTests()`). Covers create/view/sign/amend/addendum/withdraw, tenant isolation (cross-tenant 404), authorization grants/denials, R13 denial, signing-authority (author-only), repeated/invalid signing, amendment-with-reason and without-reason rejection, original signed-content preservation, audit-exactly-once, no-PHI-in-audit-metadata, and sign-vs-sign / amend-vs-amend concurrency (one succeeds, one 422, one audit event).
+- **Spoofing-negative tests (new):** caller-supplied `authorId` → 400 (strict schema); unbound user → fail-closed 422; null `clinicalAuthorRole` → 422; student binding → 422; nurse signs physician's note → 403; different bound provider amends another author's note → 403.
+- **Regression (PostgreSQL 17):** Encounters (Stage 2A) 42 passed; Appointments (Stage 1C–1F) 206 passed; Database/BC10 Workforce (incl. user-provider-binding) 196 passed; Clinic-Admin 24 passed.
 - Production build (`pnpm -r run build`): PASS (api + web + shared packages).
-- **PostgreSQL 17 integration tests: PASS on exact-head CI** (no PG17 locally — CI authoritative). The clinical-notes integration test file `test/clinical-notes/clinical-notes.integration.spec.ts` runs against real PG17 via `setupDatabaseTests()` in CI.
 
 ### Regression Results
 

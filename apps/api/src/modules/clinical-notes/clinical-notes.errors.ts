@@ -147,6 +147,67 @@ export function clinicalNoteProviderNotFound(): UnprocessableEntityException {
 }
 
 /**
+ * Return a 422 when the authenticated principal has no active
+ * User→Provider identity binding for the authenticated tenant/facility
+ * (BC10). The resolver returns null (fail closed) when: no binding
+ * exists; the binding is revoked; the User is disabled; the Provider is
+ * suspended/separated; or the facility assignment is missing/revoked.
+ *
+ * The error is intentionally generic (no leak of which condition held) —
+ * a clinical authoring/signing action cannot proceed without a trusted,
+ * server-resolved Provider identity. The caller can never supply a
+ * Provider identity to bypass this.
+ */
+export function clinicalNoteProviderIdentityNotResolved(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'CLINICAL_NOTE_PROVIDER_IDENTITY_NOT_RESOLVED',
+      message:
+        'No active provider identity is bound to the authenticated user for the current facility.',
+    },
+  });
+}
+
+/**
+ * Return a 422 when the authenticated principal's bound Provider has no
+ * configured `clinicalAuthorRole` (null). Per the BC10 User→Provider
+ * Identity Binding specification, `clinicalAuthorRole` is a TRUSTED
+ * attribute set by workforce administration on the Provider record; it is
+ * NOT derived from the platform `roleCode`. A null role means the
+ * provider is not configured for clinical authoring and cannot
+ * author/sign/amend/add addendum to/withdraw a clinical note. This is a
+ * fail-closed configuration-required state.
+ */
+export function clinicalNoteAuthorRoleNotConfigured(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'CLINICAL_NOTE_AUTHOR_ROLE_NOT_CONFIGURED',
+      message:
+        'The bound provider has no clinical author role configured and cannot author clinical notes.',
+    },
+  });
+}
+
+/**
+ * Return a 422 when the authenticated principal's bound Provider has a
+ * `clinicalAuthorRole` of `student`. Per the BC10 specification,
+ * `student` is a supported catalogue value, but interactive Student
+ * authoring/signing is deferred to a later BC03 stage. A student-bound
+ * user cannot create/sign/amend/add addendum to/withdraw a clinical
+ * note in this foundation. This is a fail-closed deferral, not a
+ * roleCode-based denial.
+ */
+export function clinicalNoteStudentAuthoringDeferred(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'CLINICAL_NOTE_STUDENT_AUTHORING_DEFERRED',
+      message:
+        'Interactive clinical-note authoring by student providers is not yet supported.',
+    },
+  });
+}
+
+/**
  * Return a 403 when the signing actor lacks signing authority for this
  * note (BR-BC03-CLIN-031).
  *

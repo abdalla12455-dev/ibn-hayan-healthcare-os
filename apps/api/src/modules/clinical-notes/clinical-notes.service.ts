@@ -4,7 +4,7 @@ import {
   type ClinicalNoteSigningAuthorityPort,
   type EncounterRepository,
   type PatientRepository,
-  type ProviderRepository,
+  type UserProviderBindingRepository,
   type TenantRepository,
   type OrganisationRepository,
   type FacilityRepository,
@@ -23,13 +23,15 @@ import {
   type TenantId,
   type OrganisationId,
   type FacilityId,
+  type UserId,
+  type ClinicalNoteAuthorRole,
 } from '@ibn-hayan/domain';
 import {
   TENANT_REPOSITORY,
   ORGANISATION_REPOSITORY,
   FACILITY_REPOSITORY,
   PATIENT_REPOSITORY,
-  WORKFORCE_REPOSITORY,
+  USER_PROVIDER_BINDING_REPOSITORY,
   ENCOUNTER_REPOSITORY,
   CLINICAL_NOTE_REPOSITORY,
   CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
@@ -53,7 +55,9 @@ import {
   clinicalNoteEncounterNotFound,
   clinicalNotePatientNotFound,
   clinicalNotePatientEncounterMismatch,
-  clinicalNoteProviderNotFound,
+  clinicalNoteProviderIdentityNotResolved,
+  clinicalNoteAuthorRoleNotConfigured,
+  clinicalNoteStudentAuthoringDeferred,
   clinicalNoteSigningAuthorityDenied,
 } from './clinical-notes.errors.js';
 
@@ -116,34 +120,45 @@ type ClinicalNoteAuditAction =
  * BC01/BC02/BC10 Prisma tables directly. The owning modules' repository
  * ports are the only cross-BC touchpoints.
  *
- * The authenticated session carries a UserId, not a ProviderId; the
- * user->provider linkage is NOT yet implemented in the schema (the
- * `Provider` model has no `userId` field; the `Session` carries only a
- * `userId`). Therefore the clinical actor's providerId
- * (authorId/actorId) is supplied in the request body and scope-validated
- * via `isEligibleForFacility`, and `authorRole` is supplied in the
- * request body and validated only against the contract enum.
+ * TRUSTED IDENTITY (BC10 User→Provider Identity Binding): clinical
+ * authorship and signing identity is NEVER caller-supplied. The service
+ * resolves the trusted active Provider identity for the authenticated
+ * principal via `UserProviderBindingRepository.findActiveProviderForUserAtFacility(
+ * tenantId, userId, facilityId)` (the facility-scoped BC10 resolver). The
+ * request body does NOT carry `authorId`, `actorId`, or `authorRole`.
  *
- * SECURITY GATE — KNOWN BLOCKING LIMITATION (do not merge until
- * resolved): because there is no canonical, trustworthy UserId->ProviderId
- * binding, the server CANNOT prove that a caller-supplied authorId /
- * actorId belongs to the authenticated principal. The checks here verify
- * only that the supplied providerId is facility-eligible — NOT that it is
- * the authenticated user's own provider identity. An authenticated
- * clinical user can therefore supply another eligible provider's providerId
- * and create / sign / amend / add addendum to / withdraw a note AS that
- * provider. The `ClinicalNoteSigningAuthorityPort` baseline
- * (`actorId === authorId`) does NOT prevent this, because both identities
- * are caller-supplied. `authorRole` is likewise caller-supplied and is not
- * derivable server-side (the `Provider` model has no role/specialty field
- * in this foundation). This spoofing surface is a blocking pre-merge
- * security/architecture flaw. BC03 must NOT merge until a canonical
- * User->Provider identity-binding prerequisite is ratified and
- * implemented (owned by BC10/identity), at which point authorship and
- * signing identity must be derived from — or trustworthily bound to —
- * the authenticated principal, not caller-selected. No fake provider
- * ownership, custom mapping, or temporary insecure fallback is introduced
- * here; the limitation is documented rather than papered over.
+ * The resolver returns null (fail closed) when ANY of these hold: no
+ * binding exists; the binding is revoked; the User is disabled; the
+ * Provider is suspended/separated; the facility assignment is missing or
+ * revoked. A null result raises `clinicalNoteProviderIdentityNotResolved`
+ * (generic, no leak of which condition held).
+ *
+ * The resolved `clinicalAuthorRole` (a TRUSTED attribute on the Provider
+ * record, set by workforce administration — NEVER derived from the
+ * platform `roleCode`) is used as the note's `authorRole`. Authoring
+ * actions (create / sign / amend / addendum / withdraw) additionally
+ * require a non-null, non-`student` `clinicalAuthorRole`: a null role
+ * raises `clinicalNoteAuthorRoleNotConfigured`; a `student` role raises
+ * `clinicalNoteStudentAuthoringDeferred` (interactive Student authoring
+ * is deferred). R05 Allied Health may therefore author ONLY when its
+ * bound Provider carries a valid non-null `clinicalAuthorRole` — the
+ * platform R05 `roleCode` does NOT by itself determine clinical
+ * authorship.
+ *
+ * Platform permissions remain a SEPARATE authorization gate (the
+ * `AuthorizationGuard` + `@RequirePermission`): R01/R02/R05 write
+ * permissions are still subject to the existing BC03 matrix, while the
+ * trusted Provider identity/clinicalAuthorRole independently determines
+ * authorship identity. R09 Clinic Administrator remains read-only; R13
+ * System Administrator is denied clinical PHI access (no
+ * `clinical_notes` permission).
+ *
+ * Signing authority (BR-BC03-CLIN-031): because both the note's
+ * `authorId` (set at creation) and the signing `actorId` are now
+ * server-resolved from the authenticated principal's bound Provider, an
+ * authenticated user cannot sign/amend a note authored by a different
+ * provider — the `actorId === authorId` baseline is now a genuine
+ * anti-spoofing check, not a caller-supplied tautology.
  */
 @Injectable()
 export class ClinicalNotesService {
@@ -156,8 +171,8 @@ export class ClinicalNotesService {
     private readonly facilities: FacilityRepository,
     @Inject(PATIENT_REPOSITORY)
     private readonly patients: PatientRepository,
-    @Inject(WORKFORCE_REPOSITORY)
-    private readonly providers: ProviderRepository,
+    @Inject(USER_PROVIDER_BINDING_REPOSITORY)
+    private readonly userProviderBindings: UserProviderBindingRepository,
     @Inject(ENCOUNTER_REPOSITORY)
     private readonly encounters: EncounterRepository,
     @Inject(CLINICAL_NOTE_REPOSITORY)
@@ -193,6 +208,14 @@ export class ClinicalNotesService {
 
     this.validateScopeEntities(await this.fetchScopeEntities(scope));
 
+    // Resolve the TRUSTED clinical author identity from the authenticated
+    // principal (BC10). The caller cannot supply authorId/authorRole.
+    const author = await this.resolveTrustedAuthoringActor(
+      tenantId,
+      user.id,
+      facilityId,
+    );
+
     // Validate the encounter reference (BC02). Scoped lookup returns null
     // safely for cross-scope access (no existence leak).
     const encounter = await this.encounters.findById(
@@ -220,24 +243,12 @@ export class ClinicalNotesService {
       throw clinicalNotePatientEncounterMismatch();
     }
 
-    // Validate the authoring provider is eligible for the authenticated
-    // facility (BC10). isEligibleForFacility returns false safely for
-    // cross-scope access (no existence leak).
-    const authorEligible = await this.providers.isEligibleForFacility(
-      tenantId,
-      request.authorId as ProviderId,
-      facilityId,
-    );
-    if (!authorEligible) {
-      throw clinicalNoteProviderNotFound();
-    }
-
     const createInput: ClinicalNoteCreateInput = {
       encounterId: request.encounterId as EncounterId,
       patientId: request.patientId as PatientId,
       noteType: request.noteType,
-      authorRole: request.authorRole,
-      authorId: request.authorId as ProviderId,
+      authorRole: author.clinicalAuthorRole,
+      authorId: author.providerId,
       body: request.body,
     };
 
@@ -412,7 +423,7 @@ export class ClinicalNotesService {
    */
   async signClinicalNote(
     noteId: string,
-    request: SignClinicalNoteRequest,
+    _request: SignClinicalNoteRequest,
     cookieValue: string | undefined,
     auditContext?: AuditRequestContext,
   ): Promise<ClinicalNoteResponse | null> {
@@ -421,28 +432,20 @@ export class ClinicalNotesService {
       'sign',
       'clinical_notes.signed',
       'clinical_notes_sign',
-      request.actorId,
       cookieValue,
       auditContext,
-      async (scope, note, actorId) => {
-        // Validate the signing actor is eligible for the authenticated
-        // facility (BC10). isEligibleForFacility returns false safely for
-        // cross-scope access (no existence leak).
-        const actorEligible = await this.providers.isEligibleForFacility(
-          scope.tenantId,
-          actorId,
-          scope.facilityId,
-        );
-        if (!actorEligible) {
-          throw clinicalNoteProviderNotFound();
-        }
+      (_scope, note, actorId) => {
         // Enforce the signing-authority rule (BR-BC03-CLIN-031). The
         // baseline rule: the signing actor must be the note's author.
-        // The per-facility authority matrix is deferred.
+        // Both identities are now server-resolved from the authenticated
+        // principal's bound Provider, so this is a genuine anti-spoofing
+        // check — an authenticated user cannot sign a note authored by a
+        // different provider. The per-facility authority matrix is
+        // deferred.
         const currentRevision = note.currentRevision;
         const allowed = this.signingAuthority.canSign(
-          scope.tenantId,
-          scope.facilityId,
+          _scope.tenantId,
+          _scope.facilityId,
           note.noteType,
           currentRevision.authorId,
           actorId,
@@ -477,18 +480,12 @@ export class ClinicalNotesService {
       'amend',
       'clinical_notes.amended',
       'clinical_notes_amend',
-      request.actorId,
       cookieValue,
       auditContext,
-      async (scope, _note, actorId) => {
-        const actorEligible = await this.providers.isEligibleForFacility(
-          scope.tenantId,
-          actorId,
-          scope.facilityId,
-        );
-        if (!actorEligible) {
-          throw clinicalNoteProviderNotFound();
-        }
+      () => {
+        // The trusted actor identity + facility eligibility are already
+        // resolved by `transition` via the BC10 resolver. No additional
+        // per-command validation is required for amend.
       },
       (_scope, _note, actorId) => ({
         actorId,
@@ -519,18 +516,11 @@ export class ClinicalNotesService {
       'addendum',
       'clinical_notes.addendum_added',
       'clinical_notes_addendum',
-      request.actorId,
       cookieValue,
       auditContext,
-      async (scope, _note, actorId) => {
-        const actorEligible = await this.providers.isEligibleForFacility(
-          scope.tenantId,
-          actorId,
-          scope.facilityId,
-        );
-        if (!actorEligible) {
-          throw clinicalNoteProviderNotFound();
-        }
+      () => {
+        // The trusted actor identity + facility eligibility are already
+        // resolved by `transition` via the BC10 resolver.
       },
       (_scope, _note, actorId) => ({
         actorId,
@@ -561,18 +551,11 @@ export class ClinicalNotesService {
       'withdraw',
       'clinical_notes.withdrawn',
       'clinical_notes_withdraw',
-      request.actorId,
       cookieValue,
       auditContext,
-      async (scope, _note, actorId) => {
-        const actorEligible = await this.providers.isEligibleForFacility(
-          scope.tenantId,
-          actorId,
-          scope.facilityId,
-        );
-        if (!actorEligible) {
-          throw clinicalNoteProviderNotFound();
-        }
+      () => {
+        // The trusted actor identity + facility eligibility are already
+        // resolved by `transition` via the BC10 resolver.
       },
       (_scope, _note, actorId) => ({
         actorId,
@@ -588,12 +571,16 @@ export class ClinicalNotesService {
 
   /**
    * Shared lifecycle-transition workflow. Resolves the session, derives
-   * scope, validates scope entities, validates the actor (via
-   * `preTransition`), performs the scoped atomic transition, and emits
-   * the audit event exactly once on a successful transition.
+   * scope, validates scope entities, resolves the TRUSTED clinical actor
+   * identity from the authenticated principal (BC10), reads the note in
+   * scope, performs command-specific validation (via `preTransition`),
+   * performs the scoped atomic transition, and emits the audit event
+   * exactly once on a successful transition.
    *
-   * The `preTransition` callback performs command-specific validation
-   * (signing-authority for sign; actor eligibility for all). It runs
+   * The actor identity is NEVER caller-supplied: it is resolved via
+   * `resolveTrustedAuthoringActor` from the session UserId and the
+   * authenticated facility. The `preTransition` callback performs
+   * command-specific validation (signing-authority for sign). It runs
    * BEFORE the repository transition so validation failures emit no
    * audit event.
    *
@@ -606,14 +593,13 @@ export class ClinicalNotesService {
     actionLabel: 'sign' | 'amend' | 'addendum' | 'withdraw',
     auditAction: ClinicalNoteAuditAction,
     endpoint: string,
-    actorIdRaw: string,
     cookieValue: string | undefined,
     auditContext: AuditRequestContext | undefined,
     preTransition: (
       scope: ResolvedScope,
       note: ClinicalNote,
       actorId: ProviderId,
-    ) => Promise<void>,
+    ) => Promise<void> | void,
     buildInput: (
       scope: ResolvedScope,
       note: ClinicalNote,
@@ -636,6 +622,17 @@ export class ClinicalNotesService {
 
     this.validateScopeEntities(await this.fetchScopeEntities(scope));
 
+    // Resolve the TRUSTED clinical actor identity from the authenticated
+    // principal (BC10). The caller cannot supply actorId. This also
+    // enforces the authoring-authority gate (non-null, non-student
+    // clinicalAuthorRole) for every transition.
+    const actor = await this.resolveTrustedAuthoringActor(
+      tenantId,
+      user.id,
+      facilityId,
+    );
+    const actorId = actor.providerId;
+
     // Read the note in scope BEFORE the transition so preTransition can
     // validate (e.g. signing-authority needs the note's author). A note
     // outside scope returns null safely (no existence leak).
@@ -649,7 +646,6 @@ export class ClinicalNotesService {
       throw clinicalNoteNotFound();
     }
 
-    const actorId = actorIdRaw as ProviderId;
     await preTransition(scope, note, actorId);
 
     const input = await buildInput(scope, note, actorId);
@@ -730,6 +726,56 @@ export class ClinicalNotesService {
     }
 
     return this.toResponse(result.note);
+  }
+
+  /**
+   * Resolve the TRUSTED clinical authoring actor identity for an
+   * authenticated principal, via the BC10 User→Provider identity-binding
+   * resolver (`findActiveProviderForUserAtFacility`).
+   *
+   * This is the spoofing-prevention core: the clinical authorId /
+   * actorId / authorRole are derived from the authenticated principal's
+   * bound, active Provider — NEVER from the request body.
+   *
+   * Fail-closed semantics (the resolver returns null when ANY hold: no
+   * binding, revoked binding, disabled User, suspended/separated
+   * Provider, or missing/revoked facility assignment) →
+   * `clinicalNoteProviderIdentityNotResolved` (generic, no leak).
+   *
+   * Authoring-authority gate: a resolved Provider with a null
+   * `clinicalAuthorRole` is not configured for clinical authoring →
+   * `clinicalNoteAuthorRoleNotConfigured`; a `student` role has
+   * interactive authoring deferred → `clinicalNoteStudentAuthoringDeferred`.
+   * Both are fail-closed; neither depends on the platform `roleCode`.
+   *
+   * @returns the trusted `{ providerId, clinicalAuthorRole }` (role
+   *   guaranteed non-null and non-`student`) for use as the note's
+   *   `authorId` / `actorId` / `authorRole`.
+   */
+  private async resolveTrustedAuthoringActor(
+    tenantId: TenantId,
+    userId: UserId,
+    facilityId: FacilityId,
+  ): Promise<TrustedAuthoringActor> {
+    const identity =
+      await this.userProviderBindings.findActiveProviderForUserAtFacility(
+        tenantId,
+        userId,
+        facilityId,
+      );
+    if (identity === null) {
+      throw clinicalNoteProviderIdentityNotResolved();
+    }
+    if (identity.clinicalAuthorRole === null) {
+      throw clinicalNoteAuthorRoleNotConfigured();
+    }
+    if (identity.clinicalAuthorRole === 'student') {
+      throw clinicalNoteStudentAuthoringDeferred();
+    }
+    return {
+      providerId: identity.providerId,
+      clinicalAuthorRole: identity.clinicalAuthorRole,
+    };
   }
 
   private resolveScope(
@@ -828,4 +874,15 @@ interface ResolvedScope {
   readonly tenantId: TenantId;
   readonly organisationId: OrganisationId;
   readonly facilityId: FacilityId;
+}
+
+/**
+ * The trusted clinical authoring actor, server-resolved from the
+ * authenticated principal's bound Provider via the BC10 resolver. The
+ * `clinicalAuthorRole` is guaranteed non-null and non-`student` by
+ * {@link ClinicalNotesService.resolveTrustedAuthoringActor}.
+ */
+interface TrustedAuthoringActor {
+  readonly providerId: ProviderId;
+  readonly clinicalAuthorRole: ClinicalNoteAuthorRole;
 }

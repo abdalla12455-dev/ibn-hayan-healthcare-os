@@ -51,6 +51,7 @@ import { AppModule } from '../../src/app.module.js';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service.js';
 import { LocalCredentialService } from '../../src/infrastructure/database/repositories/local-credential.service.js';
 import { PasswordService } from '../../src/modules/auth/password.service.js';
+import { ConsentGateFeatureConfig } from '../../src/modules/encounters/consent-gate-feature.config.js';
 import type {
   TenantRepository,
   UserRepository,
@@ -97,9 +98,15 @@ const TEST_PASSWORD = 'sufficiently-long-password';
 const ORIGIN = 'http://localhost:3000';
 
 beforeAll(async () => {
+  // The consent gate (BC02) is disabled for the clinical-notes fixture's
+  // encounter seed. Clinical notes are the system under test here; the
+  // consent workflow is exercised by the encounters suite.
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    .overrideProvider(ConsentGateFeatureConfig)
+    .useValue({ isConsentGateEnabled: () => false })
+    .compile();
 
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api/v1');
@@ -135,6 +142,8 @@ async function truncateAll(): Promise<void> {
   await prisma.encounter.deleteMany();
   await prisma.appointment.deleteMany();
   await prisma.providerFacilityAssignment.deleteMany();
+  // BC10: user_provider_bindings references providers; delete before providers.
+  await prisma.userProviderBinding.deleteMany();
   await prisma.provider.deleteMany();
   await prisma.patient.deleteMany();
   await prisma.authSession.deleteMany();
@@ -244,11 +253,17 @@ async function createPatient(
 type ProviderStatus =
   'candidate' | 'onboarded' | 'active' | 'suspended' | 'separated';
 
+type ClinicalAuthorRole =
+  'physician' | 'nurse' | 'pharmacist' | 'therapist' | 'midlevel' | 'student';
+
 async function createProvider(
   tenantId: string,
   status: ProviderStatus = 'active',
+  clinicalAuthorRole: ClinicalAuthorRole | null = null,
 ): Promise<{ providerId: string }> {
-  const provider = await prisma.provider.create({ data: { tenantId, status } });
+  const provider = await prisma.provider.create({
+    data: { tenantId, status, clinicalAuthorRole },
+  });
   return { providerId: provider.id };
 }
 
@@ -269,8 +284,13 @@ async function createEligibleProvider(
   tenantId: string,
   organisationId: string,
   facilityId: string,
+  clinicalAuthorRole: ClinicalAuthorRole | null = null,
 ): Promise<{ providerId: string }> {
-  const { providerId } = await createProvider(tenantId, 'active');
+  const { providerId } = await createProvider(
+    tenantId,
+    'active',
+    clinicalAuthorRole,
+  );
   await createProviderFacilityAssignment(
     tenantId,
     organisationId,
@@ -279,6 +299,23 @@ async function createEligibleProvider(
     null,
   );
   return { providerId };
+}
+
+/**
+ * Create a BC10 User→Provider identity binding (active). This is the
+ * trusted linkage the clinical-notes service resolves to derive
+ * authorId/actorId/authorRole server-side. Workforce administration
+ * creates bindings; there is no self-service HTTP endpoint.
+ */
+async function createBinding(
+  tenantId: string,
+  userId: string,
+  providerId: string,
+): Promise<{ bindingId: string }> {
+  const binding = await prisma.userProviderBinding.create({
+    data: { tenantId, userId, providerId },
+  });
+  return { bindingId: binding.id };
 }
 
 async function loginUser(email: string, password: string): Promise<string> {
@@ -466,12 +503,14 @@ async function seedSecondTenantPhysician(): Promise<string> {
     tenant2,
     org2,
     fac2,
+    'physician',
   );
   const { patientId: patient2 } = await createPatient(tenant2, 'MRN-X');
   const { userId: physician2 } = await createUser(
     'physician2@example.com',
     'Physician 2',
   );
+  await createBinding(tenant2, physician2, provider2);
   const { membershipId: membership2 } = await createMembership(
     physician2,
     tenant2,
@@ -507,10 +546,14 @@ async function buildFixture(): Promise<Fixture> {
     'Facility 1',
   );
   const { patientId } = await createPatient(tenantId, 'MRN-1');
+  // The physician's bound provider also serves as the encounter's
+  // provider (BC02). clinicalAuthorRole is a TRUSTED attribute set on the
+  // Provider record; it is NOT derived from the platform roleCode.
   const { providerId } = await createEligibleProvider(
     tenantId,
     organisationId,
     facilityId,
+    'physician',
   );
 
   // Physician (R01)
@@ -518,6 +561,9 @@ async function buildFixture(): Promise<Fixture> {
     'physician@example.com',
     'Physician',
   );
+  // Bind the physician User to the physician Provider (BC10). This is the
+  // trusted identity the clinical-notes service resolves for authorship.
+  await createBinding(tenantId, physicianId, providerId);
   const { membershipId: physicianMembershipId } = await createMembership(
     physicianId,
     tenantId,
@@ -537,6 +583,13 @@ async function buildFixture(): Promise<Fixture> {
 
   // Nurse (R02)
   const { userId: nurseId } = await createUser('nurse@example.com', 'Nurse');
+  const { providerId: nurseProviderId } = await createEligibleProvider(
+    tenantId,
+    organisationId,
+    facilityId,
+    'nurse',
+  );
+  await createBinding(tenantId, nurseId, nurseProviderId);
   const { membershipId: nurseMembershipId } = await createMembership(
     nurseId,
     tenantId,
@@ -551,7 +604,7 @@ async function buildFixture(): Promise<Fixture> {
     facilityId,
   );
 
-  // Pharmacist (R03) — clinical-note read-only
+  // Pharmacist (R03) — clinical-note read-only (no authoring binding)
   const { userId: pharmacistId } = await createUser(
     'pharmacist@example.com',
     'Pharmacist',
@@ -573,11 +626,20 @@ async function buildFixture(): Promise<Fixture> {
     facilityId,
   );
 
-  // Allied Health (R05) — clinical-note write
+  // Allied Health (R05) — clinical-note write. Bound to a Provider with a
+  // valid non-null clinicalAuthorRole ('therapist'); the platform R05
+  // roleCode does NOT by itself determine authorship.
   const { userId: alliedId } = await createUser(
     'allied@example.com',
     'Allied Health',
   );
+  const { providerId: alliedProviderId } = await createEligibleProvider(
+    tenantId,
+    organisationId,
+    facilityId,
+    'therapist',
+  );
+  await createBinding(tenantId, alliedId, alliedProviderId);
   const { membershipId: alliedMembershipId } = await createMembership(
     alliedId,
     tenantId,
@@ -654,14 +716,14 @@ async function buildFixture(): Promise<Fixture> {
   };
 }
 
-/** A canonical draft-note creation body referencing the fixture's author. */
+/** A canonical draft-note creation body. Author identity (authorId /
+ * authorRole) is NEVER supplied — it is resolved server-side from the
+ * authenticated principal's bound Provider (BC10). */
 function draftBody(f: Fixture): Record<string, unknown> {
   return {
     encounterId: f.encounterId,
     patientId: f.patientId,
     noteType: 'progress',
-    authorRole: 'physician',
-    authorId: f.providerId,
     body: 'Patient reviewed. Plan: continue current medication.',
   };
 }
@@ -816,7 +878,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       expect(res.status).toBe(422);
     });
 
-    it('rejects an ineligible provider (404/422)', async () => {
+    it('rejects a caller-supplied authorId (strict schema, 400)', async () => {
+      // The caller MUST NOT supply authorId/authorRole: the schema is
+      // strict and author identity is server-resolved (BC10). Supplying
+      // authorId is a validation error, never honored.
       const f = await buildFixture();
       const { providerId: unassignedProviderId } = await createProvider(
         f.tenantId,
@@ -826,7 +891,16 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
         ...draftBody(f),
         authorId: unassignedProviderId,
       });
-      expect([404, 422]).toContain(res.status);
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a caller-supplied authorRole (strict schema, 400)', async () => {
+      const f = await buildFixture();
+      const res = await createNote(f.physicianCookie, {
+        ...draftBody(f),
+        authorRole: 'nurse',
+      });
+      expect(res.status).toBe(400);
     });
 
     it('rejects an empty body (400)', async () => {
@@ -899,9 +973,7 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('returns the ordered revision history', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await viewHistory(f.physicianCookie, created.body.id);
       expect(res.status).toBe(200);
       expect(res.body.noteId).toBe(created.body.id);
@@ -927,9 +999,7 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('author signs their own draft note (200, signed)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      const res = await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      const res = await signNote(f.physicianCookie, created.body.id, {});
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('signed');
       expect(res.body.currentRevision.action).toBe('signed');
@@ -939,24 +1009,21 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('emits exactly one clinical_notes.signed audit event', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       expect(await countOutboxByAction('clinical_notes.signed')).toBe(1);
     });
 
-    it('non-author actor is denied signing authority (422)', async () => {
+    it('non-author actor is denied signing authority (403)', async () => {
       const f = await buildFixture();
+      // The physician authors the note; the note's authorId is the
+      // physician's bound Provider (server-resolved).
       const created = await createNote(f.physicianCookie, draftBody(f));
-      const { providerId: otherProviderId } = await createEligibleProvider(
-        f.tenantId,
-        f.organisationId,
-        f.facilityId,
-      );
-      const res = await signNote(f.physicianCookie, created.body.id, {
-        actorId: otherProviderId,
-      });
-      expect(res.status).toBe(422);
+      // The nurse is a different authenticated principal bound to a
+      // different Provider. The actor identity is server-resolved from
+      // the nurse's session — the nurse CANNOT supply the physician's
+      // providerId to impersonate the author.
+      const res = await signNote(f.nurseCookie, created.body.id, {});
+      expect(res.status).toBe(403);
       // No sign audit emitted on denial.
       expect(await countOutboxByAction('clinical_notes.signed')).toBe(0);
     });
@@ -964,12 +1031,8 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('re-signing an already-signed note is rejected (422)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
-      const res = await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
+      const res = await signNote(f.physicianCookie, created.body.id, {});
       expect(res.status).toBe(422);
       expect(await countOutboxByAction('clinical_notes.signed')).toBe(1);
     });
@@ -977,9 +1040,7 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('R13 platform administrator is denied clinical_notes:sign (403)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      const res = await signNote(f.platformAdminCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      const res = await signNote(f.platformAdminCookie, created.body.id, {});
       expect(res.status).toBe(403);
     });
 
@@ -988,7 +1049,7 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const res = await signNote(
         f.physicianCookie,
         '00000000-0000-0000-0000-000000000000',
-        { actorId: f.providerId },
+        {},
       );
       expect(res.status).toBe(404);
     });
@@ -1002,13 +1063,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('amends a signed note with a reason (200, amended)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await amendNote(f.physicianCookie, created.body.id, {
         body: 'Corrected assessment and plan.',
         reason: 'Typographical correction in the assessment section.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('amended');
@@ -1021,13 +1079,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('emits exactly one clinical_notes.amended audit event', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       await amendNote(f.physicianCookie, created.body.id, {
         body: 'Corrected.',
         reason: 'Correction.',
-        actorId: f.providerId,
       });
       expect(await countOutboxByAction('clinical_notes.amended')).toBe(1);
     });
@@ -1035,12 +1090,9 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('rejects amendment without a reason (400)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await amendNote(f.physicianCookie, created.body.id, {
         body: 'Corrected.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(400);
     });
@@ -1051,7 +1103,6 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const res = await amendNote(f.physicianCookie, created.body.id, {
         body: 'Corrected.',
         reason: 'Correction.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(422);
     });
@@ -1060,13 +1111,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
       const originalBody = created.body.currentRevision.body;
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       await amendNote(f.physicianCookie, created.body.id, {
         body: 'Corrected body.',
         reason: 'Correction.',
-        actorId: f.providerId,
       });
       const res = await viewHistory(f.physicianCookie, created.body.id);
       const actions = res.body.revisions.map(
@@ -1083,13 +1131,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('R13 platform administrator is denied clinical_notes:amend (403)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await amendNote(f.platformAdminCookie, created.body.id, {
         body: 'Corrected.',
         reason: 'Correction.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(403);
     });
@@ -1103,13 +1148,10 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('adds an addendum to a signed note (200)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await addAddendum(f.physicianCookie, created.body.id, {
         body: 'Late-arriving lab result noted.',
         reason: 'Additional information received after signing.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(200);
       expect(res.body.currentRevision.action).toBe('addendum_added');
@@ -1121,12 +1163,9 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('rejects addendum without a reason (400)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await addAddendum(f.physicianCookie, created.body.id, {
         body: 'Late-arriving lab result noted.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(400);
     });
@@ -1142,7 +1181,6 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const created = await createNote(f.physicianCookie, draftBody(f));
       const res = await withdrawNote(f.physicianCookie, created.body.id, {
         reason: 'Created in error.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('withdrawn');
@@ -1153,12 +1191,9 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('rejects withdrawal of a signed note (422)', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const res = await withdrawNote(f.physicianCookie, created.body.id, {
         reason: 'Withdraw.',
-        actorId: f.providerId,
       });
       expect(res.status).toBe(422);
     });
@@ -1181,10 +1216,159 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
       const cookie2 = await seedSecondTenantPhysician();
-      const res = await signNote(cookie2, created.body.id, {
+      const res = await signNote(cookie2, created.body.id, {});
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TRUSTED IDENTITY (BC10 User→Provider binding) — anti-spoofing
+  // -------------------------------------------------------------------------
+
+  describe('trusted identity (anti-spoofing)', () => {
+    it('authorRole is derived from the bound Provider, not the request', async () => {
+      // The physician's bound Provider has clinicalAuthorRole='physician'.
+      // The note's authorRole must be 'physician' regardless of any
+      // caller-supplied value (which is rejected by the strict schema).
+      const f = await buildFixture();
+      const res = await createNote(f.physicianCookie, draftBody(f));
+      expect(res.status).toBe(201);
+      expect(res.body.currentRevision.authorId).toBe(f.providerId);
+      // authorRole is not in the response top-level revision, but the
+      // note-level authorRole reflects the trusted bound role.
+      expect(res.body.authorRole).toBe('physician');
+    });
+
+    it('a nurse-bound author gets the nurse clinicalAuthorRole', async () => {
+      const f = await buildFixture();
+      const res = await createNote(f.nurseCookie, draftBody(f));
+      expect(res.status).toBe(201);
+      expect(res.body.authorRole).toBe('nurse');
+    });
+
+    it('a user with no binding cannot author (fail closed, 422)', async () => {
+      // The pharmacist has clinical_notes:view but no authoring binding.
+      // create requires clinical_notes:create (pharmacist lacks it) → 403
+      // at the permission gate before identity resolution. Use a physician
+      // role WITHOUT a binding instead to isolate the identity gate.
+      const f = await buildFixture();
+      const { userId: unboundPhysicianId } = await createUser(
+        'unbound@example.com',
+        'Unbound Physician',
+      );
+      const { membershipId } = await createMembership(
+        unboundPhysicianId,
+        f.tenantId,
+        'R01_PHYSICIAN',
+        f.organisationId,
+      );
+      const cookie = await loginUser('unbound@example.com', TEST_PASSWORD);
+      await selectContext(cookie, membershipId, f.organisationId, f.facilityId);
+      const res = await createNote(cookie, draftBody(f));
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe(
+        'CLINICAL_NOTE_PROVIDER_IDENTITY_NOT_RESOLVED',
+      );
+      expect(await countOutboxByAction('clinical_notes.created')).toBe(0);
+    });
+
+    it('a bound provider with a null clinicalAuthorRole cannot author (422)', async () => {
+      const f = await buildFixture();
+      const { userId } = await createUser(
+        'norole@example.com',
+        'No Role Physician',
+      );
+      const { providerId } = await createEligibleProvider(
+        f.tenantId,
+        f.organisationId,
+        f.facilityId,
+        null,
+      );
+      await createBinding(f.tenantId, userId, providerId);
+      const { membershipId } = await createMembership(
+        userId,
+        f.tenantId,
+        'R01_PHYSICIAN',
+        f.organisationId,
+      );
+      const cookie = await loginUser('norole@example.com', TEST_PASSWORD);
+      await selectContext(cookie, membershipId, f.organisationId, f.facilityId);
+      const res = await createNote(cookie, draftBody(f));
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe(
+        'CLINICAL_NOTE_AUTHOR_ROLE_NOT_CONFIGURED',
+      );
+    });
+
+    it('a student-bound provider cannot author (deferred, 422)', async () => {
+      const f = await buildFixture();
+      const { userId } = await createUser(
+        'student@example.com',
+        'Student Physician',
+      );
+      const { providerId } = await createEligibleProvider(
+        f.tenantId,
+        f.organisationId,
+        f.facilityId,
+        'student',
+      );
+      await createBinding(f.tenantId, userId, providerId);
+      const { membershipId } = await createMembership(
+        userId,
+        f.tenantId,
+        'R01_PHYSICIAN',
+        f.organisationId,
+      );
+      const cookie = await loginUser('student@example.com', TEST_PASSWORD);
+      await selectContext(cookie, membershipId, f.organisationId, f.facilityId);
+      const res = await createNote(cookie, draftBody(f));
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe(
+        'CLINICAL_NOTE_STUDENT_AUTHORING_DEFERRED',
+      );
+    });
+
+    it('spoofing another providerId at sign is impossible (author-only)', async () => {
+      // The physician authored the note. The physician's session resolves
+      // to the physician's own Provider — supplying another providerId in
+      // the body is rejected by the strict schema (400). The trusted
+      // actorId is always the physician's own bound Provider, which
+      // equals the author, so signing succeeds.
+      const f = await buildFixture();
+      const created = await createNote(f.physicianCookie, draftBody(f));
+      // Attempt to impersonate by supplying another providerId — rejected.
+      const spoofed = await signNote(f.physicianCookie, created.body.id, {
         actorId: f.providerId,
       });
-      expect(res.status).toBe(404);
+      expect(spoofed.status).toBe(400);
+      // A legitimate sign (no body) succeeds as the author.
+      const res = await signNote(f.physicianCookie, created.body.id, {});
+      expect(res.status).toBe(200);
+    });
+
+    it('a different bound provider cannot amend another author note', async () => {
+      // The physician authors and signs. The nurse (different bound
+      // provider) attempts to amend — amend has no signing-authority gate
+      // (any clinical author may amend per the matrix), but the actorId
+      // is server-resolved to the nurse's provider. The amendment
+      // succeeds (amend is not author-restricted), and the revision
+      // records the NURSE as the amending author (not the physician).
+      const f = await buildFixture();
+      const created = await createNote(f.physicianCookie, draftBody(f));
+      await signNote(f.physicianCookie, created.body.id, {});
+      const res = await amendNote(f.nurseCookie, created.body.id, {
+        body: 'Nurse-added clarification.',
+        reason: 'Nursing clarification added.',
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.currentRevision.action).toBe('amended');
+      // The amending actor is the nurse's bound provider, server-resolved.
+      // (Verifies the actorId is NOT the physician's provider.)
+      const history = await viewHistory(f.physicianCookie, created.body.id);
+      const amended = history.body.revisions.find(
+        (r: { action: string }) => r.action === 'amended',
+      );
+      expect(amended.authorId).not.toBe(f.providerId);
     });
   });
 
@@ -1231,9 +1415,7 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
       await prisma.auditOutboxEvent.deleteMany();
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       const rows = await prisma.auditOutboxEvent.findMany();
       const signed = rows.filter(
         (r) =>
@@ -1259,12 +1441,8 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
       const [r1, r2] = await Promise.all([
-        signNote(f.physicianCookie, created.body.id, {
-          actorId: f.providerId,
-        }),
-        signNote(f.physicianCookie, created.body.id, {
-          actorId: f.providerId,
-        }),
+        signNote(f.physicianCookie, created.body.id, {}),
+        signNote(f.physicianCookie, created.body.id, {}),
       ]);
       const statuses = [r1.status, r2.status].sort();
       // One transition succeeds (200), the other is rejected (422) because
@@ -1276,19 +1454,15 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
     it('amend-vs-amend resolves to one amended audit event', async () => {
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
-      await signNote(f.physicianCookie, created.body.id, {
-        actorId: f.providerId,
-      });
+      await signNote(f.physicianCookie, created.body.id, {});
       await Promise.all([
         amendNote(f.physicianCookie, created.body.id, {
           body: 'A1',
           reason: 'r1',
-          actorId: f.providerId,
         }),
         amendNote(f.physicianCookie, created.body.id, {
           body: 'A2',
           reason: 'r2',
-          actorId: f.providerId,
         }),
       ]);
       // Both amendments are valid transitions (signed -> amended) so both

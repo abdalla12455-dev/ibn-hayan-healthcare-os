@@ -178,10 +178,17 @@ export type ClinicalNoteResponse = z.infer<typeof ClinicalNoteResponseSchema>;
  * The canonical request schema for creating a clinical note draft via
  * `POST /api/v1/clinical-notes`.
  *
- * All scope (tenantId, organisationId, facilityId) is derived from the
- * authenticated session context. The request body contains ONLY the
- * encounter, patient, note type, author role, author (provider), and the
- * draft body.
+ * All scope (tenantId, organisationId, facilityId) AND the clinical
+ * author identity (authorId, authorRole) are derived server-side from
+ * the authenticated session via the BC10 User→Provider identity-binding
+ * resolver (`findActiveProviderForUserAtFacility`). The request body
+ * contains ONLY the encounter, patient, note type, and the draft body.
+ *
+ * The caller MUST NOT supply `authorId` or `authorRole`: doing so is a
+ * validation error (the schema is `.strict()`). This is the
+ * spoofing-prevention guarantee — clinical authorship identity is
+ * trustworthily bound to the authenticated principal, never
+ * caller-selected.
  *
  * Fields:
  * - `encounterId`: the UUID of the encounter the note attaches to. Must
@@ -189,9 +196,6 @@ export type ClinicalNoteResponse = z.infer<typeof ClinicalNoteResponseSchema>;
  * - `patientId`: the UUID of the patient. Validated to match the
  *   encounter's patient.
  * - `noteType`: the canonical note type. Defaults to `progress`.
- * - `authorRole`: the canonical author role. Defaults to `physician`.
- * - `authorId`: the UUID of the authoring provider. Validated to be
- *   eligible for the authenticated facility.
  * - `body`: the draft clinical content. Must be 1-32000 characters. This
  *   is PHI; it is persisted in the transactional database but is NEVER
  *   placed in audit metadata.
@@ -199,15 +203,14 @@ export type ClinicalNoteResponse = z.infer<typeof ClinicalNoteResponseSchema>;
  * The request does NOT include:
  * - tenantId, organisationId, or facilityId (derived from session)
  * - status (always `draft` for a fresh note)
- * - the signing actor (derived from the authenticated session)
+ * - authorId / authorRole (derived from the authenticated principal's
+ *   bound Provider via the BC10 identity-binding resolver)
  */
 export const CreateClinicalNoteRequestSchema = z
   .object({
     encounterId: z.string().uuid(),
     patientId: z.string().uuid(),
     noteType: ClinicalNoteTypeSchema.default('progress'),
-    authorRole: ClinicalNoteAuthorRoleSchema.default('physician'),
-    authorId: z.string().uuid(),
     body: z.string().min(1).max(32000),
   })
   .strict();
@@ -230,30 +233,30 @@ export type CreateClinicalNoteResponse = z.infer<
  * The canonical request-body schema for signing a clinical note via
  * `POST /api/v1/clinical-notes/:id/sign`.
  *
- * `actorId` is the logical provider identifier of the signing actor. Per
- * BR-BC03-CLIN-031 (signing authority), the signing actor must have
- * signing authority for the note (the baseline rule: the actor must be
- * the note's author). The actor is validated to be eligible for the
- * authenticated facility (existence + active status + active facility
- * assignment) before the signing-authority check.
+ * The signing actor identity (`actorId`) is derived server-side from the
+ * authenticated session via the BC10 User→Provider identity-binding
+ * resolver (`findActiveProviderForUserAtFacility`). The caller MUST NOT
+ * supply `actorId`: doing so is a validation error (the schema is
+ * `.strict()`). This is the spoofing-prevention guarantee — the signing
+ * identity is trustworthily bound to the authenticated principal, never
+ * caller-selected.
  *
- * The authenticated session carries a UserId, not a ProviderId; the
- * user→provider linkage is NOT yet implemented in the schema. Therefore
- * the signing actor's providerId is supplied in the request body and
- * scope-validated, matching the encounter-creation providerId pattern.
+ * Per BR-BC03-CLIN-031 (signing authority), the resolved signing actor
+ * must have signing authority for the note (the baseline rule: the
+ * actor must be the note's author). Because both the note's `authorId`
+ * (set at creation) and the signing `actorId` are now server-resolved
+ * from the authenticated principal's bound Provider, an authenticated
+ * user cannot sign a note authored by a different provider.
+ *
  * The audit event's `actorId` is the session UserId (the authenticated
  * identity); the clinical providerId lives in the note/revision data,
  * not the audit metadata (PHI-safe).
  *
  * The body MUST NOT include scope (tenantId/organisationId/facilityId),
- * status, or note content. Any supplied field other than `actorId` is
+ * status, note content, or any actor identifier. Any supplied field is
  * rejected as a validation error.
  */
-export const SignClinicalNoteRequestSchema = z
-  .object({
-    actorId: z.string().uuid(),
-  })
-  .strict();
+export const SignClinicalNoteRequestSchema = z.object({}).strict();
 
 export type SignClinicalNoteRequest = z.infer<typeof SignClinicalNoteRequestSchema>;
 
@@ -268,7 +271,10 @@ export type SignClinicalNoteRequest = z.infer<typeof SignClinicalNoteRequestSche
  * Per BR-BC03-CLIN-032, an amendment MUST include a reason and the
  * corrected body. The `reason` is mandatory (non-empty, max 1000 chars).
  * The `body` is the corrected note content (max 32000 chars). The
- * amending actor is derived from the authenticated session.
+ * amending actor is derived server-side from the authenticated session
+ * via the BC10 User→Provider identity-binding resolver
+ * (`findActiveProviderForUserAtFacility`); the caller MUST NOT supply
+ * `actorId` (the schema is `.strict()`).
  *
  * The original signed revision is preserved immutably; the amendment
  * creates a NEW revision.
@@ -277,7 +283,6 @@ export const AmendClinicalNoteRequestSchema = z
   .object({
     body: z.string().min(1).max(32000),
     reason: z.string().min(1).max(1000),
-    actorId: z.string().uuid(),
   })
   .strict();
 
@@ -294,13 +299,15 @@ export type AmendClinicalNoteRequest = z.infer<
  * clinical note via `POST /api/v1/clinical-notes/:id/addendum`.
  *
  * Per BR-BC03-CLIN-032, an addendum MUST include a reason and the
- * supplementary body. `addendum` is terminal.
+ * supplementary body. `addendum` is terminal. The acting author is
+ * derived server-side from the authenticated session via the BC10
+ * User→Provider identity-binding resolver; the caller MUST NOT supply
+ * `actorId` (the schema is `.strict()`).
  */
 export const AddendumClinicalNoteRequestSchema = z
   .object({
     body: z.string().min(1).max(32000),
     reason: z.string().min(1).max(1000),
-    actorId: z.string().uuid(),
   })
   .strict();
 
@@ -317,13 +324,15 @@ export type AddendumClinicalNoteRequest = z.infer<
  * clinical note via `POST /api/v1/clinical-notes/:id/withdraw`.
  *
  * Per STATUS_CODES.md §5.3, withdrawal is recorded with reason and
- * author. The `reason` is mandatory (non-empty, max 1000 chars).
- * `withdrawn` is terminal.
+ * author. The `reason` is mandatory (non-empty, max 1000 chars). The
+ * acting author is derived server-side from the authenticated session
+ * via the BC10 User→Provider identity-binding resolver; the caller MUST
+ * NOT supply `actorId` (the schema is `.strict()`). `withdrawn` is
+ * terminal.
  */
 export const WithdrawClinicalNoteRequestSchema = z
   .object({
     reason: z.string().min(1).max(1000),
-    actorId: z.string().uuid(),
   })
   .strict();
 
