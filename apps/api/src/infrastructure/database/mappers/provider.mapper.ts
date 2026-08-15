@@ -5,11 +5,14 @@ import type {
   ProviderFacilityAssignment,
   ProviderFacilityAssignmentId,
   TenantId,
+  ClinicalNoteAuthorRole,
 } from '@ibn-hayan/domain';
+import { isClinicalNoteAuthorRole } from '@ibn-hayan/domain';
 import type {
   Provider as PrismaProvider,
   ProviderFacilityAssignment as PrismaProviderFacilityAssignment,
   ProviderStatus,
+  ClinicalNoteAuthorRole as PrismaClinicalNoteAuthorRole,
 } from '../../../../generated/prisma/client.js';
 
 /**
@@ -23,11 +26,30 @@ function prismaStatusToDomain(status: ProviderStatus): ProviderLifecycleStatus {
   return status;
 }
 
+function prismaClinicalAuthorRoleToDomain(
+  role: PrismaClinicalNoteAuthorRole | null,
+): ClinicalNoteAuthorRole | null {
+  if (role === null) {
+    return null;
+  }
+  // Defensive validation: a value that is not in the canonical catalogue is
+  // a data-integrity error. We do not silently coerce unknown enum values.
+  if (!isClinicalNoteAuthorRole(role)) {
+    throw new Error(
+      `provider.mapper: unknown ClinicalNoteAuthorRole value from database: ${String(role)}`,
+    );
+  }
+  return role;
+}
+
 export function providerFromPrisma(row: PrismaProvider): Provider {
   return {
     id: row.id as ProviderId,
     tenantId: row.tenantId as TenantId,
     status: prismaStatusToDomain(row.status),
+    clinicalAuthorRole: prismaClinicalAuthorRoleToDomain(
+      row.clinicalAuthorRole,
+    ),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

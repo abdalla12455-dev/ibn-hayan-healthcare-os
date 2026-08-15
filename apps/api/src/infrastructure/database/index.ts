@@ -34,6 +34,7 @@ export {
   PATIENT_IDENTIFIER_REPOSITORY,
   PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
+  USER_PROVIDER_BINDING_REPOSITORY,
   ENCOUNTER_REPOSITORY,
 } from './tokens.js';
 export { LocalCredentialService } from './repositories/local-credential.service.js';
