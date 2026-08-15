@@ -23,8 +23,6 @@ import {
   type TenantId,
   type OrganisationId,
   type FacilityId,
-  CLINICAL_NOTE_REPOSITORY,
-  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
 } from '@ibn-hayan/domain';
 import {
   TENANT_REPOSITORY,
@@ -33,6 +31,8 @@ import {
   PATIENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
   ENCOUNTER_REPOSITORY,
+  CLINICAL_NOTE_REPOSITORY,
+  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
 } from '../../infrastructure/database/index.js';
 import { AuthService, type AuditRequestContext } from '../auth/auth.service.js';
 import { AuditHelperService } from '../audit/audit-helper.service.js';

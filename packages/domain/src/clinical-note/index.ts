@@ -37,8 +37,3 @@ export type {
   ClinicalNoteRepository,
   ClinicalNoteSigningAuthorityPort,
 } from './clinical-note.repositories.js';
-
-export {
-  CLINICAL_NOTE_REPOSITORY,
-  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
-} from './clinical-note.repositories.js';

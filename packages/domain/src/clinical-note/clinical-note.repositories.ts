@@ -244,17 +244,3 @@ export interface ClinicalNoteSigningAuthorityPort {
     actorId: ProviderId,
   ): boolean;
 }
-
-/**
- * DI token for the ClinicalNoteSigningAuthorityPort. Implemented in the
- * API infrastructure layer and injected at the composition root.
- */
-export const CLINICAL_NOTE_SIGNING_AUTHORITY_PORT = Symbol(
-  'CLINICAL_NOTE_SIGNING_AUTHORITY_PORT',
-);
-
-/**
- * DI token for the ClinicalNoteRepository. Implemented in the API
- * infrastructure layer and injected at the composition root.
- */
-export const CLINICAL_NOTE_REPOSITORY = Symbol('CLINICAL_NOTE_REPOSITORY');
