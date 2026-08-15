@@ -328,9 +328,10 @@ model User {
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
-  localCredential LocalCredential?
-  memberships     TenantMembership[]
-  sessions        AuthSession[]
+  localCredential      LocalCredential?
+  memberships          TenantMembership[]
+  sessions             AuthSession[]
+  userProviderBindings UserProviderBinding[]
 
   @@index([status], map: "users_status_idx")
   @@map("users")
@@ -1045,6 +1046,23 @@ enum ProviderStatus {
   separated
 }
 
+/// Canonical clinical-note author role, owned by the Clinical
+/// Documentation bounded context (BC03) per ENUMS.md §4.2. BC03 is not
+/// yet implemented; BC10 references this catalogue as a trusted
+/// attribute on the Provider (see `Provider.clinicalAuthorRole`).
+/// The values are the six ratified canonical ClinicalNoteAuthorRole
+/// values (Physician, Nurse, Pharmacist, Therapist, Midlevel, Student).
+/// `student` is supported, but interactive Student authoring is
+/// deferred to BC03.
+enum ClinicalNoteAuthorRole {
+  physician
+  nurse
+  pharmacist
+  therapist
+  midlevel
+  student
+}
+
 /// The canonical provider identity for the Ibn Hayan Healthcare Operating System.
 ///
 /// Per download/docs/07_MODULES/DOCTORS.md Section 4.1:
@@ -1079,13 +1097,15 @@ enum ProviderStatus {
 /// These fields will be added in subsequent batches as provider profiles
 /// and credentialing are implemented.
 model Provider {
-  id        String         @id @default(uuid()) @db.Uuid
-  tenantId  String         @map("tenant_id") @db.Uuid
-  status    ProviderStatus @default(candidate)
-  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  status             ProviderStatus          @default(candidate)
+  clinicalAuthorRole ClinicalNoteAuthorRole? @map("clinical_author_role")
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime                @updatedAt @map("updated_at") @db.Timestamptz
 
-  facilityAssignments ProviderFacilityAssignment[]
+  facilityAssignments  ProviderFacilityAssignment[]
+  userProviderBindings UserProviderBinding[]
 
   // Unique constraint enables composite foreign key from provider_facility_assignments
   // that enforces tenant integrity: a provider can only be assigned within their tenant.
@@ -1147,6 +1167,68 @@ model ProviderFacilityAssignment {
   @@index([tenantId, facilityId], map: "provider_facility_assignments_tenant_id_facility_id_idx")
   @@index([tenantId, providerId, revokedAt], map: "provider_facility_assignments_tenant_provider_revoked_idx")
   @@map("provider_facility_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// UserProviderBinding (BC10 — User→Provider Identity Binding Foundation)
+// ---------------------------------------------------------------------------
+
+/// The binding between a platform User (an authenticated identity, owned
+/// by the Identity bounded context) and a Provider (a clinical-capacity
+/// identity, owned by BC10). BC10 owns this binding.
+///
+/// Ratified cardinality (one-to-one INSIDE each tenant):
+/// - One active Provider per User per tenant.
+/// - One active User per Provider per tenant.
+/// - The same global User may bind to different Providers in different
+///   tenants. Uniqueness is therefore per-tenant, not global.
+/// - NO automatic or backfill binding. Historical Users/Providers remain
+///   valid without a binding; they simply cannot resolve a trusted
+///   Provider identity until a binding is explicitly created.
+///
+/// An active binding has `revokedAt` set to null. Revoking a binding sets
+/// `revokedAt`; a revoked binding is never returned by the active
+/// resolution path. Historical revoked bindings are preserved for audit.
+/// Re-binding after revocation is allowed.
+///
+/// Database Integrity Constraints (enforced via raw SQL in migration):
+/// - Simple FK: user_id → users.id (Prisma convenience). The User is
+///   global, so no tenant composite FK applies to user_id.
+/// - Simple FK: provider_id → providers.id (Prisma convenience).
+/// - Composite FK: (tenant_id, provider_id) → providers(tenant_id, id)
+///   Ensures the Provider belongs to the same tenant as the binding.
+/// - Partial unique index on (tenant_id, user_id) WHERE revoked_at IS NULL:
+///   enforces one ACTIVE binding per user per tenant. Historical revoked
+///   bindings are preserved; re-binding after revocation is allowed.
+/// - Partial unique index on (tenant_id, provider_id) WHERE revoked_at IS
+///   NULL: enforces one ACTIVE binding per provider per tenant.
+///
+/// The trusted `clinicalAuthorRole` is NOT stored on the binding; it lives
+/// on the Provider. The server-side resolver reads it from the Provider at
+/// resolution time so a status/role change is reflected immediately.
+model UserProviderBinding {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  providerId  String    @map("provider_id") @db.Uuid
+  activatedAt DateTime  @default(now()) @map("activated_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  // Note: the per-tenant one-active-per-user and one-active-per-provider
+  // cardinality is enforced by partial unique indexes declared in the
+  // migration (WHERE revoked_at IS NULL). A composite FK
+  // (tenant_id, provider_id) → providers(tenant_id, id) is also declared
+  // in the migration to enforce provider tenant integrity.
+  @@index([tenantId], map: "user_provider_bindings_tenant_id_idx")
+  @@index([tenantId, userId], map: "user_provider_bindings_tenant_id_user_id_idx")
+  @@index([tenantId, providerId], map: "user_provider_bindings_tenant_id_provider_id_idx")
+  @@index([tenantId, userId, revokedAt], map: "user_provider_bindings_tenant_user_revoked_idx")
+  @@map("user_provider_bindings")
 }
 
 // ---------------------------------------------------------------------------

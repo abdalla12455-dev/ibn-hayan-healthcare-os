@@ -33,6 +33,7 @@
  */
 
 import type { TenantId } from '../tenancy/tenant.js';
+import type { ClinicalNoteAuthorRole } from './clinical-author-role.js';
 
 /**
  * Stable identifier for a Provider. Branded so it cannot be confused
@@ -77,6 +78,16 @@ export type ProviderLifecycleStatus =
  * - `tenantId`: the Tenant that owns this Provider. Per DOCTORS.md,
  *   provider data is tenant-isolated by default.
  * - `status`: current lifecycle status.
+ * - `clinicalAuthorRole`: the trusted clinical-note author role for
+ *   this Provider, or null when none is configured. The value is a
+ *   canonical ClinicalNoteAuthorRole (Physician, Nurse, Pharmacist,
+ *   Therapist, Midlevel, Student) per ENUMS.md §4.2. It is a TRUSTED
+ *   attribute set by workforce administration on the Provider record;
+ *   it MUST NOT be derived from the platform `roleCode` (R01–R14). R05
+ *   Allied Health Professional may author clinical notes only when its
+ *   bound Provider carries a valid (non-null) `clinicalAuthorRole`.
+ *   `student` is a supported value, but interactive Student authoring
+ *   is deferred to BC03.
  * - `createdAt`: timezone-aware timestamp; set by persistence layer.
  * - `updatedAt`: timezone-aware timestamp; updated by persistence layer.
  *
@@ -97,6 +108,7 @@ export interface Provider {
   readonly id: ProviderId;
   readonly tenantId: TenantId;
   readonly status: ProviderLifecycleStatus;
+  readonly clinicalAuthorRole: ClinicalNoteAuthorRole | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -140,4 +152,5 @@ export interface ProviderFacilityAssignment {
 export interface CreateProviderInput {
   readonly tenantId: TenantId;
   readonly status?: ProviderLifecycleStatus;
+  readonly clinicalAuthorRole?: ClinicalNoteAuthorRole | null;
 }

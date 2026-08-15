@@ -13,6 +13,7 @@ import { PrismaPatientRepository } from './repositories/prisma-patient.repositor
 import { PrismaPatientIdentifierRepository } from './repositories/prisma-patient-identifier.repository.js';
 import { PrismaPatientConsentRepository } from './repositories/prisma-patient-consent.repository.js';
 import { PrismaProviderRepository } from './repositories/prisma-provider.repository.js';
+import { PrismaUserProviderBindingRepository } from './repositories/prisma-user-provider-binding.repository.js';
 import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
 import { TreatmentConsentVerificationService } from './services/treatment-consent-verification.service.js';
@@ -78,6 +79,7 @@ export {
   PATIENT_IDENTIFIER_REPOSITORY,
   PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
+  USER_PROVIDER_BINDING_REPOSITORY,
   ENCOUNTER_REPOSITORY,
 } from './tokens.js';
 import {
@@ -93,6 +95,7 @@ import {
   PATIENT_IDENTIFIER_REPOSITORY,
   PATIENT_CONSENT_REPOSITORY,
   WORKFORCE_REPOSITORY,
+  USER_PROVIDER_BINDING_REPOSITORY,
   ENCOUNTER_REPOSITORY,
 } from './tokens.js';
 
@@ -158,6 +161,10 @@ import {
       useClass: PrismaProviderRepository,
     },
     {
+      provide: USER_PROVIDER_BINDING_REPOSITORY,
+      useClass: PrismaUserProviderBindingRepository,
+    },
+    {
       provide: ENCOUNTER_REPOSITORY,
       useClass: PrismaEncounterRepository,
     },
@@ -198,6 +205,7 @@ import {
     TREATMENT_CONSENT_VERIFICATION_PORT,
     AGE_OF_MAJORITY_POLICY_PORT,
     WORKFORCE_REPOSITORY,
+    USER_PROVIDER_BINDING_REPOSITORY,
     ENCOUNTER_REPOSITORY,
     LocalCredentialService,
   ],
@@ -231,5 +239,6 @@ export type {
   TreatmentConsentVerificationPort,
   AgeOfMajorityPolicyPort,
   ProviderRepository,
+  UserProviderBindingRepository,
   EncounterRepository,
 } from '@ibn-hayan/domain';

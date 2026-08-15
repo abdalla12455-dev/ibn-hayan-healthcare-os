@@ -7159,3 +7159,127 @@ A final architecture/metadata/merge-readiness review identified and corrected tw
 
 Validation after corrections: typecheck PASS, lint PASS, 492 API unit tests PASS (+1 adult-guardian rejection test), Prisma validate/format/generate PASS, production build PASS. PostgreSQL 17 NOT RUN locally (CI authoritative).
 
+---
+
+## BC10 — User→Provider Identity Binding Foundation (2026-08-15)
+
+> **Status:** Implemented on feature branch `feature/bc10-user-provider-identity-binding`; draft PR opened to `main`; NOT merged. Last verified `main` baseline when this section was authored: `c49d53f38e7ade280ce449cb1c8fe4d681765609` (2026-08-15). Fetch `origin/main` for the live value before editing.
+
+### Operator-Ratified Architecture
+
+- **BC10 owns the binding.** A dedicated `UserProviderBinding` model/table is the canonical owner of the User→Provider identity relationship. No other module owns this binding.
+- **Active relationship is one-to-one INSIDE each tenant:** one active Provider per User per tenant, and one active User per Provider per tenant. Enforced at the database tier by two partial unique indexes (PostgreSQL 17): `user_provider_bindings_tenant_user_active_key` on `(tenant_id, user_id) WHERE revoked_at IS NULL`, and `user_provider_bindings_tenant_provider_active_key` on `(tenant_id, provider_id) WHERE revoked_at IS NULL`.
+- **The same global User may bind to different Providers in different tenants.** The unique constraint is tenant-scoped, not global. Cross-tenant binding is blocked by the composite `(tenant_id, provider_id)` foreign key to `providers(tenant_id, id)`.
+- **NO automatic/backfill binding.** No code path invents or synthesises a binding. Historical Users/Providers remain valid without a binding; they simply do not resolve to a provider identity until an explicit active binding exists.
+- **Clinical operations requiring provider identity fail closed when no active binding exists.** The resolver returns `null`; there is no fake fallback.
+- **`clinicalAuthorRole` is a nullable trusted attribute on Provider** using the existing canonical `ClinicalNoteAuthorRole` enum values (`physician | nurse | pharmacist | therapist | midlevel | student`). It is Provider-owned workforce data, set by workforce administration.
+- **clinicalAuthorRole is NOT derived from the platform roleCode (R01–R14).** The resolver reads only the trusted Provider attribute. R05 Allied Health may author only when its bound Provider has a valid `clinicalAuthorRole`; the role is never guessed from `roleCode`.
+- **`student` remains a supported enum value** but interactive Student authoring is deferred (no authoring gate implemented in this stage).
+
+### Schema / Cardinality Design
+
+- New `UserProviderBinding` table (`user_provider_bindings`): columns `id`, `tenant_id`, `user_id`, `provider_id`, `created_at`, `revoked_at`. `revoked_at` is nullable; a non-null value marks a revoked (historical) binding.
+- **Provider FK design (retained, matches repository convention):** the binding has BOTH a simple `provider_id → providers(id)` foreign key AND a composite `(tenant_id, provider_id) → providers(tenant_id, id)` foreign key. This is identical to the pattern established by the BC10 Workforce Reference Foundation for `provider_facility_assignments` (`provider_facility_assignments_tenant_provider_fkey`). The composite FK is backed by the existing `providers_tenant_id_id_key` unique index and prevents a binding from referencing a provider that belongs to a different tenant (no cross-tenant provider resolution). The simple FK preserves referential integrity on provider deletion. This design was reviewed and retained as intentional and consistent; no redundancy was removed because repository evidence shows the composite FK serves a distinct tenant-isolation purpose the simple FK does not.
+- The `User` model gained a `userProviderBindings UserProviderBinding[]` relation. The `Provider` model gained `clinicalAuthorRole ClinicalNoteAuthorRole?` (nullable, mapped to `clinical_author_role`).
+- Partial unique indexes use a STABLE predicate (`WHERE revoked_at IS NULL`) — no `NOW()`, so revoked rows no longer occupy the active uniqueness constraint, allowing re-binding after revocation.
+
+### Resolver / Fail-Closed Rules
+
+The domain port `UserProviderBindingRepository` exposes:
+- `findActiveProviderForUser(tenantId, userId)` → `ActiveProviderIdentity | null`
+- `findActiveProviderForUserAtFacility(tenantId, userId, facilityId)` → `ActiveProviderIdentityAtFacility | null`
+- `create(input)` / `revoke({ tenantId, userId, revokedAt })`
+
+The resolver trusts ONLY the authenticated `userId` and the tenant context (server-side). It never trusts caller-supplied Provider identity. Fail-closed conditions (all return `null`, no fake fallback):
+- no binding exists;
+- User is `disabled`;
+- Provider is `suspended` or `separated` (only `active` providers resolve);
+- binding is revoked (`revoked_at` non-null);
+- facility-specific resolution requires an active (non-revoked) `ProviderFacilityAssignment` for the requested facility — a revoked assignment or assignment to a different facility fails closed;
+- no cross-tenant provider resolution (composite FK + tenant-scoped query).
+
+The returned `ActiveProviderIdentity` carries `providerId`, `tenantId`, `providerStatus`, and the trusted `clinicalAuthorRole` (which may be `null`).
+
+### clinicalAuthorRole Behavior
+
+- Stored on Provider as nullable `ClinicalNoteAuthorRole`. The mapper validates the DB value against the canonical catalogue and throws on an unknown value (no silent coercion).
+- R05 bound Provider with `null` `clinicalAuthorRole` surfaces `null` honestly — no fake fallback guesses a role from `roleCode`.
+- `student` is a valid stored value; interactive Student authoring is deferred to BC03 (no authoring gate in this stage).
+
+### Migration Design
+
+- **ONE forward-only additive migration:** `20260815000000_bc10_user_provider_identity_binding/migration.sql` (hand-written, inspected manually).
+- Additive only: new enum `ClinicalNoteAuthorRole`, `ALTER TABLE providers ADD COLUMN clinical_author_role`, new `user_provider_bindings` table, composite + simple foreign keys, two partial unique indexes, supporting indexes.
+- No existing migration edited. No `DROP`, no `TRUNCATE`, no reset, no backfill, no destructive type rewrite. `ALTER TYPE ... ADD VALUE IF NOT EXISTS` used for the enum.
+
+### Validation (local, PostgreSQL 17.11)
+
+All run locally against a real PostgreSQL 17 disposable cluster (`PG_BINDIR=/usr/lib/postgresql/17/bin`):
+- `git diff --check`: clean. No conflict markers. No secrets in diff.
+- Prisma format / validate / generate (main + audit): SUCCESS.
+- Domain typecheck: PASS. API typecheck: PASS.
+- Domain lint: PASS. API lint: PASS.
+- Domain tests: 154/154 PASS (6 files).
+- API unit tests: 492/492 PASS (20 files).
+- PostgreSQL 17 full database suite: 196/196 PASS (7 files), including 21 new BC10 binding tests and Patient (35), Appointment/tenancy (24), Encounter/context (45), Provider/Workforce (34), identity (16), rbac (21) regressions all green.
+- Production build: SUCCESS.
+
+**Pre-existing, unrelated failure (NOT introduced by this stage):** the API integration (`test:integration`) `openapi.e2e-spec.ts` "OpenAPI documentation in production mode" test fails because `Audit configuration is invalid in production: empty — Audit key is empty or unset.` This failure was reproduced on the base commit `c49d53f` (it fails worse there) and is environment-dependent (requires an audit key env var); it is unrelated to BC10 binding.
+
+### Scope — Included
+
+- `UserProviderBinding` domain model + `UserProviderBindingRepository` port (BC10 boundary).
+- Additive Prisma model + one forward-only migration.
+- Tenant-safe active binding constraints (partial unique indexes, composite FK).
+- Provider `clinicalAuthorRole` field (domain + schema + mapper).
+- Server-side resolver `findActiveProviderForUser(tenantId, userId)` returning trusted Provider identity and `clinicalAuthorRole`; facility-scoped variant.
+- Lifecycle behavior for disabled User, suspended/separated Provider, revoked binding, revoked/invalid facility assignment.
+- Authorization/security invariants (tenant-scoped, fail-closed, no caller-supplied trust).
+- Domain unit tests + PostgreSQL 17 integration tests.
+
+### Scope — Excluded (NOT implemented by this stage)
+
+- NO full workforce profiles, credentialing, scheduling, or UI.
+- NO BC03 changes (clinical documentation) — this stage only unblocks BC03.
+- NO production deployment.
+- **Known limitation:** this stage provides the binding persistence/resolver foundation only. A full admin binding-management workflow (create/revoke/list bindings via an authenticated admin API surface) is NOT implemented in this stage; bindings are created/revoked through the repository port for testing and future wiring. Do not assume a complete binding-management API exists.
+
+### Files
+
+- **Created:**
+  - `packages/domain/src/workforce/clinical-author-role.ts`
+  - `packages/domain/src/workforce/user-provider-binding.ts`
+  - `packages/domain/src/workforce/user-provider-binding.spec.ts`
+  - `apps/api/prisma/migrations/20260815000000_bc10_user_provider_identity_binding/migration.sql`
+  - `apps/api/src/infrastructure/database/mappers/user-provider-binding.mapper.ts`
+  - `apps/api/src/infrastructure/database/repositories/prisma-user-provider-binding.repository.ts`
+  - `apps/api/test/database/user-provider-binding.db-spec.ts`
+- **Modified:**
+  - `packages/domain/src/workforce/provider.ts` (added `clinicalAuthorRole`)
+  - `packages/domain/src/workforce/provider.spec.ts` (clinicalAuthorRole + catalogue tests)
+  - `packages/domain/src/workforce/workforce.repositories.ts` (added port)
+  - `packages/domain/src/workforce/index.ts` (re-exports)
+  - `apps/api/prisma/schema.prisma` (enum, Provider field, User relation, UserProviderBinding model)
+  - `apps/api/src/infrastructure/database/mappers/provider.mapper.ts` (clinicalAuthorRole mapping)
+  - `apps/api/src/infrastructure/database/tokens.ts` (USER_PROVIDER_BINDING_REPOSITORY token)
+  - `apps/api/src/infrastructure/database/database.module.ts` (DI wiring)
+  - `apps/api/src/infrastructure/database/index.ts` (export)
+- **Deleted:** none.
+
+### Remaining Risks / Deferred
+
+- The binding-management admin API surface is not implemented; future admin workflows must enforce the same tenant-scoped, fail-closed invariants through the repository port.
+- `student` interactive authoring is deferred to BC03.
+- Per-region/tenant configuration of `clinicalAuthorRole` eligibility is not redesigned here.
+- Migration shadow-DB drift check could not be run locally (no shadow DB); CI on GitHub Actions (PostgreSQL 17) is authoritative for drift.
+
+### Recovery Information
+
+- Feature branch: `feature/bc10-user-provider-identity-binding`. Base commit: `c49d53f38e7ade280ce449cb1c8fe4d681765609`.
+- To resume: `git fetch origin`, verify `origin/main` is at `c49d53f` (or ahead via a documented merge), check out the feature branch, and confirm the working tree matches the committed PR head.
+- The migration is forward-only and additive; reverting means not deploying the migration (no destructive rollback needed). Existing rows are unaffected.
+
+### Immediate Next Step
+
+Merge this BC10 User→Provider Identity Binding prerequisite to `main` first (after Main CI succeeds on the exact PR head). Then return to **BC03 PR #28**: rebase/integrate BC03 PR #28 on the merged identity-binding foundation and replace caller-supplied clinical actor identity (`authorId`/`actorId`/`authorRole`) with trusted server-side resolution via `findActiveProviderForUser(tenantId, userId)`.
+

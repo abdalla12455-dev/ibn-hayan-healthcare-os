@@ -25,6 +25,11 @@ import type {
   ProviderFacilityAssignmentId,
   CreateProviderInput,
   ProviderRepository,
+  ClinicalNoteAuthorRole,
+} from './index.js';
+import {
+  CLINICAL_NOTE_AUTHOR_ROLES,
+  isClinicalNoteAuthorRole,
 } from './index.js';
 import type { TenantId } from '../tenancy/tenant.js';
 
@@ -34,12 +39,14 @@ describe('provider domain exports', () => {
       id: 'provider-1' as ProviderId,
       tenantId: 'tenant-1' as TenantId,
       status: 'active',
+      clinicalAuthorRole: 'physician',
       createdAt: new Date('2026-01-01T00:00:00Z'),
       updatedAt: new Date('2026-01-01T00:00:00Z'),
     };
     expect(provider.id).toBe('provider-1');
     expect(provider.tenantId).toBe('tenant-1');
     expect(provider.status).toBe('active');
+    expect(provider.clinicalAuthorRole).toBe('physician');
   });
 
   it('branded identifier types are erased to strings at runtime', () => {
@@ -103,6 +110,48 @@ describe('provider create inputs', () => {
       status: 'active',
     };
     expect(withStatus.status).toBe('active');
+  });
+});
+
+describe('clinical note author role', () => {
+  it('CLINICAL_NOTE_AUTHOR_ROLES has exactly the six canonical values', () => {
+    const values: readonly ClinicalNoteAuthorRole[] = CLINICAL_NOTE_AUTHOR_ROLES;
+    expect(values).toHaveLength(6);
+    expect([...values]).toEqual([
+      'physician',
+      'nurse',
+      'pharmacist',
+      'therapist',
+      'midlevel',
+      'student',
+    ]);
+  });
+
+  it('isClinicalNoteAuthorRole accepts canonical values and rejects others', () => {
+    expect(isClinicalNoteAuthorRole('physician')).toBe(true);
+    expect(isClinicalNoteAuthorRole('student')).toBe(true);
+    expect(isClinicalNoteAuthorRole('deleted')).toBe(false);
+    expect(isClinicalNoteAuthorRole(null)).toBe(false);
+    expect(isClinicalNoteAuthorRole(undefined)).toBe(false);
+  });
+
+  it('CreateProviderInput accepts an optional clinicalAuthorRole (including null)', () => {
+    const withRole: CreateProviderInput = {
+      tenantId: 'tenant-1' as TenantId,
+      clinicalAuthorRole: 'midlevel',
+    };
+    expect(withRole.clinicalAuthorRole).toBe('midlevel');
+
+    const nullRole: CreateProviderInput = {
+      tenantId: 'tenant-1' as TenantId,
+      clinicalAuthorRole: null,
+    };
+    expect(nullRole.clinicalAuthorRole).toBeNull();
+
+    const minimal: CreateProviderInput = {
+      tenantId: 'tenant-1' as TenantId,
+    };
+    expect(minimal.clinicalAuthorRole).toBeUndefined();
   });
 });
 
