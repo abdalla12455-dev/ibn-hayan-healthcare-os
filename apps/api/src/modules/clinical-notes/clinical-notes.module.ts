@@ -1,4 +1,8 @@
 import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../../infrastructure/database/index.js';
+import { AuditModule } from '../audit/index.js';
+import { AuthModule } from '../auth/index.js';
+import { AuthorizationModule } from '../authorization/index.js';
 import { ClinicalNotesController } from './clinical-notes.controller.js';
 import { ClinicalNotesService } from './clinical-notes.service.js';
 
@@ -11,11 +15,13 @@ import { ClinicalNotesService } from './clinical-notes.service.js';
  * AuditHelperService (audit emission). The controller is a thin transport
  * layer that applies the AuthorizationGuard and delegates to the service.
  *
- * The module does NOT import the DatabaseModule directly; it relies on
- * the repository/audit tokens being globally available via the
- * DatabaseModule exports (consistent with the encounters module).
+ * Like the encounters module, this module imports the DatabaseModule,
+ * AuditModule, AuthModule, and AuthorizationModule so the repository,
+ * audit, auth, and guard tokens are resolvable within this module's
+ * scope (the DatabaseModule is not a @Global module).
  */
 @Module({
+  imports: [DatabaseModule, AuditModule, AuthModule, AuthorizationModule],
   controllers: [ClinicalNotesController],
   providers: [ClinicalNotesService],
 })
