@@ -246,44 +246,36 @@ export class AppointmentsVisitLifecycleService {
    *
    * The `reason` parameter is the optional caller-supplied
    * justification. Per APPOINTMENTS.md §7.1, justification is "if
-   * required" (configurable per clinic type). The canonical storage
-   * model for no-show justification is NOT yet ratified: the
-   * cancellation precedent stores `reason` in audit metadata, but the
-   * no-show PHI-avoidance rule excludes free-text from audit metadata.
-   * Until the operator decides the storage model (audit metadata,
-   * appointment column, or dedicated NoShowRecord table), the reason
-   * is accepted by the API but NOT persisted. This is a documented
-   * gap, not a silent discard — the parameter flows through the
-   * service boundary explicitly.
+   * required" (configurable per clinic type). The operator-ratified
+   * storage model persists the reason on the appointment row
+   * (`no_show_reason` column, max 500 chars) atomically with the
+   * FIRST confirmed|arrived → no_show transition. The free-text
+   * reason is stored on the appointment row, NOT in generic audit
+   * metadata, to keep the audit trail PHI-safe.
    *
    * Re-marking an already-no_show appointment is an idempotent no-op
-   * (no mutation, no audit event), mirroring the terminal idempotency
-   * for `completed` and `cancelled`.
+   * (no mutation, no audit event, no overwrite of the original
+   * `noShowReason`), mirroring the terminal idempotency for
+   * `completed` and `cancelled`.
    *
    * Authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
    * Administrator (the clinic-booking operational roles). R01
    * Physician, R02 Nurse, and R13 Platform/System Administrator are
-   * denied. See the authorization note in PROJECT_CONTINUITY.md for
-   * the prose-vs-role-table tension ("reception or clinical staff").
+   * denied (operator-ratified authorization matrix).
    */
   async markNoShow(
     appointmentId: string,
     cookieValue: string | undefined,
     auditContext?: AuditRequestContext,
-    // The optional caller-supplied justification. Accepted at the API
-    // boundary but NOT persisted until the operator ratifies the
-    // storage model (see method docblock above). The parameter is
-    // intentionally received to avoid a silent discard at the
-    // controller/service boundary.
     reason?: string,
   ): Promise<AppointmentVisitLifecycleResponse | null> {
-    void reason;
     return this.transition(
       appointmentId,
       {
         allowedSourceStates: ['confirmed', 'arrived'],
         targetStatus: 'no_show',
         idempotentIfAlreadyAtTarget: true,
+        noShowReason: reason ?? null,
       },
       'appointments.no_show_recorded',
       'appointments_no_show',

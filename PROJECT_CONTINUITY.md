@@ -7570,29 +7570,27 @@ The simple FKs are retained for Prisma relation convenience. The migration was u
 
 **Tests added:** Two PG17 tests — cross-midnight booking blocked, cross-midnight rescheduling blocked.
 
-#### 3. No-show justification recording — OPERATOR DECISION REQUIRED
+#### 3. No-show justification recording — OPERATOR RATIFIED & IMPLEMENTED
 
-**Finding:** The `POST /appointments/:id/no-show` controller parses an optional `reason` from the request body but previously discarded it silently (did not pass it to `markNoShow`). APPOINTMENTS.md §7.1 requires "the justification (if required) recorded." The canonical storage model for no-show justification is NOT ratified:
+**Finding:** The `POST /appointments/:id/no-show` controller parses an optional `reason` from the request body but previously discarded it silently (did not pass it to `markNoShow`). APPOINTMENTS.md §7.1 requires "the justification (if required) recorded." The canonical storage model for no-show justification was NOT ratified:
 - The cancellation precedent stores `reason` in audit metadata.
 - The no-show PHI-avoidance rule (and existing test) excludes free-text from audit metadata.
-- No appointment column or dedicated table exists for no-show justification.
+- No appointment column or dedicated table existed for no-show justification.
 
-**Action taken:** The controller now passes `reason` through to `markNoShow` (no silent discard at the boundary). The service accepts the parameter but does NOT persist it, pending the operator decision. The existing no-show audit metadata test (no PHI, only `endpoint` + `appointmentId`) remains valid.
+**Operator decision (RATIFIED):** Option (b) — a new `no_show_reason` column on `appointments` (forward-only migration). The free-text reason is stored on the appointment row, NOT in generic audit metadata, keeping the audit trail PHI-safe.
 
-**Operator decision required:** Ratify the no-show justification storage model:
-- (a) audit metadata (like cancellation) — but this conflicts with the no-show PHI-avoidance rule; or
-- (b) a new `no_show_reason` column on `appointments` — forward-only migration; or
-- (c) a dedicated `no_show_records` table — heavier, supports richer metadata.
+**Implemented:**
+- New nullable column `no_show_reason VARCHAR(500)` on `appointments` via migration `20260818000000_appointment_no_show_reason` (forward-only, additive, no DROP/TRUNCATE, existing rows default to NULL).
+- The domain `AppointmentTransitionInput` gained an optional `noShowReason?: string | null`. The repository writes it atomically with the status transition ONLY on the `transitioned` outcome (inside the same SERIALIZABLE transaction); `already_at_target` (idempotent re-mark) and `invalid_source_state` never touch the column, so an idempotent re-mark preserves the original reason. `undefined` (confirm/check-in/start/complete) leaves the column untouched.
+- The `markNoShow` service passes `noShowReason: reason ?? null`. The `void reason` placeholder and the "documented gap" language are removed.
+- The domain `Appointment` aggregate and the `appointmentFromPrisma` mapper carry `noShowReason`.
+- Audit metadata is unchanged: only `{ endpoint, appointmentId }` — no reason, no PHI. The free-text reason lives on the appointment row.
 
-Until decided, justification is accepted but not persisted.
-
-#### 3b. No-show authorization — OPERATOR CONFIRMATION REQUESTED
+#### 3b. No-show authorization — OPERATOR RATIFIED (no code change)
 
 **Finding:** APPOINTMENTS.md §7.1 prose says no-show recording is "a manual action by reception or clinical staff." The role table (§9.1) lists "no-show recording" under R06 (Receptionist) only. The implementation grants R06/R07/R09 (the operational booking roles, matching the booking/cancel/reschedule pattern) and denies R01/R02/R13.
 
-**Tension:** The prose ("clinical staff") could imply R01/R02 should also be authorized. The role table lists only R06. The existing pattern extends operational booking to R07/R09.
-
-**Action taken:** No code change. The current authorization (R06/R07/R09 granted, R01/R02/R13 denied) is retained as defensible per the role table + operational booking pattern. Operator confirmation requested.
+**Operator decision (RATIFIED):** The current authorization is correct: `appointments:no_show` is granted to R06 Receptionist, R07 Clinic Coordinator, and R09 Clinic Administrator (the clinic-booking operational roles); denied to R01 Physician, R02 Nurse, and R13 Platform/System Administrator. No code change. The "tension" prose-vs-role-table note is resolved in favour of the role table + operational booking pattern.
 
 #### 4. False negative test replacement
 
@@ -7617,6 +7615,21 @@ Until decided, justification is accepted but not persisted.
 - `packages/domain/src/workforce/workforce.repositories.ts` (delete doc-comment)
 - `PROJECT_CONTINUITY.md` (this section)
 
+### Files Added/Modified for Operator-Ratified No-Show Decisions (this child commit)
+
+**Created:**
+- `apps/api/prisma/migrations/20260818000000_appointment_no_show_reason/migration.sql` (forward-only `ALTER TABLE appointments ADD COLUMN no_show_reason VARCHAR(500)`)
+
+**Modified:**
+- `apps/api/prisma/schema.prisma` (Appointment model: `noShowReason String? @map("no_show_reason") @db.VarChar(500)`)
+- `packages/domain/src/scheduling/appointment.ts` (domain `Appointment.noShowReason: string | null`; `AppointmentTransitionInput.noShowReason?: string | null`)
+- `apps/api/src/infrastructure/database/mappers/appointment.mapper.ts` (`appointmentFromPrisma` maps `noShowReason`)
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` (`transitionStatus` writes `noShowReason` atomically on the `transitioned` outcome only; `undefined` leaves the column untouched)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (`markNoShow` passes `noShowReason: reason ?? null`; removed `void reason` and "documented gap" language)
+- `apps/api/src/modules/appointments/appointments-today.service.spec.ts` (mock `Appointment` carries `noShowReason: null`)
+- `apps/api/test/appointments/appointments-no-show.integration.spec.ts` (8 new justification-persistence PG17 tests + 1 concurrent-reason test)
+- `PROJECT_CONTINUITY.md` (this section)
+
 ### Corrective Validation Results (PostgreSQL 17)
 
 - `git diff --check`: clean
@@ -7637,5 +7650,24 @@ Until decided, justification is accepted but not persisted.
 
 ### Operator Decisions Required
 
-1. **No-show justification storage model** — ratify (a) audit metadata, (b) appointment column, or (c) dedicated table. Until decided, justification is accepted but not persisted.
-2. **No-show authorization scope** — confirm whether "clinical staff" (R01/R02) should be authorized alongside R06/R07/R09, or whether the role table (R06 only) + operational pattern (R06/R07/R09) is correct.
+1. **No-show justification storage model** — RATIFIED (option b: `no_show_reason` column on `appointments`) and IMPLEMENTED in this child commit. See §3 above.
+2. **No-show authorization scope** — RATIFIED (R06/R07/R09 granted; R01/R02/R13 denied; no code change). See §3b above.
+
+### Validation Results for Operator-Ratified No-Show Decisions (PostgreSQL 17)
+
+- `git diff --check`: clean. Conflict-marker scan: clean.
+- Prisma format / validate / generate: PASS. Migration SQL inspected: forward-only, additive (`ALTER TABLE ... ADD COLUMN`), no `DROP`/`TRUNCATE`/destructive rewrite/backfill.
+- Typecheck (`tsc --noEmit` domain + contracts + api): PASS.
+- API lint (`eslint "{src,test}/**/*.ts"`): PASS.
+- API unit tests (`src/**/*.spec.ts`): 492/492 passed.
+- `@ibn-hayan/domain` tests: 156/156 passed.
+- **PostgreSQL 17 integration (real PG 17.11):**
+  - No-show suite: 32/32 passed (includes 8 new justification-persistence tests + 1 concurrent-reason test).
+  - Full appointments suite: 254/254 passed (booking, cancellation, rescheduling, visit-lifecycle, no-show, provider-schedule, today — all green).
+  - Database/tenancy (BC10 Workforce): 196/196 passed.
+  - Encounters (Stage 2A): 42/42 passed.
+  - Clinical notes (BC03): 52/52 passed.
+  - Context: 55/55 passed. Clinic-admin: 24/24 passed. Role-preview: 53/53 passed.
+  - Auth: 35/35 passed. Audit suites (integration/database/concurrency/atomicity/verify/configuration): all pass.
+- API production build (`tsc -p tsconfig.build.json`): PASS.
+- Pre-existing failure (unrelated): `openapi.e2e-spec.ts` "production mode" test fails due to missing audit encryption keys in the local environment; confirmed failing on the clean tree before changes; CI provides the keys.

@@ -770,6 +770,12 @@ model Appointment {
   scheduledEnd   DateTime          @map("scheduled_end") @db.Timestamptz
   status         AppointmentStatus @default(booked)
   typeCode       String            @map("type_code") @db.VarChar(80)
+  // Optional free-text no-show justification (max 500 chars), persisted
+  // only on the first confirmed|arrived -> no_show transition. An
+  // idempotent re-mark does NOT overwrite the original value. Free-text
+  // is stored here (on the appointment row), NOT in generic audit
+  // metadata, to keep the audit trail PHI-safe.
+  noShowReason   String?           @map("no_show_reason") @db.VarChar(500)
   createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 

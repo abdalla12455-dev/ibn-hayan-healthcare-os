@@ -568,9 +568,23 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           // / DriverAdapterError conflict, which is retried by the
           // outer loop; on retry the row is re-observed at its
           // committed status and resolved deterministically above.
+          //
+          // The no-show reason is persisted ONLY on this first-time
+          // transition (the `transitioned` outcome). An idempotent
+          // re-mark (`already_at_target`) and an invalid source state
+          // never reach this branch, so the original reason is never
+          // overwritten. `undefined` (non-no-show transitions: confirm,
+          // check-in, start, complete) leaves the column untouched.
+          const data: {
+            status: typeof input.targetStatus;
+            noShowReason?: string | null;
+          } = { status: input.targetStatus };
+          if (input.noShowReason !== undefined) {
+            data.noShowReason = input.noShowReason ?? null;
+          }
           const updated = await tx.appointment.update({
             where: { id: appointmentId },
-            data: { status: input.targetStatus },
+            data,
           });
 
           return {

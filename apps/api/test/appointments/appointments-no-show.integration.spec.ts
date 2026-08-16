@@ -707,6 +707,157 @@ describe('Appointment No-Show Lifecycle (Scheduling Completion Milestone)', () =
   });
 
   // -------------------------------------------------------------------------
+  // Justification persistence (operator-ratified no-show reason storage)
+  // -------------------------------------------------------------------------
+
+  describe('Justification persistence', () => {
+    it('persists the supplied reason on the first confirmed -> no_show transition', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-persist',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const reason = 'Patient did not arrive for the scheduled appointment.';
+      const response = await markNoShow(cookie, appointmentId, { reason });
+      expect(response.status).toBe(200);
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.noShowReason).toBe(reason);
+    });
+
+    it('omitted reason stores null on the first no_show transition', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-omitted',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const response = await markNoShow(cookie, appointmentId, {});
+      expect(response.status).toBe(200);
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.noShowReason).toBeNull();
+    });
+
+    it('idempotent re-mark MUST NOT overwrite the original reason', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-no-overwrite',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const originalReason = 'Original no-show justification.';
+      const first = await markNoShow(cookie, appointmentId, {
+        reason: originalReason,
+      });
+      expect(first.status).toBe(200);
+      // Idempotent re-mark with a DIFFERENT reason.
+      const second = await markNoShow(cookie, appointmentId, {
+        reason: 'Attempted overwrite reason.',
+      });
+      expect(second.status).toBe(200);
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.noShowReason).toBe(originalReason);
+    });
+
+    it('idempotent re-mark with no reason MUST NOT clear the original reason', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-no-clear',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const originalReason = 'Patient was unreachable.';
+      await markNoShow(cookie, appointmentId, { reason: originalReason });
+      // Re-mark with no reason body.
+      await markNoShow(cookie, appointmentId, {});
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.noShowReason).toBe(originalReason);
+    });
+
+    it('invalid transition (booked -> no_show) writes nothing', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-invalid-transition',
+        'R09_ADMINISTRATOR',
+        'booked',
+      );
+      const response = await markNoShow(cookie, appointmentId, {
+        reason: 'Should not be persisted.',
+      });
+      expect(response.status).toBe(422);
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.status).toBe('booked');
+      expect(appt?.noShowReason).toBeNull();
+    });
+
+    it('cross-tenant access cannot alter another appointment reason', async () => {
+      // Tenant A has a confirmed appointment.
+      const seedA = await seedAppointment(
+        'reason-cross-tenant-a',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      // Tenant B is separate.
+      const seedB = await seedAppointment(
+        'reason-cross-tenant-b',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      // Tenant B tries to mark tenant A's appointment with a reason.
+      const response = await markNoShow(seedB.cookie, seedA.appointmentId, {
+        reason: 'Cross-tenant attempt.',
+      });
+      expect(response.status).toBe(404);
+      // Tenant A's appointment is unchanged — no reason, status intact.
+      const appt = await prisma.appointment.findUnique({
+        where: { id: seedA.appointmentId },
+      });
+      expect(appt?.status).toBe('confirmed');
+      expect(appt?.noShowReason).toBeNull();
+    });
+
+    it('audit metadata excludes the free-text reason (PHI-safe)', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'reason-audit-safe',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const secretReason =
+        'Confidential justification text that must not leak.';
+      await markNoShow(cookie, appointmentId, { reason: secretReason });
+      const rows = await prisma.auditOutboxEvent.findMany();
+      const noShowEvent = rows.find(
+        (r) =>
+          (r.canonicalEventDraft as { action?: string }).action ===
+          'appointments.no_show_recorded',
+      );
+      expect(noShowEvent).toBeDefined();
+      const metadata = (
+        noShowEvent!.canonicalEventDraft as {
+          metadata?: Record<string, unknown>;
+        }
+      ).metadata;
+      expect(metadata).toEqual({
+        endpoint: 'appointments_no_show',
+        appointmentId,
+      });
+      const metadataStr = JSON.stringify(metadata);
+      expect(metadataStr).not.toContain('Confidential');
+      expect(metadataStr).not.toContain('justification');
+      // The reason IS persisted on the appointment row.
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.noShowReason).toBe(secretReason);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Audit
   // -------------------------------------------------------------------------
 
@@ -820,6 +971,31 @@ describe('Appointment No-Show Lifecycle (Scheduling Completion Milestone)', () =
         where: { id: appointmentId },
       });
       expect(appt?.status).toBe('no_show');
+      const count = await countOutboxByAction('appointments.no_show_recorded');
+      expect(count).toBe(1);
+    });
+
+    it('concurrent no-show-vs-no-show with reasons: one writes, original preserved', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'concurrent-noshow-reason',
+        'R09_ADMINISTRATOR',
+        'confirmed',
+      );
+      const reasonA = 'Concurrent reason A.';
+      const reasonB = 'Concurrent reason B.';
+      const [r1, r2] = await Promise.all([
+        markNoShow(cookie, appointmentId, { reason: reasonA }),
+        markNoShow(cookie, appointmentId, { reason: reasonB }),
+      ]);
+      // Both succeed (one transitioned, one idempotent).
+      expect([r1.status, r2.status].sort()).toEqual([200, 200]);
+      const appt = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+      expect(appt?.status).toBe('no_show');
+      // The persisted reason is one of the two (the winner's reason);
+      // the idempotent loser did NOT overwrite it. Exactly one audit.
+      expect([reasonA, reasonB]).toContain(appt?.noShowReason);
       const count = await countOutboxByAction('appointments.no_show_recorded');
       expect(count).toBe(1);
     });

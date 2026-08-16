@@ -64,6 +64,11 @@ export type AppointmentStatus =
  * - `status`: current lifecycle status.
  * - `typeCode`: the appointment type code (e.g. 'consultation',
  *   'follow-up', 'procedure').
+ * - `noShowReason`: optional free-text justification persisted on the
+ *   first confirmed|arrived -> no_show transition. `null` for
+ *   appointments that were never marked no-show or that were marked
+ *   no-show without a supplied reason. Stored on the appointment row,
+ *   NOT in audit metadata (PHI-safe audit).
  * - `createdAt`: timestamp set by persistence layer.
  * - `updatedAt`: timestamp updated by persistence layer.
  */
@@ -78,6 +83,7 @@ export interface Appointment {
   readonly scheduledEnd: Date;
   readonly status: AppointmentStatus;
   readonly typeCode: string;
+  readonly noShowReason: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -142,10 +148,10 @@ export interface AppointmentCreated {
 /**
  * The outcome of an appointment cancellation attempt.
  *
- * Per STATUS_CODES.md §4.1, `cancelled` is a terminal status
+ * Per STATUS_CODES.md ┬د4.1, `cancelled` is a terminal status
  * ("Terminal (or rebooked as new appointment)"). The canonical
  * appointment lifecycle permits cancellation from the `booked`
- * (Scheduled) source state. Per APPOINTMENTS.md §16.2, commands are
+ * (Scheduled) source state. Per APPOINTMENTS.md ┬د16.2, commands are
  * "idempotent where the operation supports idempotency"; re-cancelling
  * an already-cancelled appointment is therefore an idempotent no-op.
  *
@@ -193,7 +199,7 @@ export type AppointmentCancelResult =
  * reschedule reason is carried in the audit event metadata, not in
  * this input (mirroring the cancellation-reason persistence decision).
  *
- * Per STATUS_CODES.md §4.1, the canonical reschedule transition is:
+ * Per STATUS_CODES.md ┬د4.1, the canonical reschedule transition is:
  * "New appointment created with Scheduled status; original marked
  * Cancelled." In the implemented lifecycle the `booked` status is the
  * canonical "Scheduled" status (the implemented enum does not contain
@@ -208,7 +214,7 @@ export interface AppointmentRescheduleInput {
 /**
  * The outcome of an appointment reschedule attempt.
  *
- * Per STATUS_CODES.md §4.1, rescheduling transitions the original
+ * Per STATUS_CODES.md ┬د4.1, rescheduling transitions the original
  * appointment out of its active slot and creates a replacement
  * appointment for the new slot: "New appointment created with
  * Scheduled status; original marked Cancelled." The operation is
@@ -249,22 +255,22 @@ export type AppointmentRescheduleResult =
 
 /**
  * The canonical forward visit-lifecycle transition graph for Stage 1F,
- * derived from STATUS_CODES.md §4.1 (AppointmentStatus transition map).
+ * derived from STATUS_CODES.md ┬د4.1 (AppointmentStatus transition map).
  *
  * The implemented enum uses `booked` for the canonical "Scheduled"
  * status, `arrived` for "CheckedIn", and `in_progress` for
- * "InProgress" (see STATUS_CODES.md §4.1 display-name mapping).
+ * "InProgress" (see STATUS_CODES.md ┬د4.1 display-name mapping).
  *
  * Stage 1F forward edges (excluding cancellation, rescheduling, and
  * no-show, which belong to other stages):
  *
- *   booked      → confirmed   (confirm)
- *   booked      → arrived     (check-in, direct check-in without prior confirmation)
- *   confirmed   → arrived     (check-in)
- *   arrived     → in_progress (start)
- *   in_progress → completed   (complete)
+ *   booked      ظْ confirmed   (confirm)
+ *   booked      ظْ arrived     (check-in, direct check-in without prior confirmation)
+ *   confirmed   ظْ arrived     (check-in)
+ *   arrived     ظْ in_progress (start)
+ *   in_progress ظْ completed   (complete)
  *
- * Backward transitions (e.g. confirmed → booked, an "unconfirm") are
+ * Backward transitions (e.g. confirmed ظْ booked, an "unconfirm") are
  * NOT part of Stage 1F's approved forward visit lifecycle and are
  * excluded from this stage.
  */
@@ -288,8 +294,8 @@ export const APPOINTMENT_VISIT_TRANSITIONS: Readonly<
  * appointment's current status is one of `allowedSourceStates` before
  * transitioning to `targetStatus`. The caller NEVER supplies an
  * arbitrary target; the target is fixed per command by the service
- * layer (confirm → `confirmed`, check-in → `arrived`, start →
- * `in_progress`, complete → `completed`).
+ * layer (confirm ظْ `confirmed`, check-in ظْ `arrived`, start ظْ
+ * `in_progress`, complete ظْ `completed`).
  *
  * The `idempotentIfAlreadyAtTarget` flag governs the behaviour when
  * the appointment is already in the target state. For a terminal
@@ -305,6 +311,17 @@ export interface AppointmentTransitionInput {
   readonly allowedSourceStates: readonly AppointmentStatus[];
   readonly targetStatus: AppointmentStatus;
   readonly idempotentIfAlreadyAtTarget: boolean;
+  /**
+   * Optional no-show justification persisted atomically with the FIRST
+   * confirmed|arrived -> no_show transition. The repository writes this
+   * value (or `null` when explicitly `null`/empty) ONLY on the
+   * `transitioned` outcome; `already_at_target` and
+   * `invalid_source_state` never touch the column, so an idempotent
+   * re-mark preserves the original reason. `undefined` means "this
+   * transition does not carry a no-show reason" (confirm, check-in,
+   * start, complete) — the repository leaves the column untouched.
+   */
+  readonly noShowReason?: string | null;
 }
 
 /**
