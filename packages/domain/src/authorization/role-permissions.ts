@@ -288,6 +288,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'patients:view',
   'patients:search',
   'patients:consent_view',
+  'clinical_notes:view',
 ] as const;
 
 /**
@@ -317,6 +318,62 @@ const RECEPTION_PATIENT_PERMISSIONS: readonly PermissionCode[] = [
   'patients:consent_grant',
   'patients:consent_view',
   'patients:consent_withdraw',
+] as const;
+
+/**
+ * The clinical-note write permissions granted to the canonical clinical
+ * authoring roles (R01 Physician, R02 Nurse, R05 Allied Health
+ * Professional). Per ROLES_AND_PERMISSIONS.md §4.2 (Summary
+ * Role-Permission Matrix), the "Clinical Doc" column grants RW (read +
+ * write) to R01, R02, and R05, and "–" (no permission) to R06, R07, R08,
+ * R11, and R13. Per the resource-permission matrix (§4.1, "Clinical
+ * documentation | Clinical note, care plan, observation | Read, write,
+ * amend"), the write permission on a clinical note encompasses create,
+ * sign, and amend.
+ *
+ * BR-BC03-CLIN-031 (Note Signing Authority): the signer must have signing
+ * authority for the note type (authority matrix configurable per
+ * facility). The per-facility authority matrix is NOT documented
+ * canonically; this matrix grants the `clinical_notes:sign` permission to
+ * the clinical authoring roles, and the service layer enforces the
+ * universal baseline (the author signs their own note) via the
+ * `ClinicalNoteSigningAuthorityPort`. No medical/legal policy is
+ * invented; the per-facility authority matrix is deferred.
+ *
+ * BR-BC03-CLIN-032 (Note Amendment Documentation): amendment must include
+ * reason and author. The `clinical_notes:amend` permission is granted to
+ * the clinical authoring roles; the service layer enforces the mandatory
+ * reason.
+ *
+ * These permissions are NOT granted to R13 System Administrator — per
+ * ROLES_AND_PERMISSIONS.md §4.2, R13's "Clinical Doc" cell is "–" (no
+ * clinical documentation access). R13 must NOT inherit clinical PHI
+ * access. R04 Technician's "Clinical Doc" cell is also "–" (no clinical
+ * documentation access).
+ */
+const CLINICAL_NOTE_WRITE_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'clinical_notes:create',
+  'clinical_notes:view',
+  'clinical_notes:sign',
+  'clinical_notes:amend',
+] as const;
+
+/**
+ * The clinical-note read-only permission granted to the clinical and
+ * operational read roles (R03 Pharmacist, R09 Administrator, R10
+ * Compliance Officer, R12 Executive). Per ROLES_AND_PERMISSIONS.md §4.2,
+ * the "Clinical Doc" column grants R (read) to R03, R09, R10, and R12.
+ * The `clinical_notes:view` permission is the read-only authorisation
+ * gate for the clinical-note read endpoints.
+ *
+ * R13 System Administrator is deliberately EXCLUDED: R13's "Clinical
+ * Doc" cell is "–". R04 Technician is EXCLUDED: R04's "Clinical Doc"
+ * cell is "–".
+ */
+const CLINICAL_NOTE_READ_PERMISSIONS: readonly PermissionCode[] = [
+  ...HUMAN_CONTEXT_PERMISSIONS,
+  'clinical_notes:view',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -388,30 +445,52 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   Record<PlatformRoleCode, readonly PermissionCode[]>
 > = {
   // R01 Physician: clinical encounter lifecycle + clinical patient read
-  // (own panel). Per USER_ROLES.md 10.1, R01's Patient Records cell is
-  // "Read (own panel)" - read/search/consent_view only; NO demographic
-  // write, NO consent write, NO registration.
+  // (own panel) + clinical-note authoring/signing/amendment. Per
+  // USER_ROLES.md 10.1, R01's Patient Records cell is "Read (own
+  // panel)" - read/search/consent_view only; NO demographic write, NO
+  // consent write, NO registration. Per ROLES_AND_PERMISSIONS.md 4.2,
+  // R01's "Clinical Doc" cell is "RW" (read + write; write encompasses
+  // create/sign/amend per 4.1).
   R01_PHYSICIAN: [
     ...PHYSICIAN_ENCOUNTER_PERMISSIONS,
+    ...CLINICAL_NOTE_WRITE_PERMISSIONS,
     'patients:view',
     'patients:search',
     'patients:consent_view',
   ],
-  // R02 Nurse: clinical encounter read/write + clinical patient read.
-  // Per USER_ROLES.md 10.1, R02's Patient Records cell is "Read". Same
-  // patient read permissions as R01; NO demographic/consent write.
+  // R02 Nurse: clinical encounter read/write + clinical patient read +
+  // clinical-note authoring/signing/amendment. Per ROLES_AND_PERMISSIONS.md
+  // 4.2, R02's "Clinical Doc" cell is "RW".
   R02_NURSE: [
     ...NURSE_ENCOUNTER_PERMISSIONS,
+    ...CLINICAL_NOTE_WRITE_PERMISSIONS,
     'patients:view',
     'patients:search',
     'patients:consent_view',
   ],
-  // R03 Pharmacist: encounter read + patient read (med).
-  R03_PHARMACIST: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
-  // R04 Technician: encounter read + patient read.
+  // R03 Pharmacist: encounter read + patient read (med) + clinical-note
+  // read. Per ROLES_AND_PERMISSIONS.md 4.2, R03's "Clinical Doc" cell is
+  // "R" (read).
+  R03_PHARMACIST: [
+    ...ENCOUNTER_READ_PERMISSIONS,
+    ...CLINICAL_NOTE_READ_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+  ],
+  // R04 Technician: encounter read + patient read. Per
+  // ROLES_AND_PERMISSIONS.md 4.2, R04's "Clinical Doc" cell is "-" (no
+  // clinical-documentation access). R04 receives NO clinical_notes
+  // permission.
   R04_TECHNICIAN: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
-  // R05 Allied Health: encounter read + patient read.
-  R05_ALLIED_HEALTH_PROFESSIONAL: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R05 Allied Health: encounter read + patient read + clinical-note
+  // authoring/signing/amendment. Per ROLES_AND_PERMISSIONS.md 4.2, R05's
+  // "Clinical Doc" cell is "RW" (read + write).
+  R05_ALLIED_HEALTH_PROFESSIONAL: [
+    ...ENCOUNTER_READ_PERMISSIONS,
+    ...CLINICAL_NOTE_WRITE_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+  ],
   // R06 Receptionist: clinic booking + encounter read (sched) + FULL
   // patient registration/demographics/consent-capture write. Per
   // USER_ROLES.md 10.1, R06's Patient Records cell is "Write" - the
@@ -440,30 +519,45 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   R08_BILLER: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
   // R09 Clinic Administrator: clinic admin overview + appointments +
   // encounter read + patient read (operational oversight) +
-  // consent_view. Per USER_ROLES.md 10.1, R09's Patient Records cell
-  // is "Read" - operational oversight, NO demographic/consent write.
-  // R09 may view consent state (operational oversight of the consent
-  // gate) but may NOT grant/withdraw consent or register/update
-  // demographics. R09 receives CLINIC_ADMIN_PERMISSIONS (which now
-  // includes patients:view, patients:search, patients:consent_view).
+  // consent_view + clinical-note read. Per USER_ROLES.md 10.1, R09's
+  // Patient Records cell is "Read" - operational oversight, NO
+  // demographic/consent write. R09 may view consent state (operational
+  // oversight of the consent gate) but may NOT grant/withdraw consent or
+  // register/update demographics. Per ROLES_AND_PERMISSIONS.md 4.2,
+  // R09's "Clinical Doc" cell is "R" (read - operational oversight, NO
+  // clinical-note write/amend). R09 receives CLINIC_ADMIN_PERMISSIONS
+  // (which now includes patients:view, patients:search,
+  // patients:consent_view, clinical_notes:view).
   R09_ADMINISTRATOR: CLINIC_ADMIN_PERMISSIONS,
   // R10 Compliance Officer: encounter read + patient read (audit) +
-  // consent_view.
+  // consent_view + clinical-note read (audit/compliance oversight). Per
+  // ROLES_AND_PERMISSIONS.md 4.2, R10's "Clinical Doc" cell is "R".
   R10_COMPLIANCE_OFFICER: [
     ...ENCOUNTER_READ_PERMISSIONS,
+    ...CLINICAL_NOTE_READ_PERMISSIONS,
     'patients:view',
     'patients:search',
     'patients:consent_view',
   ],
-  // R11 HR Manager: context permissions only (no patient/encounter access).
+  // R11 HR Manager: context permissions only (no patient/encounter/clinical-note access).
   R11_HR_MANAGER: HUMAN_CONTEXT_PERMISSIONS,
-  // R12 Executive: encounter read + patient read (summary).
-  R12_EXECUTIVE: [...ENCOUNTER_READ_PERMISSIONS, 'patients:view', 'patients:search'],
+  // R12 Executive: encounter read + patient read (summary) +
+  // clinical-note read (summary). Per ROLES_AND_PERMISSIONS.md 4.2,
+  // R12's "Clinical Doc" cell is "R".
+  R12_EXECUTIVE: [
+    ...ENCOUNTER_READ_PERMISSIONS,
+    ...CLINICAL_NOTE_READ_PERMISSIONS,
+    'patients:view',
+    'patients:search',
+  ],
   // R13 System Administrator (Platform Super Admin) is explicitly NOT
-  // granted any patient permissions. Per USER_ROLES.md 10.1, R13's
-  // Patient Records cell is "-" (no patient access). R13 receives
+  // granted any patient, encounter, or clinical-note permissions. Per
+  // USER_ROLES.md 10.1, R13's Patient Records cell is "-" (no patient
+  // access). Per ROLES_AND_PERMISSIONS.md 4.2, R13's "Clinical Doc" cell
+  // is "-" (no clinical-documentation access). R13 receives
   // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions) ONLY. R13 must
-  // NOT inherit clinical operational permissions or patient PHI access.
+  // NOT inherit clinical operational permissions, patient PHI access,
+  // or clinical-note PHI access.
   R13_SYSTEM_ADMINISTRATOR: HUMAN_CONTEXT_PERMISSIONS,
   // R14 Integration Account is denied the interactive workspace
   // context permissions. The integration account is non-human and

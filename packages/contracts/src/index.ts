@@ -32,3 +32,4 @@ export * from './clinic-admin/index.js';
 export * from './appointments/index.js';
 export * from './encounters/index.js';
 export * from './patients/index.js';
+export * from './clinical-notes/index.js';

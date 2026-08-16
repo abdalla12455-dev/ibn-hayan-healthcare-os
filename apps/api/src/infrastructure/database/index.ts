@@ -36,5 +36,7 @@ export {
   WORKFORCE_REPOSITORY,
   USER_PROVIDER_BINDING_REPOSITORY,
   ENCOUNTER_REPOSITORY,
+  CLINICAL_NOTE_REPOSITORY,
+  CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
 } from './tokens.js';
 export { LocalCredentialService } from './repositories/local-credential.service.js';
