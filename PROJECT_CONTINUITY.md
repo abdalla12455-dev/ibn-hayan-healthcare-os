@@ -7208,9 +7208,17 @@ The service only scope-validated those provider IDs via `ProviderRepository.isEl
 
 The signing-authority baseline (`authorId === actorId`) is now a genuine anti-spoofing check because both identities are server-resolved from the same bound Provider. The per-facility authority matrix remains deferred (no medical/legal policy invented).
 
-### Merge-Conflict Migration Resolution (2026-08-15)
+### Migration-History Safety Correction (2026-08-16, FINAL pre-merge)
 
-> When BC03 was rebased onto main (BC10), both BC03 (`20260814000000`) and BC10 (`20260815000000`) migrations created the identical `ClinicalNoteAuthorRole` enum. BC03 (earlier timestamp) owns the enum as the canonical clinical-note bounded context; BC10 only references it. The BC10 migration's `CREATE TYPE` was made idempotent via `DO $$ ... IF to_regtype(...) IS NULL ...` so application succeeds regardless of ordering. This is a forward-only, additive, non-destructive correction of an unapplied migration (no shared/production DB applied it). No `DROP`, no `TRUNCATE`, no history rewrite.
+> The prior approach (making the BC10 migration's `CREATE TYPE` idempotent via `DO/IF NOT EXISTS`) modified an already-merged migration — a migration-history safety violation. This is now corrected:
+>
+> 1. **BC10 migration `20260815000000_bc10_user_provider_identity_binding` restored EXACTLY to the merged main (`af88a405`) version.** PR #28 shows ZERO diff for that file. The merged BC10 migration owns and creates the `ClinicalNoteAuthorRole` enum.
+> 2. **BC03 migration renamed from `20260814000000` to `20260816000000`** (timestamp AFTER BC10's `20260815000000`), reflecting that BC10 is now an already-merged prerequisite. The renamed BC03 migration does NOT create `ClinicalNoteAuthorRole` (BC10 already creates it); it only references the existing enum on `clinical_notes.author_role` and `clinical_note_revisions.author_role`. It still creates `ClinicalNoteType`, `ClinicalNoteStatus`, and `ClinicalNoteRevisionAction`.
+> 3. No already-merged migration is edited. The rename is safe because the BC03 migration was never applied to a shared/production database (unmerged, disposable test DBs only).
+>
+> **Both migration paths validated on PostgreSQL 17:**
+> - **Path A (fresh install from zero):** all 14 migrations apply cleanly; 52/52 clinical-notes integration tests pass.
+> - **Path B (real upgrade path):** main's 13 migrations (incl. BC10) applied first; then ONLY `20260816000000_bc03_clinical_notes_foundation` applied with NO checksum/history modification to existing migrations. `prisma migrate status` = "Database schema is up to date!" No drift.
 
 ### Concurrency Race Fix (2026-08-15)
 
@@ -7235,12 +7243,12 @@ The signing-authority baseline (`authorId === actorId`) is now a genuine anti-sp
 
 ### Migration
 
-- **One forward-only additive migration:** `20260814000000_bc03_clinical_notes_foundation` — new `clinical_notes` and `clinical_note_revisions` tables, new enums (`ClinicalNoteType`, `ClinicalNoteStatus`, `ClinicalNoteAuthorRole`), `ClinicalNoteRevisionAction` enum, tenant-scoped composite indexes, `ON DELETE RESTRICT` on the intra-BC revision→note relation. No existing migration edited; no `DROP`, no `TRUNCATE`, no destructive type rewrite, no backfill. Existing Patient/Appointment/Encounter/Workforce/Consent data remains valid. SQL inspected manually; no foreign keys to cross-BC tables (state isolation enforced).
+- **One forward-only additive migration:** `20260816000000_bc03_clinical_notes_foundation` (renamed from `20260814000000` to a timestamp AFTER the merged BC10 `20260815000000`) — new `clinical_notes` and `clinical_note_revisions` tables, new enums (`ClinicalNoteType`, `ClinicalNoteStatus`, `ClinicalNoteRevisionAction`); `ClinicalNoteAuthorRole` is NOT created here (owned/created by the merged BC10 migration). Tenant-scoped composite indexes, `ON DELETE RESTRICT` on the intra-BC revision→note relation. No existing/merged migration edited; no `DROP`, no `TRUNCATE`, no destructive type rewrite, no backfill. Existing Patient/Appointment/Encounter/Workforce/Consent data remains valid. SQL inspected manually; no foreign keys to cross-BC tables (state isolation enforced).
 
 ### Files Created / Modified
 
 **Created (untracked):**
-- `apps/api/prisma/migrations/20260814000000_bc03_clinical_notes_foundation/migration.sql`
+- `apps/api/prisma/migrations/20260816000000_bc03_clinical_notes_foundation/migration.sql` (renamed from `20260814000000`)
 - `apps/api/src/modules/clinical-notes/{clinical-notes.controller,clinical-notes.errors,clinical-notes.module,clinical-notes.service,index}.ts`
 - `apps/api/src/infrastructure/database/mappers/clinical-note.mapper.ts`
 - `apps/api/src/infrastructure/database/repositories/prisma-clinical-note.repository.ts`
@@ -7268,7 +7276,7 @@ The signing-authority baseline (`authorId === actorId`) is now a genuine anti-sp
 - `@ibn-hayan/domain` tests: 156 passed. `@ibn-hayan/contracts` tests: 208 passed.
 - API unit tests (`src/**/*.spec.ts`): 492 passed (Patient/Encounter/Workforce regression intact).
 - **PostgreSQL 17 clinical-notes integration tests: 52 passed** (local PG17, real DB via `setupDatabaseTests()`). Covers create/view/sign/amend/addendum/withdraw, tenant isolation (cross-tenant 404), authorization grants/denials, R13 denial, signing-authority (author-only), repeated/invalid signing, amendment-with-reason and without-reason rejection, original signed-content preservation, audit-exactly-once, no-PHI-in-audit-metadata, and sign-vs-sign / amend-vs-amend concurrency (one succeeds, one 422, one audit event).
-- **Spoofing-negative tests (new):** caller-supplied `authorId` → 400 (strict schema); unbound user → fail-closed 422; null `clinicalAuthorRole` → 422; student binding → 422; nurse signs physician's note → 403; different bound provider amends another author's note → 403.
+- **Spoofing-negative tests (new):** caller-supplied `authorId` → 400 (strict schema); unbound user → fail-closed 422; null `clinicalAuthorRole` → 422; student binding → 422; nurse signs physician's note → 403 (signing is author-only per BR-BC03-CLIN-031). Cross-author amendment is ALLOWED per BR-BC03-CLIN-032 (amendment requires reason + author, NOT author-restricted); a different bound provider with `clinical_notes:amend` may amend, with the amending author server-resolved and the original signed revision preserved.
 - **Regression (PostgreSQL 17):** Encounters (Stage 2A) 42 passed; Appointments (Stage 1C–1F) 206 passed; Database/BC10 Workforce (incl. user-provider-binding) 196 passed; Clinic-Admin 24 passed.
 - Production build (`pnpm -r run build`): PASS (api + web + shared packages).
 

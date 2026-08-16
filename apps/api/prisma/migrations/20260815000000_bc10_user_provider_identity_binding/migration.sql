@@ -51,28 +51,17 @@
 -- All indexes follow the repository naming convention (table_column_idx).
 -- ---------------------------------------------------------------------------
 
--- 1. ClinicalNoteAuthorRole enum.
---    This enum is owned and created by BC03 (migration
---    20260814000000_bc03_clinical_notes_foundation), which is the
---    canonical owning bounded context for clinical-note state. BC10 only
---    REFERENCES it as a trusted Provider attribute. To keep migration
---    application idempotent regardless of ordering (BC03's earlier
---    timestamp runs first on this merged branch), use DO/IF NOT EXISTS
---    here (harmless no-op if BC03 already created the enum).
+-- 1. Create ClinicalNoteAuthorRole enum (canonical BC03 catalogue, referenced
+--    by BC10 as a trusted Provider attribute).
 
-DO $$
-BEGIN
-  IF to_regtype('public."ClinicalNoteAuthorRole"') IS NULL THEN
-    CREATE TYPE "ClinicalNoteAuthorRole" AS ENUM (
-      'physician',
-      'nurse',
-      'pharmacist',
-      'therapist',
-      'midlevel',
-      'student'
-    );
-  END IF;
-END $$;
+CREATE TYPE "ClinicalNoteAuthorRole" AS ENUM (
+  'physician',
+  'nurse',
+  'pharmacist',
+  'therapist',
+  'midlevel',
+  'student'
+);
 
 -- 2. Add nullable trusted clinical_author_role to providers.
 --    Additive: existing rows default to NULL (no clinical author role configured).

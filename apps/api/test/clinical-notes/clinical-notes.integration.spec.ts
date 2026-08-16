@@ -1346,13 +1346,18 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
       expect(res.status).toBe(200);
     });
 
-    it('a different bound provider cannot amend another author note', async () => {
+    it('a different bound provider CAN amend another author note (cross-author amendment is allowed per BR-BC03-CLIN-032)', async () => {
       // The physician authors and signs. The nurse (different bound
-      // provider) attempts to amend — amend has no signing-authority gate
-      // (any clinical author may amend per the matrix), but the actorId
-      // is server-resolved to the nurse's provider. The amendment
-      // succeeds (amend is not author-restricted), and the revision
-      // records the NURSE as the amending author (not the physician).
+      // provider) amends. Per BR-BC03-CLIN-032, amendment requires only
+      // a reason and author — it is NOT restricted to the original note
+      // author (unlike signing, which is author-only per BR-BC03-CLIN-031).
+      // AUTHORIZATION §217 confirms a finalized note is "read-only for all
+      // principals except through the documented amendment workflow." The
+      // nurse holds clinical_notes:amend (R02), so the amendment succeeds.
+      // The actorId is server-resolved to the nurse's bound provider, and
+      // the revision records the NURSE as the amending author (not the
+      // physician), with the reason. The original signed revision is
+      // preserved verbatim (immutable history).
       const f = await buildFixture();
       const created = await createNote(f.physicianCookie, draftBody(f));
       await signNote(f.physicianCookie, created.body.id, {});
@@ -1369,6 +1374,12 @@ describe('Clinical Notes — BC03 Foundation (PostgreSQL 17)', () => {
         (r: { action: string }) => r.action === 'amended',
       );
       expect(amended.authorId).not.toBe(f.providerId);
+      // The original signed revision is preserved (immutable history).
+      const signed = history.body.revisions.find(
+        (r: { action: string }) => r.action === 'signed',
+      );
+      expect(signed).toBeDefined();
+      expect(signed.authorId).toBe(f.providerId);
     });
   });
 
