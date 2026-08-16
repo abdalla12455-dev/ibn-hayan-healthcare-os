@@ -1066,6 +1066,7 @@ export class AppointmentsController {
       id,
       cookieValue,
       buildAuditContext(req),
+      parseResult.data.reason,
     );
     if (result === null) {
       throw sessionRequired();

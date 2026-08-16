@@ -86,16 +86,19 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
     tenantId: TenantId,
     entryId: ProviderScheduleEntryId,
   ): Promise<ProviderScheduleEntry | null> {
-    const row = await this.prisma.providerSchedule.deleteMany({
+    // Read-then-delete: first find the entry (tenant-scoped), then
+    // delete it. This returns the deleted entry's content to satisfy
+    // the interface contract (deleted-entry-or-null), and the
+    // tenant-scoped findFirst ensures cross-tenant deletes return null.
+    const row = await this.prisma.providerSchedule.findFirst({
       where: { id: entryId, tenantId },
     });
-    if (row.count === 0) {
+    if (row === null) {
       return null;
     }
-    // deleteMany doesn't return the deleted row; re-query is unnecessary
-    // since the row is gone. Return a minimal placeholder for the
-    // interface contract — callers use the return value only to
-    // confirm deletion, not to read the deleted content.
-    return null;
+    await this.prisma.providerSchedule.delete({
+      where: { id: entryId },
+    });
+    return providerScheduleFromPrisma(row);
   }
 }

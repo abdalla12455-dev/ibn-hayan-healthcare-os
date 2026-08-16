@@ -133,7 +133,12 @@ export class PrismaProviderRepository implements ProviderRepository {
 
     // Convert the UTC scheduledStart to the facility's local timezone
     // to determine the ISO day of week and local time-of-day.
-    let localParts: { dayOfWeek: number; startTime: string; endTime: string };
+    let localParts: {
+      dayOfWeek: number;
+      startTime: string;
+      endTime: string;
+      crossMidnight: boolean;
+    };
     try {
       localParts = this.utcToLocalDayAndTimes(
         scheduledStart,
@@ -142,6 +147,14 @@ export class PrismaProviderRepository implements ProviderRepository {
       );
     } catch {
       // Invalid timezone → fail closed.
+      return false;
+    }
+
+    // Cross-midnight fail-closed: if the facility-local scheduledStart
+    // and scheduledEnd fall on different calendar dates, the slot
+    // spans midnight. Cross-midnight scheduling is not supported in
+    // this stage, so availability cannot be verified → block.
+    if (localParts.crossMidnight) {
       return false;
     }
 
@@ -181,41 +194,58 @@ export class PrismaProviderRepository implements ProviderRepository {
    * facility's IANA timezone. The day of week follows ISO 8601
    * (1 = Monday … 7 = Sunday).
    *
+   * Cross-midnight detection: if the facility-local scheduledStart
+   * and scheduledEnd fall on different calendar dates, this method
+   * returns `crossMidnight: true`. The caller treats this as
+   * unavailable (fail-closed) because cross-midnight scheduling is
+   * not supported in this stage. This prevents a slot like 23:00–00:30
+   * from being incorrectly matched against a same-day schedule entry.
+   *
    * Throws if the timezone is invalid (caught by the caller → fail closed).
    */
   private utcToLocalDayAndTimes(
     scheduledStart: Date,
     scheduledEnd: Date,
     timezone: string,
-  ): { dayOfWeek: number; startTime: string; endTime: string } {
+  ): {
+    dayOfWeek: number;
+    startTime: string;
+    endTime: string;
+    crossMidnight: boolean;
+  } {
     const startParts = this.toLocalParts(scheduledStart, timezone);
     const endParts = this.toLocalParts(scheduledEnd, timezone);
 
-    // The day of week is determined by the start time. If the
-    // appointment spans midnight (end is on the next day), the
-    // availability check uses the start day. This is the minimum
-    // canonical behavior; cross-midnight scheduling is deferred.
     const dayOfWeek = startParts.dayOfWeek;
+
+    // Detect cross-midnight: the start and end fall on different
+    // facility-local calendar dates. Until cross-midnight scheduling
+    // is implemented, this is treated as unavailable (fail-closed).
+    const crossMidnight = startParts.localDate !== endParts.localDate;
 
     return {
       dayOfWeek,
       startTime: startParts.timeOfDay,
       endTime: endParts.timeOfDay,
+      crossMidnight,
     };
   }
 
   /**
-   * Convert a single UTC Date to the facility-local ISO day of week
-   * and local time-of-day string.
+   * Convert a single UTC Date to the facility-local ISO day of week,
+   * local date string (YYYY-MM-DD), and local time-of-day string.
    */
   private toLocalParts(
     date: Date,
     timezone: string,
-  ): { dayOfWeek: number; timeOfDay: string } {
+  ): { dayOfWeek: number; timeOfDay: string; localDate: string } {
     // Intl.DateTimeFormat throws RangeError for invalid timezones.
     const fmt = new Intl.DateTimeFormat('en-US', {
       timeZone: timezone,
       weekday: 'short',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -224,6 +254,9 @@ export class PrismaProviderRepository implements ProviderRepository {
 
     const parts = fmt.formatToParts(date);
     const weekdayStr = parts.find((p) => p.type === 'weekday')?.value;
+    const year = parts.find((p) => p.type === 'year')?.value ?? '1970';
+    const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+    const day = parts.find((p) => p.type === 'day')?.value ?? '01';
     const hour = parts.find((p) => p.type === 'hour')?.value ?? '00';
     const minute = parts.find((p) => p.type === 'minute')?.value ?? '00';
     const second = parts.find((p) => p.type === 'second')?.value ?? '00';
@@ -249,6 +282,7 @@ export class PrismaProviderRepository implements ProviderRepository {
     return {
       dayOfWeek,
       timeOfDay: `${normalizedHour}:${minute}:${second}`,
+      localDate: `${year}-${month}-${day}`,
     };
   }
 }

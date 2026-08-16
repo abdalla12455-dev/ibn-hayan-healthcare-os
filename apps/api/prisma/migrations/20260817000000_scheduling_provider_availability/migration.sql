@@ -21,6 +21,13 @@
 -- dropped or rewritten, and no already-merged migration is touched.
 -- Existing Patient, Appointment, Encounter, Provider, Consent, and
 -- Workforce data remain valid.
+--
+-- Tenant/org/facility integrity: composite foreign keys enforce that
+-- (tenant_id, provider_id) matches an existing providers row and
+-- (tenant_id, organisation_id, facility_id) matches an existing
+-- facilities row, matching the BC10 ProviderFacilityAssignment
+-- defense-in-depth convention. The database rejects cross-tenant
+-- provider schedules and facility/organisation mismatches.
 
 -- 1. Create the `provider_schedules` table.
 CREATE TABLE "provider_schedules" (
@@ -49,17 +56,42 @@ ALTER TABLE "provider_schedules" ADD CONSTRAINT "provider_schedules_time_order_c
   CHECK ("end_time" > "start_time");
 
 -- 3. Foreign keys.
--- Provider FK (simple). onDelete: CASCADE — if a provider is deleted,
--- their schedule entries are removed. This matches the Prisma relation
+--
+-- Defense-in-depth convention (matching BC10 ProviderFacilityAssignment
+-- in 20260803010000_bc10_workforce_reference_foundation):
+-- - Simple FK: provider_id → providers(id) (Prisma convenience).
+-- - Composite FK: (tenant_id, provider_id) → providers(tenant_id, id)
+--   Ensures the provider belongs to the same tenant as the schedule.
+-- - Simple FK: facility_id → facilities(id) (Prisma convenience).
+-- - Composite FK: (tenant_id, organisation_id, facility_id) →
+--   facilities(tenant_id, organisation_id, id)
+--   Ensures the facility belongs to the same tenant AND organisation
+--   as the schedule entry. This single triple-column FK rejects
+--   cross-tenant and cross-organisation mismatches at the DB level.
+--
+-- onDelete: CASCADE — if a provider or facility is deleted, their
+-- schedule entries are removed. This matches the Prisma relation
 -- definition and does not affect appointment history (appointments
 -- reference providers by logical UUID, not FK).
+
+-- Provider FK (simple, Prisma convenience).
 ALTER TABLE "provider_schedules" ADD CONSTRAINT "provider_schedules_provider_id_fkey"
   FOREIGN KEY ("provider_id") REFERENCES "providers"("id") ON DELETE CASCADE ON UPDATE RESTRICT;
 
--- Facility FK (simple). onDelete: CASCADE — if a facility is deleted,
--- its schedule entries are removed.
+-- Composite FK: tenant integrity for provider.
+ALTER TABLE "provider_schedules" ADD CONSTRAINT "provider_schedules_tenant_provider_fkey"
+  FOREIGN KEY ("tenant_id", "provider_id") REFERENCES "providers"("tenant_id", "id")
+  ON DELETE CASCADE ON UPDATE RESTRICT;
+
+-- Facility FK (simple, Prisma convenience).
 ALTER TABLE "provider_schedules" ADD CONSTRAINT "provider_schedules_facility_id_fkey"
   FOREIGN KEY ("facility_id") REFERENCES "facilities"("id") ON DELETE CASCADE ON UPDATE RESTRICT;
+
+-- Composite FK: tenant + organisation integrity for facility.
+ALTER TABLE "provider_schedules" ADD CONSTRAINT "provider_schedules_tenant_org_facility_fkey"
+  FOREIGN KEY ("tenant_id", "organisation_id", "facility_id")
+  REFERENCES "facilities"("tenant_id", "organisation_id", "id")
+  ON DELETE CASCADE ON UPDATE RESTRICT;
 
 -- 4. Indexes for the canonical query patterns.
 -- Tenant isolation filter.

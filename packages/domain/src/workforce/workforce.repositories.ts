@@ -273,7 +273,9 @@ export interface ProviderScheduleRepository {
 
   /**
    * Delete a schedule entry by its ID, scoped to the authenticated
-   * tenant. Returns the deleted entry, or null if not found.
+   * tenant. Returns the deleted entry, or null if no entry was found
+   * for the given ID in the given tenant (cross-tenant deletes are
+   * safe no-ops that return null).
    *
    * @param tenantId The tenant scope.
    * @param entryId The schedule entry ID to delete.

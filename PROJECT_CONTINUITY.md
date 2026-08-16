@@ -7541,3 +7541,101 @@ Permission catalogue updated: 36 to 37 codes. R09 count: 19 to 20. R06 count: 21
 ### Immediate Next Step
 
 Push the feature branch, create a draft PR to `main`, and wait for Main CI (PostgreSQL 17) to succeed on the exact PR head. Do NOT merge until operator review.
+
+---
+
+## Scheduling Completion Milestone — Corrective Review (PR #30)
+
+A final corrective review of PR #30 identified and fixed five blockers before operator merge review. This section documents the corrections and one operator decision required.
+
+### Corrective Changes
+
+#### 1. Composite FK convention (DB tenant/org/facility integrity)
+
+**Finding:** The `provider_schedules` migration used only simple FKs (`provider_id → providers(id)` and `facility_id → facilities(id)`). The BC10 `ProviderFacilityAssignment` table (migration `20260803010000_bc10_workforce_reference_foundation`) uses defense-in-depth composite FKs: `(tenant_id, provider_id) → providers(tenant_id, id)` and `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)`. The SCM migration did not match this convention, so the database could not reject a `provider_schedules` row with a cross-tenant provider or a facility/organisation mismatch.
+
+**Fix:** Added composite FKs to `20260817000000_scheduling_provider_availability/migration.sql`:
+- `provider_schedules_tenant_provider_fkey`: `(tenant_id, provider_id) → providers(tenant_id, id)`
+- `provider_schedules_tenant_org_facility_fkey`: `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)`
+
+The simple FKs are retained for Prisma relation convenience. The migration was unmerged/unapplied, so amending it (rather than a corrective migration) follows the "unapplied migration correction" policy.
+
+**Tests added:** Three PG17 tests — cross-tenant provider rejection, cross-organisation facility rejection, and consistent-row acceptance.
+
+#### 2. Cross-midnight availability logic (fail-closed)
+
+**Finding:** `isProviderAvailableAtFacility` converted UTC start/end to facility-local time-of-day strings and compared them against `start_time`/`end_time` schedule entries. If the slot spanned midnight (e.g., 23:00–00:30 local), the `endTime` string ("00:30:00") was lexicographically less than the `startTime` ("23:00:00"), and the `end_time > start_time` CHECK on the schedule table prevented such entries — but the availability comparison logic could still produce incorrect matches or misses depending on the schedule entry. Cross-midnight scheduling was not supported but was not explicitly fail-closed.
+
+**Fix:** `utcToLocalDayAndTimes` now computes `localDate` for both start and end. If they differ (cross-midnight), `isProviderAvailableAtFacility` returns `false` (fail-closed). This prevents a cross-midnight slot from being matched against a same-day schedule entry.
+
+**Tests added:** Two PG17 tests — cross-midnight booking blocked, cross-midnight rescheduling blocked.
+
+#### 3. No-show justification recording — OPERATOR DECISION REQUIRED
+
+**Finding:** The `POST /appointments/:id/no-show` controller parses an optional `reason` from the request body but previously discarded it silently (did not pass it to `markNoShow`). APPOINTMENTS.md §7.1 requires "the justification (if required) recorded." The canonical storage model for no-show justification is NOT ratified:
+- The cancellation precedent stores `reason` in audit metadata.
+- The no-show PHI-avoidance rule (and existing test) excludes free-text from audit metadata.
+- No appointment column or dedicated table exists for no-show justification.
+
+**Action taken:** The controller now passes `reason` through to `markNoShow` (no silent discard at the boundary). The service accepts the parameter but does NOT persist it, pending the operator decision. The existing no-show audit metadata test (no PHI, only `endpoint` + `appointmentId`) remains valid.
+
+**Operator decision required:** Ratify the no-show justification storage model:
+- (a) audit metadata (like cancellation) — but this conflicts with the no-show PHI-avoidance rule; or
+- (b) a new `no_show_reason` column on `appointments` — forward-only migration; or
+- (c) a dedicated `no_show_records` table — heavier, supports richer metadata.
+
+Until decided, justification is accepted but not persisted.
+
+#### 3b. No-show authorization — OPERATOR CONFIRMATION REQUESTED
+
+**Finding:** APPOINTMENTS.md §7.1 prose says no-show recording is "a manual action by reception or clinical staff." The role table (§9.1) lists "no-show recording" under R06 (Receptionist) only. The implementation grants R06/R07/R09 (the operational booking roles, matching the booking/cancel/reschedule pattern) and denies R01/R02/R13.
+
+**Tension:** The prose ("clinical staff") could imply R01/R02 should also be authorized. The role table lists only R06. The existing pattern extends operational booking to R07/R09.
+
+**Action taken:** No code change. The current authorization (R06/R07/R09 granted, R01/R02/R13 denied) is retained as defensible per the role table + operational booking pattern. Operator confirmation requested.
+
+#### 4. False negative test replacement
+
+**Finding:** The test "rescheduling is blocked when the new slot is outside working hours" did not actually test rescheduling — it only tested booking (asserted `bookRes.status === 422`). It was a false rescheduling negative test.
+
+**Fix:** Replaced with a real rescheduling negative test: book a valid slot inside working hours, then attempt to reschedule to a slot outside working hours. Asserts: 422 `APPOINTMENT_PROVIDER_NOT_AVAILABLE`, original appointment unchanged, no replacement created, no reschedule audit event.
+
+#### 5. ProviderScheduleRepository.delete() contract
+
+**Finding:** `delete()` used `deleteMany` and returned `null` (a placeholder), violating the interface contract that promises the deleted entry or null. The doc-comment acknowledged this ("deleteMany doesn't return the deleted row; re-query is unnecessary").
+
+**Fix:** Changed to `findFirst` (tenant-scoped) + `delete` (by ID). Returns the deleted entry's content, or null if not found. Cross-tenant deletes return null (safe no-op).
+
+### Files Modified in Corrective Review
+
+- `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql` (composite FKs + header comment)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` (cross-midnight detection + fail-closed)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts` (truthful delete contract)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (markNoShow accepts reason, documented gap)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (passes reason through)
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts` (real rescheduling negative test, composite FK tests, cross-midnight tests, truthful delete assertion)
+- `packages/domain/src/workforce/workforce.repositories.ts` (delete doc-comment)
+- `PROJECT_CONTINUITY.md` (this section)
+
+### Corrective Validation Results (PostgreSQL 17)
+
+- `git diff --check`: clean
+- Prisma format/validate/generate: clean
+- API typecheck: clean
+- API lint (changed files): clean
+- API unit tests: 492/492 passed
+- Appointments integration (PG17): 246/246 passed (7 files, including 5 new tests)
+- Database tests (PG17): 196/196 passed
+- Encounter regression (PG17): 42/42 passed
+- Clinical notes regression (PG17): 52/52 passed
+- Context tests: 55/55 passed
+- Clinic-admin tests: 24/24 passed
+- Auth tests: 35/35 passed
+- Role-preview tests: 53/53 passed
+- API production build: success
+- Pre-existing failure (unrelated): `openapi.e2e-spec.ts` "production mode" test fails due to missing audit encryption keys in the local environment; confirmed failing on the clean tree before changes; CI provides the keys.
+
+### Operator Decisions Required
+
+1. **No-show justification storage model** — ratify (a) audit metadata, (b) appointment column, or (c) dedicated table. Until decided, justification is accepted but not persisted.
+2. **No-show authorization scope** — confirm whether "clinical staff" (R01/R02) should be authorized alongside R06/R07/R09, or whether the role table (R06 only) + operational pattern (R06/R07/R09) is correct.

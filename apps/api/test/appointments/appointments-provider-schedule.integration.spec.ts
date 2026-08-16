@@ -633,25 +633,78 @@ describe('Provider Schedule / Availability Enforcement (Scheduling Completion Mi
       expect(reschedRes.status).toBe(200);
     });
 
-    it('rescheduling is blocked when the new slot is outside working hours', async () => {
+    it('rescheduling is blocked when the replacement slot is outside working hours', async () => {
+      // Schedule covers Tuesday 09:00–17:00 Baghdad.
       const env = await seedEnvironment('resched-blocked', {
         timezone: 'Asia/Baghdad',
         schedule: {
           providerId: '' as ProviderId,
           dayOfWeek: 2, // Tuesday
           startTime: '09:00:00',
-          endTime: '12:00:00',
+          endTime: '17:00:00',
         },
       });
+
+      // Book the original slot inside working hours: Tuesday
+      // 12:00–12:30 Baghdad (09:00–09:30 UTC).
       const bookRes = await bookAppointment(env.cookie, {
         patientId: env.patientId,
         providerId: env.providerId,
-        scheduledStart: '2026-09-01T09:00:00.000Z', // 12:00 Baghdad (boundary)
-        scheduledEnd: '2026-09-01T09:30:00.000Z', // 12:30 > 12:00
+        scheduledStart: '2026-09-01T09:00:00.000Z', // 12:00 Baghdad
+        scheduledEnd: '2026-09-01T09:30:00.000Z', // 12:30 Baghdad
         typeCode: 'consultation',
       });
-      // Booking should be blocked because 12:30 > 12:00.
-      expect(bookRes.status).toBe(422);
+      expect(bookRes.status).toBe(201);
+      const originalId = bookRes.body.id as string;
+
+      // Clear audit outbox so we can verify no reschedule audit is emitted.
+      await prisma.auditOutboxEvent.deleteMany();
+
+      // Attempt to reschedule to a slot outside working hours:
+      // Tuesday 18:00–18:30 Baghdad (15:00–15:30 UTC), after 17:00.
+      const reschedRes = await rescheduleAppointment(env.cookie, originalId, {
+        scheduledStart: '2026-09-01T15:00:00.000Z', // 18:00 Baghdad
+        scheduledEnd: '2026-09-01T15:30:00.000Z', // 18:30 Baghdad
+        reason: 'Patient request',
+      });
+
+      // Reschedule must be blocked with 422 APPOINTMENT_PROVIDER_NOT_AVAILABLE.
+      expect(reschedRes.status).toBe(422);
+      expect(reschedRes.body.error.code).toBe(
+        'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
+      );
+
+      // The original appointment must remain unchanged (still booked).
+      const original = await prisma.appointment.findUnique({
+        where: { id: originalId },
+      });
+      expect(original).not.toBeNull();
+      expect(original!.status).toBe('booked');
+      expect(original!.scheduledStart.toISOString()).toBe(
+        '2026-09-01T09:00:00.000Z',
+      );
+      expect(original!.scheduledEnd.toISOString()).toBe(
+        '2026-09-01T09:30:00.000Z',
+      );
+
+      // No replacement appointment must have been created.
+      const replacements = await prisma.appointment.findMany({
+        where: {
+          tenantId: env.tenantId,
+          providerId: env.providerId,
+          scheduledStart: new Date('2026-09-01T15:00:00.000Z'),
+        },
+      });
+      expect(replacements).toHaveLength(0);
+
+      // No reschedule audit event must have been emitted.
+      const auditRows = await prisma.auditOutboxEvent.findMany();
+      const rescheduledEvents = auditRows.filter(
+        (r) =>
+          (r.canonicalEventDraft as { action?: string }).action ===
+          'appointments.rescheduled',
+      );
+      expect(rescheduledEvents).toHaveLength(0);
     });
   });
 
@@ -702,12 +755,14 @@ describe('Provider Schedule / Availability Enforcement (Scheduling Completion Mi
       expect(found).toHaveLength(1);
       expect(found[0]!.id).toBe(entry.id);
 
-      // Delete it.
+      // Delete it — returns the deleted entry (truthful contract).
       const deleted = await providerSchedules.delete(
         tenantId as TenantId,
         entry.id,
       );
-      expect(deleted).toBeNull(); // deleteMany returns null placeholder
+      expect(deleted).not.toBeNull();
+      expect(deleted!.id).toBe(entry.id);
+      expect(deleted!.dayOfWeek).toBe(1);
 
       // Verify it is gone.
       const afterDelete = await providerSchedules.findByProviderAndFacility(
@@ -761,6 +816,212 @@ describe('Provider Schedule / Availability Enforcement (Scheduling Completion Mi
       });
       expect(response.status).toBe(422);
       expect(response.body.error.code).toBe(
+        'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Database tenant/org/facility integrity (composite FK enforcement)
+  // -------------------------------------------------------------------------
+
+  describe('Database tenant/org/facility integrity (composite FKs)', () => {
+    it('rejects a schedule row with a provider from a different tenant', async () => {
+      // Tenant A: provider.
+      const { tenantId: tenantA } = await createTenant(
+        'fk-tn-a',
+        'FK Tenant A',
+      );
+      const { organisationId: orgA } = await createOrganisation(
+        tenantA,
+        'fk-org-a',
+        'FK Org A',
+      );
+      await createFacility(tenantA, orgA, 'fk-fac-a', 'FK Facility A');
+      const providerA = await prisma.provider.create({
+        data: { tenantId: tenantA, status: 'active' },
+      });
+
+      // Tenant B: separate tenant with a facility.
+      const { tenantId: tenantB } = await createTenant(
+        'fk-tn-b',
+        'FK Tenant B',
+      );
+      const { organisationId: orgB } = await createOrganisation(
+        tenantB,
+        'fk-org-b',
+        'FK Org B',
+      );
+      const { facilityId: facilityB } = await createFacility(
+        tenantB,
+        orgB,
+        'fk-fac-b',
+        'FK Facility B',
+      );
+
+      // Attempt to insert a schedule row in tenant B that references
+      // provider A from tenant A. The composite FK (tenant_id, provider_id)
+      // → providers(tenant_id, id) must reject this.
+      await expect(
+        prisma.providerSchedule.create({
+          data: {
+            tenantId: tenantB,
+            organisationId: orgB,
+            facilityId: facilityB,
+            providerId: providerA.id,
+            dayOfWeek: 1,
+            startTime: new Date('1970-01-01T08:00:00Z'),
+            endTime: new Date('1970-01-01T12:00:00Z'),
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects a schedule row with a facility from a different organisation', async () => {
+      const { tenantId } = await createTenant('fk-org-tn', 'FK Org Tenant');
+      // Org A with a facility.
+      const { organisationId: orgA } = await createOrganisation(
+        tenantId,
+        'fk-org-x',
+        'FK Org X',
+      );
+      const { facilityId: facilityInOrgA } = await createFacility(
+        tenantId,
+        orgA,
+        'fk-fac-x',
+        'FK Facility X',
+      );
+      // Org B (different organisation in the same tenant).
+      const { organisationId: orgB } = await createOrganisation(
+        tenantId,
+        'fk-org-y',
+        'FK Org Y',
+      );
+      const provider = await prisma.provider.create({
+        data: { tenantId, status: 'active' },
+      });
+
+      // Attempt to insert a schedule row claiming org B but pointing
+      // at a facility in org A. The composite FK
+      // (tenant_id, organisation_id, facility_id) →
+      // facilities(tenant_id, organisation_id, id) must reject this.
+      await expect(
+        prisma.providerSchedule.create({
+          data: {
+            tenantId,
+            organisationId: orgB,
+            facilityId: facilityInOrgA,
+            providerId: provider.id,
+            dayOfWeek: 1,
+            startTime: new Date('1970-01-01T08:00:00Z'),
+            endTime: new Date('1970-01-01T12:00:00Z'),
+          },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('accepts a schedule row with matching tenant/org/facility/provider', async () => {
+      const { tenantId } = await createTenant('fk-ok-tn', 'FK OK Tenant');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'fk-ok-org',
+        'FK OK Org',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'fk-ok-fac',
+        'FK OK Facility',
+      );
+      const provider = await prisma.provider.create({
+        data: { tenantId, status: 'active' },
+      });
+
+      // A fully-consistent row must be accepted.
+      const row = await prisma.providerSchedule.create({
+        data: {
+          tenantId,
+          organisationId,
+          facilityId,
+          providerId: provider.id,
+          dayOfWeek: 1,
+          startTime: new Date('1970-01-01T08:00:00Z'),
+          endTime: new Date('1970-01-01T12:00:00Z'),
+        },
+      });
+      expect(row.id).toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cross-midnight fail-closed
+  // -------------------------------------------------------------------------
+
+  describe('Cross-midnight fail-closed', () => {
+    it('booking is blocked when the slot spans midnight (facility-local)', async () => {
+      // America/New_York is UTC-4 in September (EDT).
+      // 2026-09-01 is a Tuesday in America/New_York.
+      // Slot: Tue 23:00 ET – Wed 00:30 ET (spans midnight).
+      // 23:00 EDT = 03:00+1 UTC; 00:30+1 EDT = 04:30+1 UTC.
+      const env = await seedEnvironment('xmidnight-book', {
+        timezone: 'America/New_York',
+        schedule: {
+          providerId: '' as ProviderId,
+          dayOfWeek: 2, // Tuesday
+          startTime: '22:00:00',
+          endTime: '23:59:59',
+        },
+      });
+
+      // Slot: Tue 23:00 ET – Wed 00:30 ET (spans midnight).
+      const response = await bookAppointment(env.cookie, {
+        patientId: env.patientId,
+        providerId: env.providerId,
+        scheduledStart: '2026-09-02T03:00:00.000Z', // Tue 23:00 ET
+        scheduledEnd: '2026-09-02T04:30:00.000Z', // Wed 00:30 ET
+        typeCode: 'consultation',
+      });
+      expect(response.status).toBe(422);
+      expect(response.body.error.code).toBe(
+        'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
+      );
+    });
+
+    it('rescheduling is blocked when the replacement slot spans midnight (facility-local)', async () => {
+      const env = await seedEnvironment('xmidnight-resched', {
+        timezone: 'America/New_York',
+        schedule: {
+          providerId: '' as ProviderId,
+          dayOfWeek: 2, // Tuesday
+          startTime: '09:00:00',
+          endTime: '17:00:00',
+        },
+      });
+
+      // Book a valid same-day slot: Tue 10:00–10:30 ET
+      // = 14:00–14:30 UTC.
+      const bookRes = await bookAppointment(env.cookie, {
+        patientId: env.patientId,
+        providerId: env.providerId,
+        scheduledStart: '2026-09-01T14:00:00.000Z', // Tue 10:00 ET
+        scheduledEnd: '2026-09-01T14:30:00.000Z', // Tue 10:30 ET
+        typeCode: 'consultation',
+      });
+      expect(bookRes.status).toBe(201);
+
+      // Attempt to reschedule to a cross-midnight slot: Tue 23:00 –
+      // Wed 00:30 ET = 03:00–04:30 UTC next day.
+      const reschedRes = await rescheduleAppointment(
+        env.cookie,
+        bookRes.body.id as string,
+        {
+          scheduledStart: '2026-09-02T03:00:00.000Z', // Tue 23:00 ET
+          scheduledEnd: '2026-09-02T04:30:00.000Z', // Wed 00:30 ET
+          reason: 'Patient request',
+        },
+      );
+      expect(reschedRes.status).toBe(422);
+      expect(reschedRes.body.error.code).toBe(
         'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
       );
     });
