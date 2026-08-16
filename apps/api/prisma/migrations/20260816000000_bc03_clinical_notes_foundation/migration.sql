@@ -16,9 +16,14 @@
 --   cross-BC state-isolation rule ("Direct data access across context
 --   boundaries is a defect and is rejected at code review"). No foreign
 --   keys cross BC boundaries.
--- - New `ClinicalNoteType`, `ClinicalNoteStatus`, `ClinicalNoteAuthorRole`,
---   and `ClinicalNoteRevisionAction` enums are created (ENUMS.md §4.2,
---   STATUS_CODES.md §5.3).
+-- - New `ClinicalNoteType`, `ClinicalNoteStatus`, and
+--   `ClinicalNoteRevisionAction` enums are created (ENUMS.md §4.2,
+--   STATUS_CODES.md §5.3). The `ClinicalNoteAuthorRole` enum is NOT
+--   created here: it is owned and created by the already-merged BC10
+--   migration `20260815000000_bc10_user_provider_identity_binding`
+--   (the canonical Provider-attribute catalogue). This migration only
+--   REFERENCES the existing enum on `clinical_notes.author_role` and
+--   `clinical_note_revisions.author_role`.
 -- - `clinical_notes` and `clinical_note_revisions` tables are created.
 --   A `clinical_note_revisions` row IS foreign-keyed to its owning
 --   `clinical_notes` row (same bounded context — BC03 owns both). No
@@ -60,6 +65,12 @@
 -- ---------------------------------------------------------------------------
 
 -- 1. Create the enums.
+--
+-- NOTE: `ClinicalNoteAuthorRole` is NOT created here. It is owned and
+-- created by the already-merged BC10 migration
+-- `20260815000000_bc10_user_provider_identity_binding` (Provider
+-- clinical-author-role attribute). This migration references the
+-- existing enum on the `author_role` columns below.
 
 CREATE TYPE "ClinicalNoteType" AS ENUM (
   'progress',
@@ -78,15 +89,6 @@ CREATE TYPE "ClinicalNoteStatus" AS ENUM (
   'amended',
   'addendum',
   'withdrawn'
-);
-
-CREATE TYPE "ClinicalNoteAuthorRole" AS ENUM (
-  'physician',
-  'nurse',
-  'pharmacist',
-  'therapist',
-  'midlevel',
-  'student'
 );
 
 CREATE TYPE "ClinicalNoteRevisionAction" AS ENUM (
