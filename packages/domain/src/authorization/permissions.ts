@@ -86,6 +86,7 @@ export type PermissionCode =
   | 'appointments:check_in'
   | 'appointments:start'
   | 'appointments:complete'
+  | 'appointments:no_show'
   | 'encounters:create'
   | 'encounters:arrive'
   | 'encounters:start'
@@ -144,6 +145,7 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'appointments:check_in',
   'appointments:start',
   'appointments:complete',
+  'appointments:no_show',
   'encounters:create',
   'encounters:arrive',
   'encounters:start',

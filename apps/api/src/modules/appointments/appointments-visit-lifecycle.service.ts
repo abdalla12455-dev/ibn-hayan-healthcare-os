@@ -33,7 +33,8 @@ type VisitLifecycleAuditAction =
   | 'appointments.confirmed'
   | 'appointments.checked_in'
   | 'appointments.started'
-  | 'appointments.completed';
+  | 'appointments.completed'
+  | 'appointments.no_show_recorded';
 
 /**
  * Appointment visit-lifecycle application service (Stage 1F).
@@ -233,6 +234,46 @@ export class AppointmentsVisitLifecycleService {
   }
 
   /**
+   * Mark an appointment as a no-show
+   * (`confirmed` | `arrived` → `no_show`).
+   *
+   * Per STATUS_CODES.md §4.1, the canonical no-show transitions are
+   * `Confirmed → NoShow` and `CheckedIn → NoShow`. NoShow is a
+   * terminal state with no outgoing transition edge. Per
+   * APPOINTMENTS.md §7.1, no-show recording is "a manual action by
+   * reception or clinical staff" and is "audited, with the recorder,
+   * the time, and the justification (if required) recorded."
+   *
+   * Re-marking an already-no_show appointment is an idempotent no-op
+   * (no mutation, no audit event), mirroring the terminal idempotency
+   * for `completed` and `cancelled`.
+   *
+   * Authorized for R06 Receptionist, R07 Clinic Coordinator, and
+   * R09 Clinic Administrator (the clinic-booking roles that can
+   * confirm/check-in). R01 Physician and R13 Platform/System
+   * Administrator are denied.
+   */
+  async markNoShow(
+    appointmentId: string,
+    cookieValue: string | undefined,
+    auditContext?: AuditRequestContext,
+  ): Promise<AppointmentVisitLifecycleResponse | null> {
+    return this.transition(
+      appointmentId,
+      {
+        allowedSourceStates: ['confirmed', 'arrived'],
+        targetStatus: 'no_show',
+        idempotentIfAlreadyAtTarget: true,
+      },
+      'appointments.no_show_recorded',
+      'appointments_no_show',
+      'no_show',
+      cookieValue,
+      auditContext,
+    );
+  }
+
+  /**
    * Shared internal transition workflow.
    *
    * All four commands share the same session-resolution, scope
@@ -246,7 +287,7 @@ export class AppointmentsVisitLifecycleService {
     spec: AppointmentTransitionInput,
     auditAction: VisitLifecycleAuditAction,
     endpoint: string,
-    actionLabel: 'confirm' | 'check-in' | 'start' | 'complete',
+    actionLabel: 'confirm' | 'check-in' | 'start' | 'complete' | 'no_show',
     cookieValue: string | undefined,
     auditContext: AuditRequestContext | undefined,
   ): Promise<AppointmentVisitLifecycleResponse | null> {

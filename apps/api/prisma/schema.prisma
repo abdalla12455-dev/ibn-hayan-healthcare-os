@@ -283,6 +283,7 @@ model Facility {
   activeSessions      AuthSession[]                @relation("AuthSessionActiveFacility")
   appointments        Appointment[]
   providerAssignments ProviderFacilityAssignment[]
+  providerSchedules   ProviderSchedule[]
 
   @@unique([tenantId, organisationId, code], map: "facilities_tenant_id_organisation_id_code_key")
   @@unique([id, organisationId], map: "facilities_id_organisation_id_key")
@@ -1106,6 +1107,7 @@ model Provider {
 
   facilityAssignments  ProviderFacilityAssignment[]
   userProviderBindings UserProviderBinding[]
+  providerSchedules    ProviderSchedule[]
 
   // Unique constraint enables composite foreign key from provider_facility_assignments
   // that enforces tenant integrity: a provider can only be assigned within their tenant.
@@ -1167,6 +1169,52 @@ model ProviderFacilityAssignment {
   @@index([tenantId, facilityId], map: "provider_facility_assignments_tenant_id_facility_id_idx")
   @@index([tenantId, providerId, revokedAt], map: "provider_facility_assignments_tenant_provider_revoked_idx")
   @@map("provider_facility_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// ProviderSchedule (BC10 — Provider Working-Hours / Availability Foundation)
+// ---------------------------------------------------------------------------
+
+/// BC10 Workforce owns provider schedule/availability data (per
+/// DOCTORS.md §2.2 and APPOINTMENTS.md §2.1: "Workforce publishes
+/// provider availability changes that Appointments consumes"). This
+/// model is the minimum canonical weekly working-hours entry per
+/// provider per facility, required for appointment eligibility
+/// enforcement (BR-BC06-ADM-002).
+///
+/// Time semantics:
+/// - `startTime` and `endTime` are local time-of-day values
+///   (`@db.Time`) interpreted in the facility's configured IANA
+///   timezone (Facility.timezone). A facility with a null timezone
+///   is a configuration-required state; availability checks fail
+///   closed for such facilities.
+/// - `dayOfWeek` follows ISO 8601: 1 = Monday … 7 = Sunday. Enforced
+///   by a CHECK constraint in the migration.
+///
+/// Deliberately excluded (deferred to later stages):
+/// - Recurrence engines and slot-duration templates (BC06-owned)
+/// - Schedule overrides, leave, and exceptions (BC10 future stage)
+/// - Per-tenant configurable availability source (BR-BC06-ADM-002)
+/// - Resource/room/equipment availability (BC06 multi-resource)
+model ProviderSchedule {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  organisationId String   @map("organisation_id") @db.Uuid
+  facilityId     String   @map("facility_id") @db.Uuid
+  providerId     String   @map("provider_id") @db.Uuid
+  dayOfWeek      Int      @map("day_of_week")
+  startTime      DateTime @map("start_time") @db.Time
+  endTime        DateTime @map("end_time") @db.Time
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([tenantId], map: "provider_schedules_tenant_id_idx")
+  @@index([tenantId, providerId, facilityId], map: "provider_schedules_tenant_provider_facility_idx")
+  @@index([tenantId, facilityId, providerId, dayOfWeek], map: "provider_schedules_availability_lookup_idx")
+  @@map("provider_schedules")
 }
 
 // ---------------------------------------------------------------------------

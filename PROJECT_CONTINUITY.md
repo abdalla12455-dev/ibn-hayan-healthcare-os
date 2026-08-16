@@ -7424,3 +7424,120 @@ All run locally against a real PostgreSQL 17 disposable cluster (`PG_BINDIR=/usr
 
 Merge this BC10 User→Provider Identity Binding prerequisite to `main` first (after Main CI succeeds on the exact PR head). Then return to **BC03 PR #28**: rebase/integrate BC03 PR #28 on the merged identity-binding foundation and replace caller-supplied clinical actor identity (`authorId`/`actorId`/`authorRole`) with trusted server-side resolution via `findActiveProviderForUser(tenantId, userId)`.
 
+
+
+---
+
+## Scheduling Completion Milestone
+
+**Date:** 2026-08-14
+**Feature branch:** `feature/scheduling-completion-milestone`
+**Base commit:** `5faa945a688045114b2d09d5ee91ea4d1cb6177c` (merge of BC03 PR #28)
+
+### Scope
+
+The Scheduling Completion Milestone completes the Scheduling bounded context (BC06) by adding three operator-ratified capabilities:
+
+1. **Provider Availability/Schedules** — BC10 Workforce owns schedule data; BC06 Scheduling consumes it. A new `provider_schedules` table stores weekly working hours per provider per facility. Booking and rescheduling enforce that the provider must be available at the requested time (BR-BC06-ADM-002: fail-closed if availability cannot be verified).
+2. **Appointment No-Show recording** — a new terminal appointment status `no_show`, recorded via `POST /api/v1/appointments/:id/no-show`. No-show is idempotent (re-marking an already-no_show appointment returns 200 without a duplicate audit event). Only `confirmed` and `arrived` appointments can transition to `no_show`.
+3. **Provider availability enforcement on booking/rescheduling** — the booking and rescheduling services call `ProviderRepository.isProviderAvailableAtFacility()` after the eligibility check. If the facility timezone is null, no schedule entry exists for the appointment's day of week, or the appointment's time window extends beyond the provider's working hours, booking is blocked with `APPOINTMENT_PROVIDER_NOT_AVAILABLE` (422).
+
+### Architecture Decisions
+
+- **Cross-BC ownership:** BC10 Workforce owns provider schedule/availability data. BC06 Scheduling consumes it through the `ProviderRepository` port (`isProviderAvailableAtFacility`), not through direct cross-BC Prisma coupling.
+- **Time semantics:** `provider_schedules.start_time` and `end_time` are local time-of-day values (`TIME` without time zone) interpreted in the facility's configured IANA timezone (`facilities.timezone`). A facility with a null timezone is a configuration-required state; availability checks fail closed.
+- **Day of week:** ISO 8601 (1 = Monday ... 7 = Sunday).
+- **No-show lifecycle:** `no_show` is a terminal status (like `cancelled` and `completed`). It is non-blocking for slot re-use (the same provider/time slot can be re-booked after a no-show).
+- **Authorization:** A new permission `appointments:no_show` was added to the permission catalogue. It is granted to R06 Receptionist, R07 Scheduler, and R09 Clinic Administrator. R01 Physician, R02 Nurse, and R13 Platform/System Administrator are denied. R13 does NOT inherit clinical PHI access.
+- **Audit:** A new audit action code `appointments.no_show_recorded` was added. Audit metadata contains only safe IDs/context (endpoint + appointmentId) -- no note body, diagnosis text, patient names, DOB, or other PHI/PII.
+- **Idempotency:** Re-marking an already-`no_show` appointment returns 200 (idempotent) and does NOT emit a duplicate audit event.
+
+### Authorization Summary
+
+| Permission | R01 Physician | R02 Nurse | R06 Receptionist | R07 Scheduler | R09 Clinic Admin | R13 Platform Admin |
+|---|---|---|---|---|---|---|
+| `appointments:no_show` | x | x | yes | yes | yes | x |
+
+Permission catalogue updated: 36 to 37 codes. R09 count: 19 to 20. R06 count: 21 to 22. R07 count: 15 to 16.
+
+### Migration
+
+- **File:** `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql`
+- **Type:** Forward-only, additive. Creates the `provider_schedules` table with CHECK constraints (day_of_week 1-7, end_time > start_time), foreign keys to `providers` and `facilities` (CASCADE on delete), and three indexes (tenant isolation, provider+facility lookup, availability hot-path lookup).
+- No existing table is modified, no data is dropped or rewritten, and no already-merged migration is touched.
+
+### Files Changed
+
+**Created:**
+- `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql`
+- `apps/api/src/infrastructure/database/mappers/provider-schedule.mapper.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts`
+- `apps/api/test/appointments/appointments-no-show.integration.spec.ts`
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts`
+- `packages/domain/src/workforce/provider-schedule.ts`
+
+**Modified:**
+- `apps/api/prisma/schema.prisma` (ProviderSchedule model)
+- `apps/api/src/infrastructure/database/database.module.ts` (DI wiring for ProviderScheduleRepository)
+- `apps/api/src/infrastructure/database/index.ts` (export)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` (isProviderAvailableAtFacility, UTC-to-local conversion)
+- `apps/api/src/infrastructure/database/tokens.ts` (PROVIDER_SCHEDULE_REPOSITORY token)
+- `apps/api/src/modules/appointments/appointments-booking.service.ts` (availability enforcement)
+- `apps/api/src/modules/appointments/appointments-rescheduling.service.ts` (availability enforcement on reschedule)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (markNoShow method, no_show audit action)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (POST /:id/no-show endpoint)
+- `apps/api/src/modules/appointments/appointments.errors.ts` (no_show transition error handling)
+- `apps/api/test/appointments/appointments-booking.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-cancellation.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-rescheduling.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-visit-lifecycle.integration.spec.ts` (facility timezone + schedule seeding)
+- `packages/contracts/src/appointments/appointments.schema.ts` (no-show request schema)
+- `packages/domain/src/authorization/authorization.spec.ts` (permission counts, no_show exclusion filters)
+- `packages/domain/src/authorization/permissions.ts` (appointments:no_show permission)
+- `packages/domain/src/authorization/role-permissions.ts` (appointments:no_show in CLINIC_BOOKING_PERMISSIONS)
+- `packages/domain/src/scheduling/appointment.ts` (no_show status added to AppointmentStatus)
+- `packages/domain/src/workforce/index.ts` (re-exports)
+- `packages/domain/src/workforce/provider.spec.ts` (isProviderAvailableAtFacility stubs)
+- `packages/domain/src/workforce/workforce.repositories.ts` (ProviderScheduleRepository port, isProviderAvailableAtFacility on ProviderRepository)
+- `packages/observability/src/audit/action-codes.ts` (appointments.no_show_recorded action code)
+
+**Deleted:** none.
+
+### Validation Results
+
+- `git diff --check`: clean (no whitespace/conflict markers)
+- Prisma format: clean
+- Prisma validate: valid
+- Prisma client generation: success
+- API typecheck (`tsc --noEmit`): clean
+- API lint (`eslint`): clean
+- Workspace lint (`pnpm -r lint`): clean (all packages)
+- API production build (`nest build`): success
+- Web production build: success
+- Domain unit tests: 156/156 passed
+- Authorization spec: 78/78 passed
+- Appointments integration tests (PostgreSQL 17): 241/241 passed (7 files)
+- Encounter regression (PostgreSQL 17): 42/42 passed
+- Database tests (PostgreSQL 17): 196/196 passed
+- Auth tests: 35/35 passed
+- Context tests: 55/55 passed
+- Clinic-admin tests: 24/24 passed
+- Audit configuration tests: 28/28 passed
+- Audit concurrency tests: 11/11 passed
+
+### Remaining Risks / Deferred
+
+- Cross-midnight scheduling is not supported (the availability check uses the start day; appointments spanning midnight are deferred).
+- Provider schedule management admin API (CRUD for schedule entries) is implemented at the repository level but not exposed via a REST controller in this milestone (only consumed internally by booking/rescheduling).
+- No-Show notification/reporting workflows are deferred.
+- The migration shadow-DB drift check could not be run locally; CI on GitHub Actions (PostgreSQL 17) is authoritative for drift.
+
+### Recovery Information
+
+- Feature branch: `feature/scheduling-completion-milestone`. Base commit: `5faa945a688045114b2d09d5ee91ea4d1cb6177c`.
+- To resume: `git fetch origin`, verify `origin/main` is at `5faa945` (or ahead via a documented merge), check out the feature branch, and confirm the working tree matches the committed PR head.
+- The migration is forward-only and additive; reverting means not deploying the migration (no destructive rollback needed). Existing rows are unaffected.
+
+### Immediate Next Step
+
+Push the feature branch, create a draft PR to `main`, and wait for Main CI (PostgreSQL 17) to succeed on the exact PR head. Do NOT merge until operator review.

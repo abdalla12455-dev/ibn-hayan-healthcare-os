@@ -19,6 +19,11 @@ import type {
   ProviderFacilityAssignmentId,
 } from './provider.js';
 import type {
+  ProviderScheduleEntry,
+  ProviderScheduleEntryId,
+  ProviderScheduleEntryCreateInput,
+} from './provider-schedule.js';
+import type {
   UserProviderBinding,
   UserProviderBindingId,
   ActiveProviderIdentity,
@@ -27,6 +32,7 @@ import type {
   RevokeUserProviderBindingInput,
 } from './user-provider-binding.js';
 import type { TenantId } from '../tenancy/tenant.js';
+import type { OrganisationId } from '../tenancy/organisation.js';
 import type { FacilityId } from '../tenancy/facility.js';
 import type { UserId } from '../identity/user.js';
 
@@ -126,6 +132,51 @@ export interface ProviderRepository {
     tenantId: TenantId,
     providerId: ProviderId,
   ): Promise<ProviderFacilityAssignment[]>;
+
+  /**
+   * Check if a provider is available at a facility for a given
+   * UTC time window, based on the provider's weekly working-hours
+   * schedule (BR-BC06-ADM-002: "Practitioner must be available at
+   * requested time; if availability cannot be verified, block
+   * booking").
+   *
+   * BC10 Workforce owns provider schedule/availability data. This
+   * method is the port through which the Appointments bounded context
+   * (BC06) consumes availability without duplicating the logic or
+   * cross-BC Prisma coupling.
+   *
+   * The method converts the UTC `scheduledStart` and `scheduledEnd`
+   * to the facility's configured IANA timezone, extracts the ISO day
+   * of week and local time-of-day, and checks whether at least one
+   * `ProviderScheduleEntry` for `(tenantId, providerId, facilityId,
+   * dayOfWeek)` fully contains the appointment's local time window
+   * (`entry.startTime <= localStart AND entry.endTime >= localEnd`).
+   *
+   * Fail-closed posture (per BR-BC06-ADM-002 and AGENTS.md facility
+   * timezone rules):
+   * - If the facility timezone is null or invalid, availability
+   *   cannot be verified → returns `false` (block booking).
+   * - If no schedule entry exists for the provider at the facility
+   *   on the appointment's day of week → returns `false`.
+   * - If the appointment's local time window extends beyond the
+   *   schedule entry's working hours → returns `false`.
+   * - Cross-tenant/cross-facility queries return `false` (no leak).
+   *
+   * @param tenantId The tenant scope (from the authenticated session).
+   * @param providerId The provider to check availability for.
+   * @param facilityId The facility whose timezone and schedule apply.
+   * @param scheduledStart The appointment's UTC scheduled start.
+   * @param scheduledEnd The appointment's UTC scheduled end.
+   * @returns `true` if the provider is available; `false` if not
+   *   available or if availability cannot be verified (fail closed).
+   */
+  isProviderAvailableAtFacility(
+    tenantId: TenantId,
+    providerId: ProviderId,
+    facilityId: FacilityId,
+    scheduledStart: Date,
+    scheduledEnd: Date,
+  ): Promise<boolean>;
 }
 
 /**
@@ -172,6 +223,66 @@ export interface ProviderFacilityAssignmentRepository {
     tenantId: TenantId,
     providerId: ProviderId,
   ): Promise<ProviderFacilityAssignment[]>;
+}
+
+/**
+ * Repository port for ProviderScheduleEntry (BC10).
+ *
+ * BC10 Workforce owns provider schedule/availability data. This port
+ * provides write access for schedule administration and read access
+ * for availability queries. The Appointments bounded context (BC06)
+ * consumes availability through {@link ProviderRepository.isProviderAvailableAtFacility},
+ * not through this port directly, to maintain the customer-supplier
+ * boundary.
+ */
+export interface ProviderScheduleRepository {
+  /**
+   * Create a provider schedule entry (weekly working-hours block).
+   *
+   * Scope (tenantId, organisationId, facilityId) is derived from the
+   * authenticated session at the API boundary; the caller supplies
+   * only the provider, day of week, and working-hours window.
+   *
+   * @param tenantId The tenant scope.
+   * @param organisationId The organisation scope.
+   * @param facilityId The facility scope.
+   * @param input The schedule entry input (provider, day, times).
+   * @returns The created schedule entry.
+   */
+  create(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    input: ProviderScheduleEntryCreateInput,
+  ): Promise<ProviderScheduleEntry>;
+
+  /**
+   * Find all schedule entries for a provider at a facility, scoped
+   * to the authenticated tenant.
+   *
+   * @param tenantId The tenant scope.
+   * @param providerId The provider whose schedule to find.
+   * @param facilityId The facility scope.
+   * @returns Array of schedule entries, empty if none exist.
+   */
+  findByProviderAndFacility(
+    tenantId: TenantId,
+    providerId: ProviderId,
+    facilityId: FacilityId,
+  ): Promise<ProviderScheduleEntry[]>;
+
+  /**
+   * Delete a schedule entry by its ID, scoped to the authenticated
+   * tenant. Returns the deleted entry, or null if not found.
+   *
+   * @param tenantId The tenant scope.
+   * @param entryId The schedule entry ID to delete.
+   * @returns The deleted entry, or null if not found.
+   */
+  delete(
+    tenantId: TenantId,
+    entryId: ProviderScheduleEntryId,
+  ): Promise<ProviderScheduleEntry | null>;
 }
 
 /**

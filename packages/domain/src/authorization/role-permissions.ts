@@ -114,6 +114,7 @@ const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:reschedule',
   'appointments:confirm',
   'appointments:check_in',
+  'appointments:no_show',
 ] as const;
 
 /**
@@ -284,6 +285,7 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:reschedule',
   'appointments:confirm',
   'appointments:check_in',
+  'appointments:no_show',
   'encounters:view',
   'patients:view',
   'patients:search',

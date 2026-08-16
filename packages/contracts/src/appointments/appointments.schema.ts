@@ -303,6 +303,7 @@ export const BookingErrorResponseSchema = z
           'APPOINTMENT_VALIDATION_ERROR',
           'APPOINTMENT_PATIENT_NOT_FOUND',
           'APPOINTMENT_PROVIDER_NOT_FOUND',
+          'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
           'APPOINTMENT_OVERLAP',
           'APPOINTMENT_PAST_TIME',
         ]),
@@ -546,6 +547,7 @@ export const ReschedulingErrorResponseSchema = z
           'APPOINTMENT_INVALID_TRANSITION',
           'APPOINTMENT_OVERLAP',
           'APPOINTMENT_PAST_TIME',
+          'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
         ]),
         message: z.string().min(1).max(200),
       })
@@ -656,3 +658,98 @@ export const VisitLifecycleErrorResponseSchema = z
 export type VisitLifecycleErrorResponse = z.infer<
   typeof VisitLifecycleErrorResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// No-Show Recording (Scheduling Completion Milestone)
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical request-body schema for marking an appointment as a
+ * no-show via `POST /api/v1/appointments/:id/no-show`.
+ *
+ * Per STATUS_CODES.md §4.1, the canonical no-show transitions are
+ * `Confirmed → NoShow` and `CheckedIn → NoShow` (in the implemented
+ * lifecycle: `confirmed → no_show` and `arrived → no_show`). NoShow
+ * is a terminal state ("Terminal (or rebooked as new appointment").
+ *
+ * Per APPOINTMENTS.md §7.1, no-show recording is "a manual action by
+ * reception or clinical staff" and is "audited, with the recorder,
+ * the time, and the justification (if required) recorded." The
+ * justification (`reason`) is an optional free-text string because the
+ * docs say "if required" and the requirement is configurable per
+ * clinic type. The actor (recorder) is derived from the authenticated
+ * session, NOT from the request body.
+ *
+ * The request does NOT include:
+ * - tenantId, organisationId, or facilityId (derived from session)
+ * - status (the transition is always confirmed|arrived → no_show)
+ * - actorId (derived from the authenticated session)
+ *
+ * The schema is `.strict()` so that adding an unexpected field at
+ * the boundary is rejected by the Zod parse.
+ */
+export const NoShowAppointmentRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(500).optional(),
+  })
+  .strict();
+
+export type NoShowAppointmentRequest = z.infer<
+  typeof NoShowAppointmentRequestSchema
+>;
+
+/**
+ * The canonical response schema for a successful no-show recording.
+ *
+ * Returns the appointment with all persisted fields. The `status` is
+ * always `no_show` for a successful response (whether the recording
+ * just transitioned the appointment or was an idempotent re-marking
+ * of an already-no_show appointment).
+ */
+export const NoShowAppointmentResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+  })
+  .strict();
+
+export type NoShowAppointmentResponse = z.infer<
+  typeof NoShowAppointmentResponseSchema
+>;
+
+/**
+ * The canonical error response schema for the no-show recording
+ * endpoint.
+ *
+ * Error codes:
+ * - `APPOINTMENT_VALIDATION_ERROR`: invalid request body.
+ * - `APPOINTMENT_NOT_FOUND`: the appointment does not exist or is not
+ *   accessible in the authenticated tenant, organisation, or facility
+ *   (no existence leak).
+ * - `APPOINTMENT_INVALID_TRANSITION`: the appointment is in a source
+ *   state that is not canonically permitted for no-show (only
+ *   `confirmed` and `arrived` can transition to `no_show`). An
+ *   already-no_show appointment is an idempotent success (not this
+ *   error).
+ */
+export const NoShowErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum([
+          'APPOINTMENT_VALIDATION_ERROR',
+          'APPOINTMENT_NOT_FOUND',
+          'APPOINTMENT_INVALID_TRANSITION',
+        ]),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type NoShowErrorResponse = z.infer<typeof NoShowErrorResponseSchema>;

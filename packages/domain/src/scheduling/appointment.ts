@@ -272,8 +272,8 @@ export const APPOINTMENT_VISIT_TRANSITIONS: Readonly<
   Record<AppointmentStatus, readonly AppointmentStatus[]>
 > = {
   booked: ['confirmed', 'arrived'],
-  confirmed: ['arrived'],
-  arrived: ['in_progress'],
+  confirmed: ['arrived', 'no_show'],
+  arrived: ['in_progress', 'no_show'],
   in_progress: ['completed'],
   completed: [],
   cancelled: [],

@@ -406,7 +406,21 @@ export type ClinicAdminActionCode =
  * `appointments_confirm`, `appointments_check_in`,
  * `appointments_start`, and `appointments_complete` respectively.
  *
- * All eight actions are mapped to the `facility_context` category
+ * The `appointments.no_show_recorded` event is emitted after a
+ * successful FIRST-TIME no-show recording (confirmed|arrived →
+ * no_show). Per STATUS_CODES.md §4.1, NoShow is a terminal state
+ * ("Terminal (or rebooked as new appointment") with no outgoing
+ * transition edge. Per APPOINTMENTS.md §7.1, no-show recording is
+ * "a manual action by reception or clinical staff" and "is itself
+ * audited, with the recorder, the time, and the justification (if
+ * required) recorded." The event metadata carries
+ * `{ endpoint: 'appointments_no_show', appointmentId: string }` only
+ * — no patient details, provider details, or appointment timing (no
+ * PHI). An idempotent re-marking of an already-no_show appointment
+ * does NOT emit a duplicate event, mirroring the terminal idempotency
+ * for `cancelled` and `completed`.
+ *
+ * All nine actions are mapped to the `facility_context` category
  * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
@@ -427,6 +441,7 @@ export const APPOINTMENTS_ACTION_CODES = [
   'appointments.checked_in',
   'appointments.started',
   'appointments.completed',
+  'appointments.no_show_recorded',
 ] as const;
 
 export type AppointmentsActionCode =
