@@ -7818,3 +7818,53 @@ An independent post-CI security review found a merge-blocking scope-isolation de
 ### Recovery Information
 
 Pre-push base: `33db0a464d9fab2e08c52862e5aef42530055068`. Final commit SHA recorded in the external completion report.
+
+---
+
+## Post-Merge Continuity: Scheduling Completion Milestone — COMPLETE AND MERGED (PR #30)
+
+**Date:** 2026-08-19 (UTC)
+**Type:** Post-merge continuity synchronization. Documentation-only; no application code, schema, migration, dependency, configuration, test, or generated file changed.
+**Supersedes:** the pre-merge "Immediate Next Step" instructions recorded in the Scheduling Completion Milestone sections above ("Wait for PR #30 exact-head Main CI (both jobs) to pass; then await operator merge review. Do NOT merge without explicit operator instruction."). Those instructions are fulfilled historical evidence and MUST NOT be followed for new work.
+
+### Verified Merge Record
+
+Verified on 2026-08-19 via direct remote reference (`git ls-remote`), GitHub API (PR #30 state, merge-commit parents), and CI run inspection.
+
+- **Scheduling Completion Milestone:** COMPLETE AND MERGED.
+- **Merged PR:** #30 (`feature/scheduling-completion-milestone` → `main`); state MERGED.
+- **Pre-merge `main`:** `5faa945a688045114b2d09d5ee91ea4d1cb6177c`
+- **Final feature head (PR #30 exact head):** `61f9aa515558763cfac7a7380b0f1568a58537f5`
+- **Final merge commit (`main` advance):** `7afc0cd233ae0908c226bc26c3bcf9a19dae12d2`
+  - Parents: `5faa945a688045114b2d09d5ee91ea4d1cb6177c` (pre-merge main) and `61f9aa515558763cfac7a7380b0f1568a58537f5` (feature head) — a normal two-parent merge commit (GitHub merge-commit strategy). No squash, no rebase, no force.
+- **Exact-head CI:** Main CI run `32211522414` on the exact feature head — both required jobs SUCCESS:
+  - `Static analysis, lint, unit tests, and build` — success
+  - `PostgreSQL 17 validation suites` — success
+- **Feature branch preserved:** `feature/scheduling-completion-milestone` remains on origin at `61f9aa515558763cfac7a7380b0f1568a58537f5`; NOT deleted.
+- **Production deployment:** NONE performed as part of this merge.
+
+### Final Completed Scheduling Capabilities (now on `main`)
+
+- **Provider availability/schedules:** BC10 Workforce-owned `provider_schedules` table (weekly working hours per provider per facility), consumed by BC06 Scheduling via the `ProviderRepository.isProviderAvailableAtFacility` port.
+- **Availability enforcement on booking/rescheduling:** fail-closed blocking with `APPOINTMENT_PROVIDER_NOT_AVAILABLE` (422) when availability cannot be verified (null facility timezone, no covering schedule entry, or time window beyond working hours).
+- **Appointment no-show recording:** terminal `no_show` status via `POST /api/v1/appointments/:id/no-show`; idempotent; transitions allowed only from `confirmed`/`arrived`; operator-ratified `no_show_reason` justification column; dedicated audit action `appointments.no_show_recorded`; permission `appointments:no_show` (R06/R07/R09 granted, R01/R02/R13 denied).
+- **Provider Schedule Management API:** `POST`/`GET`/`DELETE /api/v1/provider-schedules` with `provider_schedules:read` / `provider_schedules:manage` permissions; delete is fully scope-isolated across tenant + organisation + facility (post-CI corrective fix).
+- **Appointment Detail Read surface:** `GET /api/v1/appointments/:id` guarded by `appointments:no_show_reason_read`; `noShowReason` is exposed only through this strict explicit surface.
+
+### Remaining Intentionally Deferred Items (unchanged; NOT on `main`)
+
+- **No-show grace-period enforcement** — deferred pending the canonical Configuration implementation.
+- **Cross-midnight schedule windows** — remain fail-closed (rejected by the Zod contract `startTime < endTime` and by repository availability checks).
+- **No-show notification/reporting workflows** — deferred.
+- **Web UI surfaces for provider schedules and no-show reason display** — deferred.
+
+### Recovery Truth (current; supersedes all pre-merge Scheduling recovery instructions)
+
+- Current known-good `main` is the verified merge commit `7afc0cd233ae0908c226bc26c3bcf9a19dae12d2` (baseline-at-time-of-authoring 2026-08-19; as always, run `git fetch origin && git rev-parse origin/main` for the live value before acting).
+- All Scheduling Completion Milestone content is fully merged into `main`. Resume work from the verified current `main` on a NEW branch — do NOT base new work on the merged `feature/scheduling-completion-milestone` branch.
+- The pre-merge recovery instructions in the sections above (verify PR #30 head, check out the feature branch, wait for CI) are preserved as historical evidence only and are now obsolete.
+- Working tree at time of this record: clean.
+
+### Immediate Next Step
+
+The next major project milestone has NOT yet been formally implemented or started. The leading architectural dependency for the next completion cycle is the **canonical Configuration vertical slice**: `packages/configuration` currently exists only as a package-boundary marker (its own `src/index.ts` docblock records that the Zod schemas and eight-layer precedence helpers arrive in a subsequent batch), and Scheduling no-show grace-period enforcement intentionally depends on the future canonical Configuration implementation. Configuration implementation was NOT performed as part of this documentation-only task. The next substantive stage must be identified and ratified by the operator before any code changes begin.
