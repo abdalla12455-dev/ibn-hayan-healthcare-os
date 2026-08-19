@@ -17,6 +17,7 @@ import { PrismaUserProviderBindingRepository } from './repositories/prisma-user-
 import { PrismaEncounterRepository } from './repositories/prisma-encounter.repository.js';
 import { PrismaClinicalNoteRepository } from './repositories/prisma-clinical-note.repository.js';
 import { PrismaProviderScheduleRepository } from './repositories/prisma-provider-schedule.repository.js';
+import { PrismaConfigurationRepository } from './repositories/prisma-configuration.repository.js';
 import { ClinicalNoteSigningAuthorityService } from './services/clinical-note-signing-authority.service.js';
 import { LocalCredentialService } from './repositories/local-credential.service.js';
 import { TreatmentConsentVerificationService } from './services/treatment-consent-verification.service.js';
@@ -87,6 +88,7 @@ export {
   CLINICAL_NOTE_REPOSITORY,
   CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
   PROVIDER_SCHEDULE_REPOSITORY,
+  CONFIGURATION_REPOSITORY,
 } from './tokens.js';
 import {
   TENANT_REPOSITORY,
@@ -106,6 +108,7 @@ import {
   CLINICAL_NOTE_REPOSITORY,
   CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
   PROVIDER_SCHEDULE_REPOSITORY,
+  CONFIGURATION_REPOSITORY,
 } from './tokens.js';
 
 @Module({
@@ -189,6 +192,10 @@ import {
       provide: PROVIDER_SCHEDULE_REPOSITORY,
       useClass: PrismaProviderScheduleRepository,
     },
+    {
+      provide: CONFIGURATION_REPOSITORY,
+      useClass: PrismaConfigurationRepository,
+    },
   ],
   // PrismaService and the repository implementations are not exported
   // directly. Feature modules that need persistence inject the
@@ -231,6 +238,7 @@ import {
     CLINICAL_NOTE_REPOSITORY,
     CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
     PROVIDER_SCHEDULE_REPOSITORY,
+    CONFIGURATION_REPOSITORY,
     LocalCredentialService,
   ],
 })
@@ -267,4 +275,6 @@ export type {
   EncounterRepository,
   ClinicalNoteRepository,
   ClinicalNoteSigningAuthorityPort,
+  ConfigurationValueRepository,
+  ConfigurationResolutionPort,
 } from '@ibn-hayan/domain';

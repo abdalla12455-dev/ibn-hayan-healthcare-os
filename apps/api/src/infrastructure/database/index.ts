@@ -39,5 +39,7 @@ export {
   CLINICAL_NOTE_REPOSITORY,
   CLINICAL_NOTE_SIGNING_AUTHORITY_PORT,
   PROVIDER_SCHEDULE_REPOSITORY,
+  CONFIGURATION_REPOSITORY,
+  CONFIGURATION_RESOLUTION_PORT,
 } from './tokens.js';
 export { LocalCredentialService } from './repositories/local-credential.service.js';

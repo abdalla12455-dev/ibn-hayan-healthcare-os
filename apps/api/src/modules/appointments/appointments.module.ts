@@ -4,6 +4,7 @@ import { AuditModule } from '../audit/index.js';
 import { AuthModule } from '../auth/index.js';
 import { AuthorizationModule } from '../authorization/index.js';
 import { ClockModule } from '../../infrastructure/clock/index.js';
+import { ConfigurationModule } from '../configuration/index.js';
 import { AppointmentsController } from './appointments.controller.js';
 import { AppointmentsTodayService } from './appointments-today.service.js';
 import { AppointmentsBookingService } from './appointments-booking.service.js';
@@ -40,6 +41,9 @@ import { AppointmentsDetailService } from './appointments-detail.service.js';
  * - `POST /api/v1/appointments/:id/complete` for completing a visit,
  *   authorized for R01 Physician only (requires `appointments:complete`
  *   permission).
+ * - `POST /api/v1/appointments/:id/no-show` for recording a no-show,
+ *   gated by the Configuration-grace-period resolution via
+ *   {@link ConfigurationResolver} from `@ibn-hayan/configuration`.
  *
  * The module depends on:
  * - {@link DatabaseModule} for the AppointmentRepository,
@@ -56,6 +60,7 @@ import { AppointmentsDetailService } from './appointments-detail.service.js';
     AuthModule,
     AuthorizationModule,
     ClockModule,
+    ConfigurationModule,
   ],
   controllers: [AppointmentsController],
   providers: [

@@ -376,7 +376,10 @@ describe('buildAuditEventDraft', () => {
     // `isAuditEventCategory` check would accept it, but the database
     // CHECK constraint would reject it during projection.
     expect(AUDIT_EVENT_CATEGORIES).not.toContain('clinic_admin');
-    // The list MUST contain the eight database-approved categories.
+    // The list MUST contain the nine database-approved categories (the
+    // eighth, `configuration`, was registered by BC16 and the CHECK
+    // constraint parity is established by the
+    // `20260819000001_audit_category_extend_for_configuration` migration).
     expect(AUDIT_EVENT_CATEGORIES).toEqual([
       'security',
       'authorization',
@@ -386,7 +389,21 @@ describe('buildAuditEventDraft', () => {
       'rbac',
       'audit',
       'role_preview',
+      'configuration',
     ]);
+  });
+
+  it('includes configuration.* action codes in the AUDIT_ACTION_CODES catalogue', () => {
+    // Defence-in-depth: every Configuration administration action code
+    // (BC16) MUST be present in the catalogue so that `isAuditActionCode`
+    // accepts it and `inferCategoryFromAction` maps it to the
+    // `configuration` category (BC16's registered category).
+    expect(AUDIT_ACTION_CODES).toContain('configuration.effective_value.viewed');
+    expect(AUDIT_ACTION_CODES).toContain('configuration.override.created');
+    expect(AUDIT_ACTION_CODES).toContain('configuration.override.updated');
+    expect(inferCategoryFromAction('configuration.effective_value.viewed')).toBe(
+      'configuration',
+    );
   });
 
   it('includes clinic_admin.overview.viewed in the AUDIT_ACTION_CODES catalogue', () => {

@@ -11,6 +11,7 @@ import { AppointmentsModule } from './modules/appointments/index.js';
 import { ProviderSchedulesModule } from './modules/provider-schedules/index.js';
 import { EncountersModule } from './modules/encounters/index.js';
 import { ClinicalNotesModule } from './modules/clinical-notes/index.js';
+import { ConfigurationModule } from './modules/configuration/index.js';
 import { PatientsModule } from './modules/patients/index.js';
 
 /**
@@ -87,6 +88,7 @@ import { PatientsModule } from './modules/patients/index.js';
     EncountersModule,
     ClinicalNotesModule,
     PatientsModule,
+    ConfigurationModule,
   ],
 })
 export class AppModule implements NestModule {

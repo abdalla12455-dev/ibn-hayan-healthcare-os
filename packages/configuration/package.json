@@ -2,13 +2,29 @@
   "name": "@ibn-hayan/configuration",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "description": "Canonical Configuration layer model, precedence helpers, and the configuration key registry for Ibn Hayan Healthcare OS.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc --noEmit",
-    "lint": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests in @ibn-hayan/configuration yet' && exit 0"
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.typecheck.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
   }
 }

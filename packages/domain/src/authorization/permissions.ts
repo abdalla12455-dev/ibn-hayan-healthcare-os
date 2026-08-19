@@ -109,7 +109,9 @@ export type PermissionCode =
   | 'clinical_notes:create'
   | 'clinical_notes:view'
   | 'clinical_notes:sign'
-  | 'clinical_notes:amend';
+  | 'clinical_notes:amend'
+  | 'configuration:read'
+  | 'configuration:write';
 
 /**
  * The complete list of canonical permission codes, in catalogue
@@ -172,6 +174,8 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'clinical_notes:view',
   'clinical_notes:sign',
   'clinical_notes:amend',
+  'configuration:read',
+  'configuration:write',
 ] as const;
 
 /**

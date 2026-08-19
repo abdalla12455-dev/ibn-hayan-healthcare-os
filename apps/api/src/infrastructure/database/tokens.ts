@@ -49,3 +49,13 @@ export const CLINICAL_NOTE_SIGNING_AUTHORITY_PORT = Symbol(
 export const PROVIDER_SCHEDULE_REPOSITORY = Symbol(
   'PROVIDER_SCHEDULE_REPOSITORY',
 );
+export const CONFIGURATION_REPOSITORY = Symbol('CONFIGURATION_REPOSITORY');
+/**
+ * The canonical Configuration resolution port. Distinct from
+ * `CONFIGURATION_REPOSITORY` (the persistence port): consuming modules
+ * depend on this token so repository detail never leaks into module
+ * code paths.
+ */
+export const CONFIGURATION_RESOLUTION_PORT = Symbol(
+  'CONFIGURATION_RESOLUTION_PORT',
+);
