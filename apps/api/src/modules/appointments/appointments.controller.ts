@@ -32,10 +32,18 @@ import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
+import { AppointmentsDetailService } from './appointments-detail.service.js';
 import {
   readCookie,
   buildAuditContext,
 } from '../../infrastructure/transport/index.js';
+import { appointmentValidationError } from './appointments.errors.js';
+
+const UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
 
 /**
  * Shared OpenAPI response schema for the four Stage 1F visit-lifecycle
@@ -123,6 +131,7 @@ export class AppointmentsController {
     private readonly cancellationService: AppointmentsCancellationService,
     private readonly reschedulingService: AppointmentsReschedulingService,
     private readonly visitLifecycleService: AppointmentsVisitLifecycleService,
+    private readonly detailService: AppointmentsDetailService,
   ) {}
 
   /**
@@ -234,6 +243,64 @@ export class AppointmentsController {
   ): Promise<TodayAppointmentsResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
     const result = await this.todayService.loadTodayAppointments(
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * GET /api/v1/appointments/:id
+   *
+   * Explicit appointment-detail read surface that exposes the persisted
+   * `noShowReason`. Guarded by `appointments:no_show_reason_read`
+   * (granted to R06, R07, R09; denied to R01, R02, R13). Broad
+   * today/list/book/cancel/reschedule/visit-lifecycle projections
+   * continue to exclude `noShowReason`.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 when roles do not grant `appointments:no_show_reason_read`
+   * or the active context is missing/invalid.
+   * Returns 404 when the appointment is not found within the
+   * authenticated tenant/organisation/facility scope (no existence leak).
+   *
+   * Declared after the literal route `GET /today` so that `/today`
+   * resolves before this `:id` parameter route.
+   */
+  @Get(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:no_show_reason_read', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Read appointment detail (explicitly authorized no-show reason surface)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The appointment detail, including `noShowReason` (persisted or null).',
+  })
+  @ApiResponse({ status: 401, description: 'Session required.' })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Appointment not found in the authenticated scope.',
+  })
+  async getAppointmentDetail(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ): Promise<import('@ibn-hayan/contracts').AppointmentDetailResponse> {
+    if (!isUuid(id)) {
+      throw appointmentValidationError('The appointment id must be a UUID.');
+    }
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const result = await this.detailService.loadDetail(
+      id,
       cookieValue,
       buildAuditContext(req),
     );

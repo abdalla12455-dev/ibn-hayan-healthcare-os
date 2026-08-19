@@ -8,6 +8,7 @@ import { AuditModule, RequestIdMiddleware } from './modules/audit/index.js';
 import { RolePreviewModule } from './modules/dev/index.js';
 import { ClinicAdminModule } from './modules/clinic-admin/index.js';
 import { AppointmentsModule } from './modules/appointments/index.js';
+import { ProviderSchedulesModule } from './modules/provider-schedules/index.js';
 import { EncountersModule } from './modules/encounters/index.js';
 import { ClinicalNotesModule } from './modules/clinical-notes/index.js';
 import { PatientsModule } from './modules/patients/index.js';
@@ -82,6 +83,7 @@ import { PatientsModule } from './modules/patients/index.js';
     RolePreviewModule,
     ClinicAdminModule,
     AppointmentsModule,
+    ProviderSchedulesModule,
     EncountersModule,
     ClinicalNotesModule,
     PatientsModule,

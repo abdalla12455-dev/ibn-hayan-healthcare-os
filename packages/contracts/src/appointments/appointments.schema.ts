@@ -753,3 +753,53 @@ export const NoShowErrorResponseSchema = z
   .strict();
 
 export type NoShowErrorResponse = z.infer<typeof NoShowErrorResponseSchema>;
+
+/**
+ * Appointment detail read surface.
+ *
+ * `GET /api/v1/appointments/:id` is the smallest explicit production
+ * read surface that exposes the persisted no-show reason. It is
+ * guarded by `appointments:no_show_reason_read` (granted to R06, R07,
+ * R09; denied to R01, R02, R13). Broad projections
+ * (today/list/book/cancel/reschedule/visit-lifecycle) continue to
+ * exclude `noShowReason`.
+ *
+ * The response is the appointment's canonical identity plus the
+ * no-show reason: patient/provider IDs (already allowed by the
+ * appointment contract), scheduled window, status, typeCode, and
+ * `noShowReason` (persisted free-text or `null`). No unrelated fields.
+ */
+export const AppointmentDetailResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    patientId: z.string().uuid(),
+    providerId: z.string().uuid(),
+    scheduledStart: z.string().datetime(),
+    scheduledEnd: z.string().datetime(),
+    status: AppointmentStatusSchema,
+    typeCode: z.string().min(1).max(80),
+    noShowReason: z.string().nullable(),
+  })
+  .strict();
+
+export type AppointmentDetailResponse = z.infer<
+  typeof AppointmentDetailResponseSchema
+>;
+
+/**
+ * Appointment detail error codes.
+ */
+export const AppointmentDetailErrorResponseSchema = z
+  .object({
+    error: z
+      .object({
+        code: z.enum(['APPOINTMENT_NOT_FOUND']),
+        message: z.string().min(1).max(200),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type AppointmentDetailErrorResponse = z.infer<
+  typeof AppointmentDetailErrorResponseSchema
+>;

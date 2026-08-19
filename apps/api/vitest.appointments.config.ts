@@ -38,7 +38,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['test/appointments/**/*.spec.ts'],
+    include: [
+      'test/appointments/**/*.spec.ts',
+      'test/provider-schedules/**/*.spec.ts',
+    ],
     exclude: ['node_modules', 'dist'],
     testTimeout: 30_000,
     hookTimeout: 60_000,

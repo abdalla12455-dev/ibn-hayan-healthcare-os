@@ -7671,3 +7671,92 @@ The simple FKs are retained for Prisma relation convenience. The migration was u
   - Auth: 35/35 passed. Audit suites (integration/database/concurrency/atomicity/verify/configuration): all pass.
 - API production build (`tsc -p tsconfig.build.json`): PASS.
 - Pre-existing failure (unrelated): `openapi.e2e-spec.ts` "production mode" test fails due to missing audit encryption keys in the local environment; confirmed failing on the clean tree before changes; CI provides the keys.
+
+---
+
+## Scheduling Completion Milestone — Detail Read & Provider Schedule Management (continuation child commit)
+
+**Date:** 2026-08-19
+**Branch:** `feature/scheduling-completion-milestone`
+**Base commit before this continuation child commit:** `f4c92f8e8c80875d052d5781b701508a619319fa` (verified local == direct remote == PR #30 head before this work)
+
+### Scope Completed in This Continuation
+
+1. **Provider Schedule Management API (BC10 Workforce).** A production REST controller is now exposed under `apps/api/src/modules/provider-schedules/`:
+   - `POST /api/v1/provider-schedules` — create a weekly schedule entry; `provider_schedules:manage` (R07 Scheduler only).
+   - `GET /api/v1/provider-schedules?providerId=...` — list entries for the scoped provider/facility; `provider_schedules:read` (R07 and R09; R09 is read-only).
+   - `DELETE /api/v1/provider-schedules/:id` — delete an entry; `provider_schedules:manage` (R07 only); cross-tenant delete returns the safe 404 `PROVIDER_SCHEDULE_NOT_FOUND`.
+   - R06 Receptionist, R01 Physician, R02 Nurse, and R13 System Administrator receive NO ProviderSchedule administration permission (least privilege).
+   - Audit actions `provider_schedules.created` and `provider_schedules.deleted` added to the canonical audit action catalogue (`facility_context` category); metadata is `{ endpoint, providerId, scheduleEntryId }` — no PHI/PII.
+   - Zod contract (`packages/contracts/src/workforce/provider-schedules.schema.ts`) is strict and fail-closed: `startTime < endTime` (cross-midnight windows rejected at the contract layer). Overlapping weekly entries are intentionally ALLOWED (operator-ratified decision; the availability lookup only requires one covering entry).
+
+2. **Appointment Detail Read Surface (BC06 Scheduling).** `GET /api/v1/appointments/:id` is the smallest explicit production read surface exposing the persisted `noShowReason`:
+   - Guarded by the new permission `appointments:no_show_reason_read` — granted to R06, R07, R09; denied to R01, R02, R13.
+   - Broad projections (today/list/book/cancel/reschedule/visit-lifecycle) continue to exclude `noShowReason`; only this explicit detail surface exposes it.
+   - Response shape is strict (`AppointmentDetailResponseSchema`): `{ id, patientId, providerId, scheduledStart, scheduledEnd, status, typeCode, noShowReason }`.
+   - Invalid `:id` (non-UUID) returns 400 `APPOINTMENT_VALIDATION_ERROR` before any service call.
+   - Audit action `appointments.detail.viewed` (`facility_context` scope) emitted on success; metadata `{ endpoint, appointmentId }` only (PHI-safe).
+   - Tenant isolation: cross-tenant detail read returns safe 404 `APPOINTMENT_NOT_FOUND` (no leak).
+
+3. **No-show grace period.** Remains INTENTIONALLY DEFERRED to the future canonical Configuration implementation. No ad-hoc env-var or hard-coded grace window exists; the blocking dependency is the not-yet-ratified Configuration module contract (tenant/facility-level configuration values).
+
+### Permission Catalogue Changes
+
+New permission codes: `appointments:no_show_reason_read`, `provider_schedules:read`, `provider_schedules:manage`.
+
+| Permission | R01 | R02 | R06 | R07 | R09 | R13 |
+|---|---|---|---|---|---|---|
+| `appointments:no_show_reason_read` | x | x | yes | yes | yes | x |
+| `provider_schedules:read` | x | x | x | yes | yes | x |
+| `provider_schedules:manage` | x | x | x | yes | x | x |
+
+### Files Changed in This Continuation Child Commit
+
+**Created:**
+- `apps/api/src/modules/appointments/appointments-detail.service.ts`
+- `apps/api/src/modules/provider-schedules/index.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.controller.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.errors.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.module.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.service.ts`
+- `apps/api/test/appointments/appointments-detail.integration.spec.ts`
+- `apps/api/test/provider-schedules/provider-schedules.integration.spec.ts`
+- `packages/contracts/src/workforce/index.ts`
+- `packages/contracts/src/workforce/provider-schedules.schema.ts`
+
+**Modified:**
+- `apps/api/src/app.module.ts` (ProviderSchedulesModule import)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (GET /:id detail endpoint, UUID guard)
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts` (detail-service stub)
+- `apps/api/src/modules/appointments/appointments.module.ts` (detail service provider)
+- `apps/api/vitest.appointments.config.ts` (detail + provider-schedules spec globs)
+- `packages/contracts/src/appointments/appointments.schema.ts` (AppointmentDetailResponseSchema, AppointmentDetailErrorResponseSchema)
+- `packages/contracts/src/index.ts` (workforce export)
+- `packages/domain/src/authorization/permissions.ts` (3 new permission codes)
+- `packages/domain/src/authorization/role-permissions.ts` (R06/R07/R09 no_show_reason_read; R07 manage; R09 read-only)
+- `packages/domain/src/authorization/authorization.spec.ts` (catalogue + role-matrix expectations)
+- `packages/observability/src/audit/action-codes.ts` (appointments.detail.viewed, provider_schedules.created/deleted)
+- `PROJECT_CONTINUITY.md` (this section)
+
+**Deleted:** none.
+
+### Validation Results (this continuation)
+
+See the pre-commit validation battery run immediately before commit; final numbers recorded in the external completion report.
+
+### Remaining Deferred Scope
+
+- No-show grace-period enforcement — blocked on the canonical Configuration implementation (operator decision required; NOT started).
+- Cross-midnight schedule windows — fail-closed by contract + repository checks (deliberate).
+- No-show notification/reporting workflows — deferred.
+- Frontend (web) surfaces for provider schedule administration and no-show reason display — deferred.
+
+### Recovery Information
+
+- Branch: `feature/scheduling-completion-milestone`. Pre-commit verified base: `f4c92f8e8c80875d052d5781b701508a619319fa` (local == origin/feature == PR #30 head).
+- The final commit SHA of this child commit is recorded in the external completion report (no recursive SHA inside this file).
+- To resume: `git fetch origin`, verify PR #30 head matches the completion-report SHA, check out the branch, confirm working tree clean.
+
+### Immediate Next Step
+
+Wait for PR #30 exact-head Main CI (both jobs) to pass; then await operator merge review. Do NOT merge without explicit operator instruction.

@@ -87,6 +87,9 @@ export type PermissionCode =
   | 'appointments:start'
   | 'appointments:complete'
   | 'appointments:no_show'
+  | 'appointments:no_show_reason_read'
+  | 'provider_schedules:read'
+  | 'provider_schedules:manage'
   | 'encounters:create'
   | 'encounters:arrive'
   | 'encounters:start'
@@ -146,6 +149,9 @@ export const PERMISSION_CODES: readonly PermissionCode[] = [
   'appointments:start',
   'appointments:complete',
   'appointments:no_show',
+  'appointments:no_show_reason_read',
+  'provider_schedules:read',
+  'provider_schedules:manage',
   'encounters:create',
   'encounters:arrive',
   'encounters:start',

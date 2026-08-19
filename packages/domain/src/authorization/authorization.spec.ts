@@ -263,6 +263,9 @@ describe('authorization permission catalogue', () => {
       'appointments:start',
       'appointments:complete',
       'appointments:no_show',
+      'appointments:no_show_reason_read',
+      'provider_schedules:read',
+      'provider_schedules:manage',
       'encounters:create',
       'encounters:arrive',
       'encounters:start',
@@ -374,6 +377,9 @@ describe('authorization role-permission matrix', () => {
         p !== 'appointments:start' &&
         p !== 'appointments:complete' &&
         p !== 'appointments:no_show' &&
+        p !== 'appointments:no_show_reason_read' &&
+        p !== 'provider_schedules:read' &&
+        p !== 'provider_schedules:manage' &&
         p !== 'encounters:create' &&
         p !== 'encounters:arrive' &&
         p !== 'encounters:start' &&
@@ -501,6 +507,9 @@ describe('authorization role-permission matrix', () => {
           p !== 'appointments:confirm' &&
           p !== 'appointments:check_in' &&
           p !== 'appointments:no_show' &&
+          p !== 'appointments:no_show_reason_read' &&
+          p !== 'provider_schedules:read' &&
+          p !== 'provider_schedules:manage' &&
           p !== 'patients:register' &&
           p !== 'patients:update_demographics' &&
           p !== 'patients:manage_identifiers' &&
@@ -527,6 +536,9 @@ describe('authorization role-permission matrix', () => {
           p !== 'appointments:start' &&
           p !== 'appointments:complete' &&
           p !== 'appointments:no_show' &&
+          p !== 'appointments:no_show_reason_read' &&
+          p !== 'provider_schedules:read' &&
+          p !== 'provider_schedules:manage' &&
           p !== 'encounters:create' &&
           p !== 'encounters:arrive' &&
           p !== 'encounters:start' &&
@@ -559,11 +571,14 @@ describe('authorization role-permission matrix', () => {
     // R09 DOES hold encounters:view (Read on Encounter Records) and the
     // operational patient read permissions (patients:view,
     // patients:search, patients:consent_view).
+    // R09 also receives the read-only provider-schedule permission
+    // (list) but NOT the manage permission (create/delete, R07-only).
     expect(permissionsForRole('R09_ADMINISTRATOR')).toEqual(
       PERMISSION_CODES.filter(
         (p) =>
           p !== 'appointments:start' &&
           p !== 'appointments:complete' &&
+          p !== 'provider_schedules:manage' &&
           p !== 'encounters:create' &&
           p !== 'encounters:arrive' &&
           p !== 'encounters:start' &&
@@ -771,7 +786,7 @@ describe('authorization role-permission matrix', () => {
     // CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it. This is the
     // desired least-privilege behaviour.
     const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
-    expect(r09Permissions).toHaveLength(20);
+    expect(r09Permissions).toHaveLength(22);
     expect(r09Permissions).toEqual([
       'context:view',
       'context:select',
@@ -788,6 +803,8 @@ describe('authorization role-permission matrix', () => {
       'appointments:confirm',
       'appointments:check_in',
       'appointments:no_show',
+      'appointments:no_show_reason_read',
+      'provider_schedules:read',
       'encounters:view',
       'patients:view',
       'patients:search',
@@ -872,7 +889,7 @@ describe('authorization role-permission matrix', () => {
     // write permission (create/arrive/start/finish/cancel/on_leave/resume).
     const r06Permissions = ROLE_PERMISSION_MATRIX.R06_RECEPTIONIST;
     // Raw entry has duplicate context perms; assert the deduplicated count.
-    expect(new Set(r06Permissions).size).toBe(22);
+    expect(new Set(r06Permissions).size).toBe(23);
     expect(r06Permissions).toContain('appointments:book');
     expect(r06Permissions).toContain('appointments:cancel');
     expect(r06Permissions).toContain('appointments:reschedule');
@@ -915,7 +932,7 @@ describe('authorization role-permission matrix', () => {
     // visit-progression actions reserved for R01 Physician), and does
     // NOT receive any encounter lifecycle write permission.
     const r07Permissions = ROLE_PERMISSION_MATRIX.R07_SCHEDULER;
-    expect(r07Permissions).toHaveLength(16);
+    expect(r07Permissions).toHaveLength(19);
     expect(r07Permissions).toContain('appointments:book');
     expect(r07Permissions).toContain('appointments:cancel');
     expect(r07Permissions).toContain('appointments:reschedule');
@@ -1192,8 +1209,8 @@ describe('authorization role-permission matrix', () => {
     // NOT a reference to PERMISSION_CODES and that R09 does not silently
     // inherit clinical visit, encounter write, patient write, or
     // clinical-note write permissions.
-    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(20);
-    expect(PERMISSION_CODES.length).toBe(37);
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(22);
+    expect(PERMISSION_CODES.length).toBe(40);
     // R09 must NOT equal the full PERMISSION_CODES catalogue.
     expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toEqual(
       PERMISSION_CODES,
