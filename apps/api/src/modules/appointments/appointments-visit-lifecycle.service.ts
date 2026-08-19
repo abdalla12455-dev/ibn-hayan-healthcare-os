@@ -33,7 +33,8 @@ type VisitLifecycleAuditAction =
   | 'appointments.confirmed'
   | 'appointments.checked_in'
   | 'appointments.started'
-  | 'appointments.completed';
+  | 'appointments.completed'
+  | 'appointments.no_show_recorded';
 
 /**
  * Appointment visit-lifecycle application service (Stage 1F).
@@ -233,6 +234,58 @@ export class AppointmentsVisitLifecycleService {
   }
 
   /**
+   * Mark an appointment as a no-show
+   * (`confirmed` | `arrived` → `no_show`).
+   *
+   * Per STATUS_CODES.md §4.1, the canonical no-show transitions are
+   * `Confirmed → NoShow` and `CheckedIn → NoShow`. NoShow is a
+   * terminal state with no outgoing transition edge. Per
+   * APPOINTMENTS.md §7.1, no-show recording is "a manual action by
+   * reception or clinical staff" and is "audited, with the recorder,
+   * the time, and the justification (if required) recorded."
+   *
+   * The `reason` parameter is the optional caller-supplied
+   * justification. Per APPOINTMENTS.md §7.1, justification is "if
+   * required" (configurable per clinic type). The operator-ratified
+   * storage model persists the reason on the appointment row
+   * (`no_show_reason` column, max 500 chars) atomically with the
+   * FIRST confirmed|arrived → no_show transition. The free-text
+   * reason is stored on the appointment row, NOT in generic audit
+   * metadata, to keep the audit trail PHI-safe.
+   *
+   * Re-marking an already-no_show appointment is an idempotent no-op
+   * (no mutation, no audit event, no overwrite of the original
+   * `noShowReason`), mirroring the terminal idempotency for
+   * `completed` and `cancelled`.
+   *
+   * Authorized for R06 Receptionist, R07 Scheduler, and R09 Clinic
+   * Administrator (the clinic-booking operational roles). R01
+   * Physician, R02 Nurse, and R13 Platform/System Administrator are
+   * denied (operator-ratified authorization matrix).
+   */
+  async markNoShow(
+    appointmentId: string,
+    cookieValue: string | undefined,
+    auditContext?: AuditRequestContext,
+    reason?: string,
+  ): Promise<AppointmentVisitLifecycleResponse | null> {
+    return this.transition(
+      appointmentId,
+      {
+        allowedSourceStates: ['confirmed', 'arrived'],
+        targetStatus: 'no_show',
+        idempotentIfAlreadyAtTarget: true,
+        noShowReason: reason ?? null,
+      },
+      'appointments.no_show_recorded',
+      'appointments_no_show',
+      'no_show',
+      cookieValue,
+      auditContext,
+    );
+  }
+
+  /**
    * Shared internal transition workflow.
    *
    * All four commands share the same session-resolution, scope
@@ -246,7 +299,7 @@ export class AppointmentsVisitLifecycleService {
     spec: AppointmentTransitionInput,
     auditAction: VisitLifecycleAuditAction,
     endpoint: string,
-    actionLabel: 'confirm' | 'check-in' | 'start' | 'complete',
+    actionLabel: 'confirm' | 'check-in' | 'start' | 'complete' | 'no_show',
     cookieValue: string | undefined,
     auditContext: AuditRequestContext | undefined,
   ): Promise<AppointmentVisitLifecycleResponse | null> {

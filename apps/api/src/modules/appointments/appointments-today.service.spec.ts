@@ -113,6 +113,7 @@ function makeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     scheduledEnd: new Date('2026-08-01T09:30:00.000Z'),
     status: 'booked' as const,
     typeCode: 'consultation',
+    noShowReason: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

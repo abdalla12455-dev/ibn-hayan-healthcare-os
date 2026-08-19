@@ -114,6 +114,25 @@ const CLINIC_BOOKING_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:reschedule',
   'appointments:confirm',
   'appointments:check_in',
+  'appointments:no_show',
+  'appointments:no_show_reason_read',
+] as const;
+
+/**
+ * The Provider Schedule administration permissions granted to R07
+ * Scheduler. Per the operator-ratified Scheduling Completion Milestone
+ * decisions, R07 may create, list/read, and delete ProviderSchedule
+ * entries. R09 Clinic Administrator is list/read-only; R06, R01, R02,
+ * and R13 receive no ProviderSchedule administration.
+ *
+ * `provider_schedules:read` gates the list operation.
+ * `provider_schedules:manage` gates create and delete. The two-code
+ * split makes read-only versus manage access explicit instead of a
+ * single overgrant code.
+ */
+const PROVIDER_SCHEDULE_MANAGE_PERMISSIONS: readonly PermissionCode[] = [
+  'provider_schedules:read',
+  'provider_schedules:manage',
 ] as const;
 
 /**
@@ -284,6 +303,9 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'appointments:reschedule',
   'appointments:confirm',
   'appointments:check_in',
+  'appointments:no_show',
+  'appointments:no_show_reason_read',
+  'provider_schedules:read',
   'encounters:view',
   'patients:view',
   'patients:search',
@@ -512,6 +534,7 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   // its existing booking permissions.
   R07_SCHEDULER: [
     ...CLINIC_BOOKING_ENCOUNTER_READ_PERMISSIONS,
+    ...PROVIDER_SCHEDULE_MANAGE_PERMISSIONS,
     'patients:view',
     'patients:search',
   ],

@@ -282,6 +282,23 @@ async function createProviderFacilityAssignment(
  * - Active provider
  * - Active (non-revoked) facility assignment
  */
+async function setFacilityTimezone(
+  facilityId: string,
+  timezone: string,
+): Promise<void> {
+  await prisma.$executeRaw`UPDATE facilities SET timezone = ${timezone} WHERE id = ${facilityId}::uuid`;
+}
+
+/**
+ * Creates a fully eligible provider for booking tests:
+ * - Active provider
+ * - Active (non-revoked) facility assignment
+ * - Facility timezone set to Asia/Baghdad (UTC+3)
+ * - Provider schedule entries covering all seven days (Monday-Sunday)
+ *   from 08:00 to 18:00 facility-local time, so any test slot in
+ *   September 2026 (09:00-10:30 UTC = 12:00-13:30 Baghdad) is within
+ *   working hours.
+ */
 async function createEligibleProvider(
   tenantId: string,
   organisationId: string,
@@ -295,6 +312,22 @@ async function createEligibleProvider(
     providerId,
     null, // active assignment
   );
+  await setFacilityTimezone(facilityId, 'Asia/Baghdad');
+  const dayStart = new Date(Date.UTC(1970, 0, 1, 8, 0, 0));
+  const dayEnd = new Date(Date.UTC(1970, 0, 1, 18, 0, 0));
+  for (const dayOfWeek of [1, 2, 3, 4, 5, 6, 7]) {
+    await prisma.providerSchedule.create({
+      data: {
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId,
+        dayOfWeek,
+        startTime: dayStart,
+        endTime: dayEnd,
+      },
+    });
+  }
   return { providerId };
 }
 

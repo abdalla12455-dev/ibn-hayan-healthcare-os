@@ -32,6 +32,7 @@ import {
   appointmentPastTime,
   appointmentPatientNotFound,
   appointmentProviderNotFound,
+  appointmentProviderNotAvailable,
 } from './appointments.errors.js';
 import { AppointmentOverlapError } from '../../infrastructure/database/repositories/prisma-appointment.repository.js';
 
@@ -224,6 +225,26 @@ export class AppointmentsBookingService {
     );
     if (!providerEligible) {
       throw appointmentProviderNotFound();
+    }
+
+    // Enforce provider availability (BR-BC06-ADM-002): the provider
+    // must be available at the requested time for the authenticated
+    // facility. BC10 Workforce owns the schedule/availability data;
+    // this call consumes it through the ProviderRepository port
+    // without duplicating the logic. Fail-closed: if the facility
+    // timezone is null, if no schedule entry exists for the
+    // appointment's day of week, or if the appointment's time window
+    // extends beyond the provider's working hours, booking is blocked.
+    const providerAvailable =
+      await this.providers.isProviderAvailableAtFacility(
+        tenantId,
+        request.providerId as ProviderId,
+        facilityId,
+        scheduledStart,
+        scheduledEnd,
+      );
+    if (!providerAvailable) {
+      throw appointmentProviderNotAvailable();
     }
 
     // Create the appointment (overlap detection is handled by the repository)

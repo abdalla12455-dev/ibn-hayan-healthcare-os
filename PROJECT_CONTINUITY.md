@@ -7424,3 +7424,397 @@ All run locally against a real PostgreSQL 17 disposable cluster (`PG_BINDIR=/usr
 
 Merge this BC10 User→Provider Identity Binding prerequisite to `main` first (after Main CI succeeds on the exact PR head). Then return to **BC03 PR #28**: rebase/integrate BC03 PR #28 on the merged identity-binding foundation and replace caller-supplied clinical actor identity (`authorId`/`actorId`/`authorRole`) with trusted server-side resolution via `findActiveProviderForUser(tenantId, userId)`.
 
+
+
+---
+
+## Scheduling Completion Milestone
+
+**Date:** 2026-08-14
+**Feature branch:** `feature/scheduling-completion-milestone`
+**Base commit:** `5faa945a688045114b2d09d5ee91ea4d1cb6177c` (merge of BC03 PR #28)
+
+### Scope
+
+The Scheduling Completion Milestone completes the Scheduling bounded context (BC06) by adding three operator-ratified capabilities:
+
+1. **Provider Availability/Schedules** — BC10 Workforce owns schedule data; BC06 Scheduling consumes it. A new `provider_schedules` table stores weekly working hours per provider per facility. Booking and rescheduling enforce that the provider must be available at the requested time (BR-BC06-ADM-002: fail-closed if availability cannot be verified).
+2. **Appointment No-Show recording** — a new terminal appointment status `no_show`, recorded via `POST /api/v1/appointments/:id/no-show`. No-show is idempotent (re-marking an already-no_show appointment returns 200 without a duplicate audit event). Only `confirmed` and `arrived` appointments can transition to `no_show`.
+3. **Provider availability enforcement on booking/rescheduling** — the booking and rescheduling services call `ProviderRepository.isProviderAvailableAtFacility()` after the eligibility check. If the facility timezone is null, no schedule entry exists for the appointment's day of week, or the appointment's time window extends beyond the provider's working hours, booking is blocked with `APPOINTMENT_PROVIDER_NOT_AVAILABLE` (422).
+
+### Architecture Decisions
+
+- **Cross-BC ownership:** BC10 Workforce owns provider schedule/availability data. BC06 Scheduling consumes it through the `ProviderRepository` port (`isProviderAvailableAtFacility`), not through direct cross-BC Prisma coupling.
+- **Time semantics:** `provider_schedules.start_time` and `end_time` are local time-of-day values (`TIME` without time zone) interpreted in the facility's configured IANA timezone (`facilities.timezone`). A facility with a null timezone is a configuration-required state; availability checks fail closed.
+- **Day of week:** ISO 8601 (1 = Monday ... 7 = Sunday).
+- **No-show lifecycle:** `no_show` is a terminal status (like `cancelled` and `completed`). It is non-blocking for slot re-use (the same provider/time slot can be re-booked after a no-show).
+- **Authorization:** A new permission `appointments:no_show` was added to the permission catalogue. It is granted to R06 Receptionist, R07 Scheduler, and R09 Clinic Administrator. R01 Physician, R02 Nurse, and R13 Platform/System Administrator are denied. R13 does NOT inherit clinical PHI access.
+- **Audit:** A new audit action code `appointments.no_show_recorded` was added. Audit metadata contains only safe IDs/context (endpoint + appointmentId) -- no note body, diagnosis text, patient names, DOB, or other PHI/PII.
+- **Idempotency:** Re-marking an already-`no_show` appointment returns 200 (idempotent) and does NOT emit a duplicate audit event.
+
+### Authorization Summary
+
+| Permission | R01 Physician | R02 Nurse | R06 Receptionist | R07 Scheduler | R09 Clinic Admin | R13 Platform Admin |
+|---|---|---|---|---|---|---|
+| `appointments:no_show` | x | x | yes | yes | yes | x |
+
+Permission catalogue updated: 36 to 37 codes. R09 count: 19 to 20. R06 count: 21 to 22. R07 count: 15 to 16.
+
+### Migration
+
+- **File:** `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql`
+- **Type:** Forward-only, additive. Creates the `provider_schedules` table with CHECK constraints (day_of_week 1-7, end_time > start_time), foreign keys to `providers` and `facilities` (CASCADE on delete), and three indexes (tenant isolation, provider+facility lookup, availability hot-path lookup).
+- No existing table is modified, no data is dropped or rewritten, and no already-merged migration is touched.
+
+### Files Changed
+
+**Created:**
+- `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql`
+- `apps/api/src/infrastructure/database/mappers/provider-schedule.mapper.ts`
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts`
+- `apps/api/test/appointments/appointments-no-show.integration.spec.ts`
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts`
+- `packages/domain/src/workforce/provider-schedule.ts`
+
+**Modified:**
+- `apps/api/prisma/schema.prisma` (ProviderSchedule model)
+- `apps/api/src/infrastructure/database/database.module.ts` (DI wiring for ProviderScheduleRepository)
+- `apps/api/src/infrastructure/database/index.ts` (export)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` (isProviderAvailableAtFacility, UTC-to-local conversion)
+- `apps/api/src/infrastructure/database/tokens.ts` (PROVIDER_SCHEDULE_REPOSITORY token)
+- `apps/api/src/modules/appointments/appointments-booking.service.ts` (availability enforcement)
+- `apps/api/src/modules/appointments/appointments-rescheduling.service.ts` (availability enforcement on reschedule)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (markNoShow method, no_show audit action)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (POST /:id/no-show endpoint)
+- `apps/api/src/modules/appointments/appointments.errors.ts` (no_show transition error handling)
+- `apps/api/test/appointments/appointments-booking.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-cancellation.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-rescheduling.integration.spec.ts` (facility timezone + schedule seeding)
+- `apps/api/test/appointments/appointments-visit-lifecycle.integration.spec.ts` (facility timezone + schedule seeding)
+- `packages/contracts/src/appointments/appointments.schema.ts` (no-show request schema)
+- `packages/domain/src/authorization/authorization.spec.ts` (permission counts, no_show exclusion filters)
+- `packages/domain/src/authorization/permissions.ts` (appointments:no_show permission)
+- `packages/domain/src/authorization/role-permissions.ts` (appointments:no_show in CLINIC_BOOKING_PERMISSIONS)
+- `packages/domain/src/scheduling/appointment.ts` (no_show status added to AppointmentStatus)
+- `packages/domain/src/workforce/index.ts` (re-exports)
+- `packages/domain/src/workforce/provider.spec.ts` (isProviderAvailableAtFacility stubs)
+- `packages/domain/src/workforce/workforce.repositories.ts` (ProviderScheduleRepository port, isProviderAvailableAtFacility on ProviderRepository)
+- `packages/observability/src/audit/action-codes.ts` (appointments.no_show_recorded action code)
+
+**Deleted:** none.
+
+### Validation Results
+
+- `git diff --check`: clean (no whitespace/conflict markers)
+- Prisma format: clean
+- Prisma validate: valid
+- Prisma client generation: success
+- API typecheck (`tsc --noEmit`): clean
+- API lint (`eslint`): clean
+- Workspace lint (`pnpm -r lint`): clean (all packages)
+- API production build (`nest build`): success
+- Web production build: success
+- Domain unit tests: 156/156 passed
+- Authorization spec: 78/78 passed
+- Appointments integration tests (PostgreSQL 17): 241/241 passed (7 files)
+- Encounter regression (PostgreSQL 17): 42/42 passed
+- Database tests (PostgreSQL 17): 196/196 passed
+- Auth tests: 35/35 passed
+- Context tests: 55/55 passed
+- Clinic-admin tests: 24/24 passed
+- Audit configuration tests: 28/28 passed
+- Audit concurrency tests: 11/11 passed
+
+### Remaining Risks / Deferred
+
+- Cross-midnight scheduling is not supported (the availability check uses the start day; appointments spanning midnight are deferred).
+- Provider schedule management admin API (CRUD for schedule entries) is implemented at the repository level but not exposed via a REST controller in this milestone (only consumed internally by booking/rescheduling).
+- No-Show notification/reporting workflows are deferred.
+- The migration shadow-DB drift check could not be run locally; CI on GitHub Actions (PostgreSQL 17) is authoritative for drift.
+
+### Recovery Information
+
+- Feature branch: `feature/scheduling-completion-milestone`. Base commit: `5faa945a688045114b2d09d5ee91ea4d1cb6177c`.
+- To resume: `git fetch origin`, verify `origin/main` is at `5faa945` (or ahead via a documented merge), check out the feature branch, and confirm the working tree matches the committed PR head.
+- The migration is forward-only and additive; reverting means not deploying the migration (no destructive rollback needed). Existing rows are unaffected.
+
+### Immediate Next Step
+
+Push the feature branch, create a draft PR to `main`, and wait for Main CI (PostgreSQL 17) to succeed on the exact PR head. Do NOT merge until operator review.
+
+---
+
+## Scheduling Completion Milestone — Corrective Review (PR #30)
+
+A final corrective review of PR #30 identified and fixed five blockers before operator merge review. This section documents the corrections and one operator decision required.
+
+### Corrective Changes
+
+#### 1. Composite FK convention (DB tenant/org/facility integrity)
+
+**Finding:** The `provider_schedules` migration used only simple FKs (`provider_id → providers(id)` and `facility_id → facilities(id)`). The BC10 `ProviderFacilityAssignment` table (migration `20260803010000_bc10_workforce_reference_foundation`) uses defense-in-depth composite FKs: `(tenant_id, provider_id) → providers(tenant_id, id)` and `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)`. The SCM migration did not match this convention, so the database could not reject a `provider_schedules` row with a cross-tenant provider or a facility/organisation mismatch.
+
+**Fix:** Added composite FKs to `20260817000000_scheduling_provider_availability/migration.sql`:
+- `provider_schedules_tenant_provider_fkey`: `(tenant_id, provider_id) → providers(tenant_id, id)`
+- `provider_schedules_tenant_org_facility_fkey`: `(tenant_id, organisation_id, facility_id) → facilities(tenant_id, organisation_id, id)`
+
+The simple FKs are retained for Prisma relation convenience. The migration was unmerged/unapplied, so amending it (rather than a corrective migration) follows the "unapplied migration correction" policy.
+
+**Tests added:** Three PG17 tests — cross-tenant provider rejection, cross-organisation facility rejection, and consistent-row acceptance.
+
+#### 2. Cross-midnight availability logic (fail-closed)
+
+**Finding:** `isProviderAvailableAtFacility` converted UTC start/end to facility-local time-of-day strings and compared them against `start_time`/`end_time` schedule entries. If the slot spanned midnight (e.g., 23:00–00:30 local), the `endTime` string ("00:30:00") was lexicographically less than the `startTime` ("23:00:00"), and the `end_time > start_time` CHECK on the schedule table prevented such entries — but the availability comparison logic could still produce incorrect matches or misses depending on the schedule entry. Cross-midnight scheduling was not supported but was not explicitly fail-closed.
+
+**Fix:** `utcToLocalDayAndTimes` now computes `localDate` for both start and end. If they differ (cross-midnight), `isProviderAvailableAtFacility` returns `false` (fail-closed). This prevents a cross-midnight slot from being matched against a same-day schedule entry.
+
+**Tests added:** Two PG17 tests — cross-midnight booking blocked, cross-midnight rescheduling blocked.
+
+#### 3. No-show justification recording — OPERATOR RATIFIED & IMPLEMENTED
+
+**Finding:** The `POST /appointments/:id/no-show` controller parses an optional `reason` from the request body but previously discarded it silently (did not pass it to `markNoShow`). APPOINTMENTS.md §7.1 requires "the justification (if required) recorded." The canonical storage model for no-show justification was NOT ratified:
+- The cancellation precedent stores `reason` in audit metadata.
+- The no-show PHI-avoidance rule (and existing test) excludes free-text from audit metadata.
+- No appointment column or dedicated table existed for no-show justification.
+
+**Operator decision (RATIFIED):** Option (b) — a new `no_show_reason` column on `appointments` (forward-only migration). The free-text reason is stored on the appointment row, NOT in generic audit metadata, keeping the audit trail PHI-safe.
+
+**Implemented:**
+- New nullable column `no_show_reason VARCHAR(500)` on `appointments` via migration `20260818000000_appointment_no_show_reason` (forward-only, additive, no DROP/TRUNCATE, existing rows default to NULL).
+- The domain `AppointmentTransitionInput` gained an optional `noShowReason?: string | null`. The repository writes it atomically with the status transition ONLY on the `transitioned` outcome (inside the same SERIALIZABLE transaction); `already_at_target` (idempotent re-mark) and `invalid_source_state` never touch the column, so an idempotent re-mark preserves the original reason. `undefined` (confirm/check-in/start/complete) leaves the column untouched.
+- The `markNoShow` service passes `noShowReason: reason ?? null`. The `void reason` placeholder and the "documented gap" language are removed.
+- The domain `Appointment` aggregate and the `appointmentFromPrisma` mapper carry `noShowReason`.
+- Audit metadata is unchanged: only `{ endpoint, appointmentId }` — no reason, no PHI. The free-text reason lives on the appointment row.
+
+#### 3b. No-show authorization — OPERATOR RATIFIED (no code change)
+
+**Finding:** APPOINTMENTS.md §7.1 prose says no-show recording is "a manual action by reception or clinical staff." The role table (§9.1) lists "no-show recording" under R06 (Receptionist) only. The implementation grants R06/R07/R09 (the operational booking roles, matching the booking/cancel/reschedule pattern) and denies R01/R02/R13.
+
+**Operator decision (RATIFIED):** The current authorization is correct: `appointments:no_show` is granted to R06 Receptionist, R07 Clinic Coordinator, and R09 Clinic Administrator (the clinic-booking operational roles); denied to R01 Physician, R02 Nurse, and R13 Platform/System Administrator. No code change. The "tension" prose-vs-role-table note is resolved in favour of the role table + operational booking pattern.
+
+#### 4. False negative test replacement
+
+**Finding:** The test "rescheduling is blocked when the new slot is outside working hours" did not actually test rescheduling — it only tested booking (asserted `bookRes.status === 422`). It was a false rescheduling negative test.
+
+**Fix:** Replaced with a real rescheduling negative test: book a valid slot inside working hours, then attempt to reschedule to a slot outside working hours. Asserts: 422 `APPOINTMENT_PROVIDER_NOT_AVAILABLE`, original appointment unchanged, no replacement created, no reschedule audit event.
+
+#### 5. ProviderScheduleRepository.delete() contract
+
+**Finding:** `delete()` used `deleteMany` and returned `null` (a placeholder), violating the interface contract that promises the deleted entry or null. The doc-comment acknowledged this ("deleteMany doesn't return the deleted row; re-query is unnecessary").
+
+**Fix:** Changed to `findFirst` (tenant-scoped) + `delete` (by ID). Returns the deleted entry's content, or null if not found. Cross-tenant deletes return null (safe no-op).
+
+### Files Modified in Corrective Review
+
+- `apps/api/prisma/migrations/20260817000000_scheduling_provider_availability/migration.sql` (composite FKs + header comment)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider.repository.ts` (cross-midnight detection + fail-closed)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts` (truthful delete contract)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (markNoShow accepts reason, documented gap)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (passes reason through)
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts` (real rescheduling negative test, composite FK tests, cross-midnight tests, truthful delete assertion)
+- `packages/domain/src/workforce/workforce.repositories.ts` (delete doc-comment)
+- `PROJECT_CONTINUITY.md` (this section)
+
+### Files Added/Modified for Operator-Ratified No-Show Decisions (this child commit)
+
+**Created:**
+- `apps/api/prisma/migrations/20260818000000_appointment_no_show_reason/migration.sql` (forward-only `ALTER TABLE appointments ADD COLUMN no_show_reason VARCHAR(500)`)
+
+**Modified:**
+- `apps/api/prisma/schema.prisma` (Appointment model: `noShowReason String? @map("no_show_reason") @db.VarChar(500)`)
+- `packages/domain/src/scheduling/appointment.ts` (domain `Appointment.noShowReason: string | null`; `AppointmentTransitionInput.noShowReason?: string | null`)
+- `apps/api/src/infrastructure/database/mappers/appointment.mapper.ts` (`appointmentFromPrisma` maps `noShowReason`)
+- `apps/api/src/infrastructure/database/repositories/prisma-appointment.repository.ts` (`transitionStatus` writes `noShowReason` atomically on the `transitioned` outcome only; `undefined` leaves the column untouched)
+- `apps/api/src/modules/appointments/appointments-visit-lifecycle.service.ts` (`markNoShow` passes `noShowReason: reason ?? null`; removed `void reason` and "documented gap" language)
+- `apps/api/src/modules/appointments/appointments-today.service.spec.ts` (mock `Appointment` carries `noShowReason: null`)
+- `apps/api/test/appointments/appointments-no-show.integration.spec.ts` (8 new justification-persistence PG17 tests + 1 concurrent-reason test)
+- `PROJECT_CONTINUITY.md` (this section)
+
+### Corrective Validation Results (PostgreSQL 17)
+
+- `git diff --check`: clean
+- Prisma format/validate/generate: clean
+- API typecheck: clean
+- API lint (changed files): clean
+- API unit tests: 492/492 passed
+- Appointments integration (PG17): 246/246 passed (7 files, including 5 new tests)
+- Database tests (PG17): 196/196 passed
+- Encounter regression (PG17): 42/42 passed
+- Clinical notes regression (PG17): 52/52 passed
+- Context tests: 55/55 passed
+- Clinic-admin tests: 24/24 passed
+- Auth tests: 35/35 passed
+- Role-preview tests: 53/53 passed
+- API production build: success
+- Pre-existing failure (unrelated): `openapi.e2e-spec.ts` "production mode" test fails due to missing audit encryption keys in the local environment; confirmed failing on the clean tree before changes; CI provides the keys.
+
+### Operator Decisions Required
+
+1. **No-show justification storage model** — RATIFIED (option b: `no_show_reason` column on `appointments`) and IMPLEMENTED in this child commit. See §3 above.
+2. **No-show authorization scope** — RATIFIED (R06/R07/R09 granted; R01/R02/R13 denied; no code change). See §3b above.
+
+### Validation Results for Operator-Ratified No-Show Decisions (PostgreSQL 17)
+
+- `git diff --check`: clean. Conflict-marker scan: clean.
+- Prisma format / validate / generate: PASS. Migration SQL inspected: forward-only, additive (`ALTER TABLE ... ADD COLUMN`), no `DROP`/`TRUNCATE`/destructive rewrite/backfill.
+- Typecheck (`tsc --noEmit` domain + contracts + api): PASS.
+- API lint (`eslint "{src,test}/**/*.ts"`): PASS.
+- API unit tests (`src/**/*.spec.ts`): 492/492 passed.
+- `@ibn-hayan/domain` tests: 156/156 passed.
+- **PostgreSQL 17 integration (real PG 17.11):**
+  - No-show suite: 32/32 passed (includes 8 new justification-persistence tests + 1 concurrent-reason test).
+  - Full appointments suite: 254/254 passed (booking, cancellation, rescheduling, visit-lifecycle, no-show, provider-schedule, today — all green).
+  - Database/tenancy (BC10 Workforce): 196/196 passed.
+  - Encounters (Stage 2A): 42/42 passed.
+  - Clinical notes (BC03): 52/52 passed.
+  - Context: 55/55 passed. Clinic-admin: 24/24 passed. Role-preview: 53/53 passed.
+  - Auth: 35/35 passed. Audit suites (integration/database/concurrency/atomicity/verify/configuration): all pass.
+- API production build (`tsc -p tsconfig.build.json`): PASS.
+- Pre-existing failure (unrelated): `openapi.e2e-spec.ts` "production mode" test fails due to missing audit encryption keys in the local environment; confirmed failing on the clean tree before changes; CI provides the keys.
+
+---
+
+## Scheduling Completion Milestone — Detail Read & Provider Schedule Management (continuation child commit)
+
+**Date:** 2026-08-19
+**Branch:** `feature/scheduling-completion-milestone`
+**Base commit before this continuation child commit:** `f4c92f8e8c80875d052d5781b701508a619319fa` (verified local == direct remote == PR #30 head before this work)
+
+### Scope Completed in This Continuation
+
+1. **Provider Schedule Management API (BC10 Workforce).** A production REST controller is now exposed under `apps/api/src/modules/provider-schedules/`:
+   - `POST /api/v1/provider-schedules` — create a weekly schedule entry; `provider_schedules:manage` (R07 Scheduler only).
+   - `GET /api/v1/provider-schedules?providerId=...` — list entries for the scoped provider/facility; `provider_schedules:read` (R07 and R09; R09 is read-only).
+   - `DELETE /api/v1/provider-schedules/:id` — delete an entry; `provider_schedules:manage` (R07 only); cross-tenant delete returns the safe 404 `PROVIDER_SCHEDULE_NOT_FOUND`.
+   - R06 Receptionist, R01 Physician, R02 Nurse, and R13 System Administrator receive NO ProviderSchedule administration permission (least privilege).
+   - Audit actions `provider_schedules.created` and `provider_schedules.deleted` added to the canonical audit action catalogue (`facility_context` category); metadata is `{ endpoint, providerId, scheduleEntryId }` — no PHI/PII.
+   - Zod contract (`packages/contracts/src/workforce/provider-schedules.schema.ts`) is strict and fail-closed: `startTime < endTime` (cross-midnight windows rejected at the contract layer). Overlapping weekly entries are intentionally ALLOWED (operator-ratified decision; the availability lookup only requires one covering entry).
+
+2. **Appointment Detail Read Surface (BC06 Scheduling).** `GET /api/v1/appointments/:id` is the smallest explicit production read surface exposing the persisted `noShowReason`:
+   - Guarded by the new permission `appointments:no_show_reason_read` — granted to R06, R07, R09; denied to R01, R02, R13.
+   - Broad projections (today/list/book/cancel/reschedule/visit-lifecycle) continue to exclude `noShowReason`; only this explicit detail surface exposes it.
+   - Response shape is strict (`AppointmentDetailResponseSchema`): `{ id, patientId, providerId, scheduledStart, scheduledEnd, status, typeCode, noShowReason }`.
+   - Invalid `:id` (non-UUID) returns 400 `APPOINTMENT_VALIDATION_ERROR` before any service call.
+   - Audit action `appointments.detail.viewed` (`facility_context` scope) emitted on success; metadata `{ endpoint, appointmentId }` only (PHI-safe).
+   - Tenant isolation: cross-tenant detail read returns safe 404 `APPOINTMENT_NOT_FOUND` (no leak).
+
+3. **No-show grace period.** Remains INTENTIONALLY DEFERRED to the future canonical Configuration implementation. No ad-hoc env-var or hard-coded grace window exists; the blocking dependency is the not-yet-ratified Configuration module contract (tenant/facility-level configuration values).
+
+### Permission Catalogue Changes
+
+New permission codes: `appointments:no_show_reason_read`, `provider_schedules:read`, `provider_schedules:manage`.
+
+| Permission | R01 | R02 | R06 | R07 | R09 | R13 |
+|---|---|---|---|---|---|---|
+| `appointments:no_show_reason_read` | x | x | yes | yes | yes | x |
+| `provider_schedules:read` | x | x | x | yes | yes | x |
+| `provider_schedules:manage` | x | x | x | yes | x | x |
+
+### Files Changed in This Continuation Child Commit
+
+**Created:**
+- `apps/api/src/modules/appointments/appointments-detail.service.ts`
+- `apps/api/src/modules/provider-schedules/index.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.controller.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.errors.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.module.ts`
+- `apps/api/src/modules/provider-schedules/provider-schedules.service.ts`
+- `apps/api/test/appointments/appointments-detail.integration.spec.ts`
+- `apps/api/test/provider-schedules/provider-schedules.integration.spec.ts`
+- `packages/contracts/src/workforce/index.ts`
+- `packages/contracts/src/workforce/provider-schedules.schema.ts`
+
+**Modified:**
+- `apps/api/src/app.module.ts` (ProviderSchedulesModule import)
+- `apps/api/src/modules/appointments/appointments.controller.ts` (GET /:id detail endpoint, UUID guard)
+- `apps/api/src/modules/appointments/appointments.controller.spec.ts` (detail-service stub)
+- `apps/api/src/modules/appointments/appointments.module.ts` (detail service provider)
+- `apps/api/vitest.appointments.config.ts` (detail + provider-schedules spec globs)
+- `packages/contracts/src/appointments/appointments.schema.ts` (AppointmentDetailResponseSchema, AppointmentDetailErrorResponseSchema)
+- `packages/contracts/src/index.ts` (workforce export)
+- `packages/domain/src/authorization/permissions.ts` (3 new permission codes)
+- `packages/domain/src/authorization/role-permissions.ts` (R06/R07/R09 no_show_reason_read; R07 manage; R09 read-only)
+- `packages/domain/src/authorization/authorization.spec.ts` (catalogue + role-matrix expectations)
+- `packages/observability/src/audit/action-codes.ts` (appointments.detail.viewed, provider_schedules.created/deleted)
+- `PROJECT_CONTINUITY.md` (this section)
+
+**Deleted:** none.
+
+### Validation Results (this continuation)
+
+See the pre-commit validation battery run immediately before commit; final numbers recorded in the external completion report.
+
+### Remaining Deferred Scope
+
+- No-show grace-period enforcement — intentionally deferred by the operator until the canonical Configuration implementation exists (deferral already ratified; NOT started).
+- Cross-midnight schedule windows — fail-closed by contract + repository checks (deliberate).
+- No-show notification/reporting workflows — deferred.
+- Frontend (web) surfaces for provider schedule administration and no-show reason display — deferred.
+
+### Recovery Information
+
+- Branch: `feature/scheduling-completion-milestone`. Pre-commit verified base: `f4c92f8e8c80875d052d5781b701508a619319fa` (local == origin/feature == PR #30 head).
+- The final commit SHA of this child commit is recorded in the external completion report (no recursive SHA inside this file).
+- To resume: `git fetch origin`, verify PR #30 head matches the completion-report SHA, check out the branch, confirm working tree clean.
+
+### Immediate Next Step
+
+Wait for PR #30 exact-head Main CI (both jobs) to pass; then await operator merge review. Do NOT merge without explicit operator instruction.
+
+---
+
+## Scheduling Completion Milestone — Provider Schedule Delete Scope-Isolation Correction (corrective child commit)
+
+**Date:** 2026-08-19 · **Base commit (verified pre-task):** `33db0a464d9fab2e08c52862e5aef42530055068`
+
+### Task
+
+An independent post-CI security review found a merge-blocking scope-isolation defect in the new Provider Schedule Management API: `DELETE /api/v1/provider-schedules/:id` was scoped to tenant only (`where: { id, tenantId }`), so an R07 Scheduler in Facility A could delete a ProviderSchedule entry belonging to Facility B or another organisation inside the SAME tenant if the entry ID was known. The previous integration test only proved cross-TENANT isolation, leaving the same-tenant cross-facility bypass green in CI.
+
+### Correction
+
+- `ProviderScheduleRepository.delete()` contract changed in place from `(tenantId, entryId)` to `(tenantId, organisationId, facilityId, entryId)` — the Prisma `findFirst` now requires ALL authenticated scope dimensions.
+- `ProviderSchedulesService.deleteEntry()` passes the session-derived `organisationId` and `facilityId` through. Scope remains session-derived ONLY; no tenantId/organisationId/facilityId is accepted from the request.
+- Boundary UUID validation added: `GET ?providerId=` (malformed → 400 `PROVIDER_SCHEDULE_VALIDATION_ERROR`) and `DELETE /:id` (malformed → 400), so malformed input never reaches Prisma as an unhandled database error.
+- Permission matrix UNCHANGED: R07 is the only create/delete role; R09 read-only; R06/R01/R02/R13 denied.
+
+### New PostgreSQL 17 tests
+
+1. Same tenant + same organisation + different facility: delete is denied (404 safe not-found), row remains, no successful delete audit event.
+2. Same tenant + different organisation/facility: delete denied (404), row remains (org + facility ids verified unchanged), no successful delete audit event.
+3. Existing correct-facility deletion still succeeds (200, entries emptied).
+4. Cross-tenant deletion still fails safely (404).
+5. Invalid providerId query → controlled 400 validation error.
+6. Invalid delete id → controlled 400 validation error.
+
+**Modified:**
+
+- `packages/domain/src/workforce/workforce.repositories.ts` (delete contract)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts` (scope-enforced findFirst)
+- `apps/api/src/modules/provider-schedules/provider-schedules.service.ts` (pass full scope)
+- `apps/api/src/modules/provider-schedules/provider-schedules.controller.ts` (UUID validation)
+- `apps/api/src/modules/provider-schedules/provider-schedules.errors.ts` (doc)
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts` (repository call sites)
+- `apps/api/test/provider-schedules/provider-schedules.integration.spec.ts` (4 new tests)
+- `PROJECT_CONTINUITY.md` (this section)
+
+**Deleted:** none.
+
+### Validation Results
+
+- prisma format/validate/generate: PASS
+- Workspace lint: PASS — Workspace typecheck: PASS (after domain package rebuild)
+- Product builds (api nest SWC + web Next.js): PASS
+- Unit: contracts 208/208; domain 156/156; observability 96/96; web 227/227; api 492/492
+- PG17: Appointments 278/278 (9 files, includes 4 new scope-isolation/UUID tests); Database/BC10 196/196; Auth 35/35; Context 55/55; Clinic-admin 24/24
+- `git diff --check`: clean; conflict-marker scan: clean
+- Previous known pre-existing openapi production-mode failure remains (missing audit keys in local env; CI provides them)
+
+### Remaining Deferred Scope (unchanged)
+
+- No-show grace-period enforcement — intentionally deferred until the canonical Configuration implementation exists.
+- Cross-midnight windows fail-closed; no-show notification/reporting; web surfaces.
+
+### Recovery Information
+
+Pre-push base: `33db0a464d9fab2e08c52862e5aef42530055068`. Final commit SHA recorded in the external completion report.

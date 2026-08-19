@@ -33,6 +33,7 @@ import {
   appointmentRescheduleInvalidTransition,
   appointmentPatientNotFound,
   appointmentProviderNotFound,
+  appointmentProviderNotAvailable,
 } from './appointments.errors.js';
 import { AppointmentOverlapError } from '../../infrastructure/database/repositories/prisma-appointment.repository.js';
 
@@ -280,6 +281,26 @@ export class AppointmentsReschedulingService {
     );
     if (!providerEligible) {
       throw appointmentProviderNotFound();
+    }
+
+    // Enforce provider availability for the replacement slot
+    // (BR-BC06-ADM-002): the provider must be available at the
+    // requested new time for the authenticated facility. BC10 owns
+    // the schedule/availability data; this call consumes it through
+    // the ProviderRepository port. Fail-closed: if the facility
+    // timezone is null, if no schedule entry exists for the new
+    // slot's day of week, or if the new slot extends beyond the
+    // provider's working hours, rescheduling is blocked.
+    const providerAvailable =
+      await this.providers.isProviderAvailableAtFacility(
+        tenantId,
+        original.providerId,
+        facilityId,
+        scheduledStart,
+        scheduledEnd,
+      );
+    if (!providerAvailable) {
+      throw appointmentProviderNotAvailable();
     }
 
     // Perform the atomic reschedule. The repository handles the

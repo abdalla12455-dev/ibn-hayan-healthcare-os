@@ -1,0 +1,109 @@
+/**
+ * Prisma-backed implementation of {@link ProviderScheduleRepository}
+ * from `@ibn-hayan/domain`.
+ *
+ * BC10 Workforce owns provider schedule/availability data. This adapter
+ * provides write access for schedule administration (create, delete)
+ * and read access for schedule queries.
+ *
+ * Per CODING_STANDARDS.md §10, every method takes `tenantId` as a
+ * required parameter. Cross-tenant queries return empty results or
+ * null (not an error).
+ */
+
+import { Injectable } from '@nestjs/common';
+import type {
+  ProviderScheduleEntry,
+  ProviderScheduleEntryId,
+  ProviderScheduleRepository,
+  ProviderScheduleEntryCreateInput,
+  TenantId,
+  OrganisationId,
+  FacilityId,
+  ProviderId,
+} from '@ibn-hayan/domain';
+import { PrismaService } from '../prisma.service.js';
+import {
+  providerScheduleFromPrisma,
+  timeOfDayToPrisma,
+} from '../mappers/provider-schedule.mapper.js';
+
+/**
+ * The Prisma row shape for the ProviderSchedule model. Exported so
+ * the mapper can reference it without importing Prisma-generated types
+ * directly (the mapper stays decoupled from the Prisma client namespace).
+ */
+export interface PrismaScheduleRow {
+  id: string;
+  tenantId: string;
+  organisationId: string;
+  facilityId: string;
+  providerId: string;
+  dayOfWeek: number;
+  startTime: Date;
+  endTime: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+@Injectable()
+export class PrismaProviderScheduleRepository implements ProviderScheduleRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    input: ProviderScheduleEntryCreateInput,
+  ): Promise<ProviderScheduleEntry> {
+    const row = await this.prisma.providerSchedule.create({
+      data: {
+        tenantId,
+        organisationId,
+        facilityId,
+        providerId: input.providerId,
+        dayOfWeek: input.dayOfWeek,
+        startTime: timeOfDayToPrisma(input.startTime),
+        endTime: timeOfDayToPrisma(input.endTime),
+      },
+    });
+    return providerScheduleFromPrisma(row);
+  }
+
+  async findByProviderAndFacility(
+    tenantId: TenantId,
+    providerId: ProviderId,
+    facilityId: FacilityId,
+  ): Promise<ProviderScheduleEntry[]> {
+    const rows = await this.prisma.providerSchedule.findMany({
+      where: { tenantId, providerId, facilityId },
+      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+    });
+    return rows.map((r) => providerScheduleFromPrisma(r));
+  }
+
+  async delete(
+    tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
+    entryId: ProviderScheduleEntryId,
+  ): Promise<ProviderScheduleEntry | null> {
+    // Read-then-delete: first find the entry scoped to the FULL
+    // authenticated tenant/organisation/facility context, then delete
+    // it. This returns the deleted entry's content to satisfy the
+    // interface contract (deleted-entry-or-null). Entries outside the
+    // authenticated scope (another tenant, another organisation, or
+    // another facility) return null — a safe no-op with no existence
+    // leak — and remain unchanged.
+    const row = await this.prisma.providerSchedule.findFirst({
+      where: { id: entryId, tenantId, organisationId, facilityId },
+    });
+    if (row === null) {
+      return null;
+    }
+    await this.prisma.providerSchedule.delete({
+      where: { id: entryId },
+    });
+    return providerScheduleFromPrisma(row);
+  }
+}

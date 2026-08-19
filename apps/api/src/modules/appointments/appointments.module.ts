@@ -10,6 +10,7 @@ import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
+import { AppointmentsDetailService } from './appointments-detail.service.js';
 
 /**
  * Appointments module.
@@ -63,6 +64,7 @@ import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycl
     AppointmentsCancellationService,
     AppointmentsReschedulingService,
     AppointmentsVisitLifecycleService,
+    AppointmentsDetailService,
   ],
 })
 export class AppointmentsModule {}

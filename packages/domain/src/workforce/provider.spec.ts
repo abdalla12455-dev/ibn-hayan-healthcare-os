@@ -183,6 +183,15 @@ describe('provider repository ports', () => {
       ): Promise<ProviderFacilityAssignment[]> {
         return [];
       },
+      async isProviderAvailableAtFacility(
+        _tenantId: string,
+        _providerId: string,
+        _facilityId: string,
+        _scheduledStart: Date,
+        _scheduledEnd: Date,
+      ): Promise<boolean> {
+        return false;
+      },
     };
     expect(stub).toBeDefined();
     expect(typeof stub.existsInTenant).toBe('function');
@@ -212,6 +221,15 @@ describe('provider repository ports', () => {
       > {
         return [];
       },
+      async isProviderAvailableAtFacility(
+        _tenantId: string,
+        _providerId: string,
+        _facilityId: string,
+        _scheduledStart: Date,
+        _scheduledEnd: Date,
+      ): Promise<boolean> {
+        return false;
+      },
     };
     expect(stub.existsInTenant).toBeDefined();
   });
@@ -239,6 +257,15 @@ describe('provider repository ports', () => {
       > {
         return [];
       },
+      async isProviderAvailableAtFacility(
+        _tenantId: string,
+        _providerId: string,
+        _facilityId: string,
+        _scheduledStart: Date,
+        _scheduledEnd: Date,
+      ): Promise<boolean> {
+        return false;
+      },
     };
     expect(stub.isEligibleForFacility).toBeDefined();
   });
@@ -261,6 +288,15 @@ describe('provider repository ports', () => {
         expect(typeof tenantId).toBe('string');
         expect(typeof providerId).toBe('string');
         return [];
+      },
+      async isProviderAvailableAtFacility(
+        _tenantId: string,
+        _providerId: string,
+        _facilityId: string,
+        _scheduledStart: Date,
+        _scheduledEnd: Date,
+      ): Promise<boolean> {
+        return false;
       },
     };
     expect(stub.findActiveFacilityAssignments).toBeDefined();

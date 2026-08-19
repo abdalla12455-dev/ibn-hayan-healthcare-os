@@ -32,10 +32,18 @@ import { AppointmentsBookingService } from './appointments-booking.service.js';
 import { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
+import { AppointmentsDetailService } from './appointments-detail.service.js';
 import {
   readCookie,
   buildAuditContext,
 } from '../../infrastructure/transport/index.js';
+import { appointmentValidationError } from './appointments.errors.js';
+
+const UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
 
 /**
  * Shared OpenAPI response schema for the four Stage 1F visit-lifecycle
@@ -123,6 +131,7 @@ export class AppointmentsController {
     private readonly cancellationService: AppointmentsCancellationService,
     private readonly reschedulingService: AppointmentsReschedulingService,
     private readonly visitLifecycleService: AppointmentsVisitLifecycleService,
+    private readonly detailService: AppointmentsDetailService,
   ) {}
 
   /**
@@ -234,6 +243,64 @@ export class AppointmentsController {
   ): Promise<TodayAppointmentsResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
     const result = await this.todayService.loadTodayAppointments(
+      cookieValue,
+      buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * GET /api/v1/appointments/:id
+   *
+   * Explicit appointment-detail read surface that exposes the persisted
+   * `noShowReason`. Guarded by `appointments:no_show_reason_read`
+   * (granted to R06, R07, R09; denied to R01, R02, R13). Broad
+   * today/list/book/cancel/reschedule/visit-lifecycle projections
+   * continue to exclude `noShowReason`.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 when roles do not grant `appointments:no_show_reason_read`
+   * or the active context is missing/invalid.
+   * Returns 404 when the appointment is not found within the
+   * authenticated tenant/organisation/facility scope (no existence leak).
+   *
+   * Declared after the literal route `GET /today` so that `/today`
+   * resolves before this `:id` parameter route.
+   */
+  @Get(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:no_show_reason_read', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Read appointment detail (explicitly authorized no-show reason surface)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The appointment detail, including `noShowReason` (persisted or null).',
+  })
+  @ApiResponse({ status: 401, description: 'Session required.' })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Appointment not found in the authenticated scope.',
+  })
+  async getAppointmentDetail(
+    @Req() req: Request,
+    @Param('id') id: string,
+  ): Promise<import('@ibn-hayan/contracts').AppointmentDetailResponse> {
+    if (!isUuid(id)) {
+      throw appointmentValidationError('The appointment id must be a UUID.');
+    }
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const result = await this.detailService.loadDetail(
+      id,
       cookieValue,
       buildAuditContext(req),
     );
@@ -979,6 +1046,94 @@ export class AppointmentsController {
       id,
       cookieValue,
       buildAuditContext(req),
+    );
+    if (result === null) {
+      throw sessionRequired();
+    }
+    return result;
+  }
+
+  /**
+   * POST /api/v1/appointments/:id/no-show
+   *
+   * Mark an appointment as a no-show (`confirmed` | `arrived` →
+   * `no_show`).
+   *
+   * Authorized for R06 Receptionist, R07 Clinic Coordinator, and R09
+   * Clinic Administrator (clinic-booking roles; permission
+   * `appointments:no_show`). Per STATUS_CODES.md §4.1, NoShow is a
+   * terminal state. Per APPOINTMENTS.md §7.1, no-show recording is
+   * "a manual action by reception or clinical staff" and is audited.
+   *
+   * Re-marking an already-no_show appointment is an idempotent no-op
+   * (no mutation, no duplicate audit event), mirroring the terminal
+   * idempotency for `completed` and `cancelled`.
+   *
+   * Returns 401 for missing/invalid/expired/revoked sessions.
+   * Returns 403 for principals whose roles do not grant
+   * `appointments:no_show` (R01 Physician and R13 Platform/System
+   * Administrator are denied), or when the active context is missing.
+   * Returns 404 when the appointment does not exist or is not
+   * accessible in the authenticated scope (no cross-scope leak).
+   * Returns 422 when the appointment is not in `confirmed` or
+   * `arrived` (an already-no_show appointment returns idempotent
+   * success 200, NOT this error).
+   */
+  @Post(':id/no-show')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('appointments:no_show', {
+    mode: 'for-active-membership',
+  })
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary:
+      'Mark an appointment as a no-show (confirmed|arrived → no_show) for the active tenant, organisation, and facility context',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The no-show appointment. The appointments.no_show_recorded audit event is emitted exactly once on a first-time transition. An idempotent re-marking returns success without a duplicate audit event.',
+    schema: visitLifecycleResponseSchema,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Session is missing, expired, or revoked.',
+  })
+  @ApiResponse({ status: 403, description: 'Authorisation denied.' })
+  @ApiResponse({
+    status: 404,
+    description:
+      'Appointment not found or not accessible in the current context.',
+  })
+  @ApiResponse({
+    status: 422,
+    description:
+      'The appointment cannot be marked as a no-show from its current state.',
+  })
+  async markNoShow(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<AppointmentVisitLifecycleResponse> {
+    const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    const { NoShowAppointmentRequestSchema } =
+      await import('@ibn-hayan/contracts');
+    const parseResult = NoShowAppointmentRequestSchema.safeParse(body);
+    if (!parseResult.success) {
+      const { BadRequestException } = await import('@nestjs/common');
+      const issues = parseResult.error.issues.map((i) => i.message).join('; ');
+      throw new BadRequestException({
+        error: {
+          code: 'APPOINTMENT_VALIDATION_ERROR',
+          message: issues || 'Invalid request body',
+        },
+      });
+    }
+    const result = await this.visitLifecycleService.markNoShow(
+      id,
+      cookieValue,
+      buildAuditContext(req),
+      parseResult.data.reason,
     );
     if (result === null) {
       throw sessionRequired();

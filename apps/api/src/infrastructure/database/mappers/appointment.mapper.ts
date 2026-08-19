@@ -79,6 +79,7 @@ export function appointmentFromPrisma(row: PrismaAppointment): Appointment {
     scheduledEnd: row.scheduledEnd,
     status: prismaStatusToDomain(row.status),
     typeCode: row.typeCode,
+    noShowReason: row.noShowReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

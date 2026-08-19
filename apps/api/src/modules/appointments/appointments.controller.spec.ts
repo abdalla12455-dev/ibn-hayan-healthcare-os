@@ -6,6 +6,7 @@ import type { AppointmentsBookingService } from './appointments-booking.service.
 import type { AppointmentsCancellationService } from './appointments-cancellation.service.js';
 import type { AppointmentsReschedulingService } from './appointments-rescheduling.service.js';
 import type { AppointmentsVisitLifecycleService } from './appointments-visit-lifecycle.service.js';
+import type { AppointmentsDetailService } from './appointments-detail.service.js';
 import type {
   TodayAppointmentsResponse,
   CancelAppointmentResponse,
@@ -204,6 +205,12 @@ function makeVisitLifecycleServiceStub(
   } as unknown as AppointmentsVisitLifecycleService;
 }
 
+function makeDetailServiceStub() {
+  return {
+    loadDetail: vi.fn(),
+  } as unknown as AppointmentsDetailService;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -217,6 +224,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest();
       const result = await controller.getTodayAppointments(req);
@@ -231,6 +239,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -248,6 +257,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest();
       await controller.getTodayAppointments(req);
@@ -265,6 +275,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toMatchObject({
@@ -284,6 +295,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ query: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -301,6 +313,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ query: { organisationId: 'evil-org' } });
       await controller.getTodayAppointments(req);
@@ -318,6 +331,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ query: { facilityId: 'evil-facility' } });
       await controller.getTodayAppointments(req);
@@ -335,6 +349,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({
         headers: {
@@ -358,6 +373,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ body: { tenantId: 'evil-tenant' } });
       await controller.getTodayAppointments(req);
@@ -375,6 +391,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest();
       await expect(controller.getTodayAppointments(req)).rejects.toThrow(
@@ -391,6 +408,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       const result = await controller.cancelAppointment(
@@ -408,6 +426,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub({ result: null }),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       await expect(
@@ -432,6 +451,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub({ result: VALID_CANCEL_RESPONSE }),
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       await expect(
@@ -460,6 +480,7 @@ describe('AppointmentsController', () => {
         cancellationService,
         makeReschedulingServiceStub(),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       // The strict schema rejects unknown keys (tenantId, status, etc.)
@@ -487,6 +508,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       const result = await controller.rescheduleAppointment(
@@ -508,6 +530,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub({ result: null }),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       await expect(
@@ -536,6 +559,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       // missing required `reason`
@@ -564,6 +588,7 @@ describe('AppointmentsController', () => {
         makeCancellationServiceStub(),
         makeReschedulingServiceStub({ result: VALID_RESCHEDULE_RESPONSE }),
         makeVisitLifecycleServiceStub(),
+        makeDetailServiceStub(),
       );
       const req = makeRequest({ method: 'POST' });
       // The strict schema rejects unknown keys (tenantId, status,

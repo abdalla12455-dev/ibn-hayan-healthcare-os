@@ -406,7 +406,21 @@ export type ClinicAdminActionCode =
  * `appointments_confirm`, `appointments_check_in`,
  * `appointments_start`, and `appointments_complete` respectively.
  *
- * All eight actions are mapped to the `facility_context` category
+ * The `appointments.no_show_recorded` event is emitted after a
+ * successful FIRST-TIME no-show recording (confirmed|arrived →
+ * no_show). Per STATUS_CODES.md §4.1, NoShow is a terminal state
+ * ("Terminal (or rebooked as new appointment") with no outgoing
+ * transition edge. Per APPOINTMENTS.md §7.1, no-show recording is
+ * "a manual action by reception or clinical staff" and "is itself
+ * audited, with the recorder, the time, and the justification (if
+ * required) recorded." The event metadata carries
+ * `{ endpoint: 'appointments_no_show', appointmentId: string }` only
+ * — no patient details, provider details, or appointment timing (no
+ * PHI). An idempotent re-marking of an already-no_show appointment
+ * does NOT emit a duplicate event, mirroring the terminal idempotency
+ * for `cancelled` and `completed`.
+ *
+ * All nine actions are mapped to the `facility_context` category
  * (see `inferCategoryFromAction`).
  *
  * Emission semantics:
@@ -427,10 +441,45 @@ export const APPOINTMENTS_ACTION_CODES = [
   'appointments.checked_in',
   'appointments.started',
   'appointments.completed',
+  'appointments.no_show_recorded',
+  'appointments.detail.viewed',
 ] as const;
 
 export type AppointmentsActionCode =
   (typeof APPOINTMENTS_ACTION_CODES)[number];
+
+
+// ---------------------------------------------------------------------------
+// Provider Schedules (Workforce bounded context � BC10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Provider Schedules action codes.
+ *
+ * Emitted by the Provider Schedule Management API
+ * (`POST /api/v1/provider-schedules` and
+ * `DELETE /api/v1/provider-schedules/:id`) after successful schedule
+ * administration operations.
+ *
+ * The `provider_schedules.created` event is emitted after a schedule
+ * entry is created. The `provider_schedules.deleted` event is emitted
+ * after a schedule entry is deleted. Metadata carries only
+ * `{ endpoint, providerId, scheduleEntryId }` � stable identifiers
+ * for traceability. No working hours, no patient data, no clinical
+ * content (no PHI/PII).
+ *
+ * One event per successful create/delete. List operations are not
+ * audited (routine operational reads), matching the read of schedule
+ * data performed by booking/rescheduling, which emits the
+ * appointments module's own audit actions.
+ */
+export const PROVIDER_SCHEDULES_ACTION_CODES = [
+  'provider_schedules.created',
+  'provider_schedules.deleted',
+] as const;
+
+export type ProviderSchedulesActionCode =
+  (typeof PROVIDER_SCHEDULES_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
 // Encounters (Encounter bounded context — BC02)
@@ -634,6 +683,7 @@ export const AUDIT_ACTION_CODES = [
   ...ROLE_PREVIEW_ACTION_CODES,
   ...CLINIC_ADMIN_ACTION_CODES,
   ...APPOINTMENTS_ACTION_CODES,
+  ...PROVIDER_SCHEDULES_ACTION_CODES,
   ...ENCOUNTERS_ACTION_CODES,
   ...PATIENTS_ACTION_CODES,
   ...CLINICAL_NOTES_ACTION_CODES,
@@ -715,6 +765,12 @@ export function inferCategoryFromAction(
   // existing category. See the `APPOINTMENTS_ACTION_CODES` block above
   // for the full rationale.
   if (action.startsWith('appointments.')) {
+    return 'facility_context';
+  }
+  // Provider Schedules actions are mapped to the `facility_context`
+  // category: schedule entries are per-provider-per-facility and the
+  // service requires an active facility context.
+  if (action.startsWith('provider_schedules.')) {
     return 'facility_context';
   }
   // Encounters actions are mapped to the `facility_context` category,

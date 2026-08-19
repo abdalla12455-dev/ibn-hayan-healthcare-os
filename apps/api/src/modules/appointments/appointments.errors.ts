@@ -116,6 +116,32 @@ export function appointmentProviderNotFound(): UnprocessableEntityException {
 }
 
 /**
+ * Return a 422 when the provider is not available at the requested
+ * time for the authenticated facility.
+ *
+ * Per BR-BC06-ADM-002 ("Practitioner Availability"), if the
+ * practitioner's availability cannot be verified for the requested
+ * time, booking is blocked. This includes:
+ * - The provider has no schedule entry for the appointment's day of
+ *   week at the facility.
+ * - The appointment's time window extends beyond the provider's
+ *   configured working hours.
+ * - The facility timezone is not configured (fail closed).
+ *
+ * This error is also used for rescheduling when the replacement slot
+ * falls outside the provider's availability.
+ */
+export function appointmentProviderNotAvailable(): UnprocessableEntityException {
+  return new UnprocessableEntityException({
+    error: {
+      code: 'APPOINTMENT_PROVIDER_NOT_AVAILABLE',
+      message:
+        'The provider is not available at the requested time for this facility.',
+    },
+  });
+}
+
+/**
  * Return a 422 when the requested appointment time overlaps with an
  * existing appointment for the same provider.
  *
@@ -239,13 +265,15 @@ export function appointmentRescheduleInvalidTransition(): UnprocessableEntityExc
  * cancellation/rescheduling for a single invalid-transition code path.
  */
 export function appointmentVisitInvalidTransition(
-  action: 'confirm' | 'check-in' | 'start' | 'complete',
+  action: 'confirm' | 'check-in' | 'start' | 'complete' | 'no_show',
 ): UnprocessableEntityException {
   const messages: Record<typeof action, string> = {
     confirm: 'The appointment cannot be confirmed from its current state.',
     'check-in': 'The appointment cannot be checked in from its current state.',
     start: 'The appointment cannot be started from its current state.',
     complete: 'The appointment cannot be completed from its current state.',
+    no_show:
+      'The appointment cannot be marked as a no-show from its current state.',
   };
   return new UnprocessableEntityException({
     error: {
