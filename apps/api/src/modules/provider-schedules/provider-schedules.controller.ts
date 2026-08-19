@@ -34,6 +34,12 @@ import {
   buildAuditContext,
 } from '../../infrastructure/transport/index.js';
 
+const UUID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
 /**
  * Provider Schedule Management controller (BC10 Workforce).
  *
@@ -152,6 +158,11 @@ export class ProviderSchedulesController {
     if (typeof pid === 'string' && pid.length === 0) {
       pid = undefined;
     }
+    if (pid !== undefined && !isUuid(pid)) {
+      throw providerScheduleValidationError(
+        'providerId query parameter must be a UUID.',
+      );
+    }
     const result = await this.schedules.listEntries(pid, cookieValue);
     if (result === null) {
       throw sessionRequired();
@@ -160,8 +171,10 @@ export class ProviderSchedulesController {
   }
 
   /**
-   * Delete a provider schedule entry by ID (tenant-scoped, safe
-   * not-found across tenant boundaries).
+   * Delete a provider schedule entry by ID, scoped to the FULL
+   * authenticated tenant/organisation/facility context. Entries in
+   * another tenant, organisation, or facility return the same safe
+   * 404 and remain unchanged.
    */
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
@@ -184,6 +197,11 @@ export class ProviderSchedulesController {
     @Param('id') id: string,
   ): Promise<DeleteProviderScheduleResponse> {
     const cookieValue = readCookie(req, SESSION_COOKIE_NAME);
+    if (!isUuid(id)) {
+      throw providerScheduleValidationError(
+        'Schedule entry id must be a UUID.',
+      );
+    }
     const result = await this.schedules.deleteEntry(
       id,
       cookieValue,

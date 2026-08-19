@@ -84,14 +84,19 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
 
   async delete(
     tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
     entryId: ProviderScheduleEntryId,
   ): Promise<ProviderScheduleEntry | null> {
-    // Read-then-delete: first find the entry (tenant-scoped), then
-    // delete it. This returns the deleted entry's content to satisfy
-    // the interface contract (deleted-entry-or-null), and the
-    // tenant-scoped findFirst ensures cross-tenant deletes return null.
+    // Read-then-delete: first find the entry scoped to the FULL
+    // authenticated tenant/organisation/facility context, then delete
+    // it. This returns the deleted entry's content to satisfy the
+    // interface contract (deleted-entry-or-null). Entries outside the
+    // authenticated scope (another tenant, another organisation, or
+    // another facility) return null — a safe no-op with no existence
+    // leak — and remain unchanged.
     const row = await this.prisma.providerSchedule.findFirst({
-      where: { id: entryId, tenantId },
+      where: { id: entryId, tenantId, organisationId, facilityId },
     });
     if (row === null) {
       return null;

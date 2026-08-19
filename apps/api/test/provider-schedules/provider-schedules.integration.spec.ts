@@ -277,6 +277,7 @@ async function seedEnvironment(
   organisationId: string;
   facilityId: string;
   providerId: string;
+  membershipId: string;
 }> {
   const { userId } = await createUser(`${emailSlug}@example.com`, emailSlug);
   const { tenantId } = await createTenant(
@@ -307,7 +308,14 @@ async function seedEnvironment(
   );
   const cookie = await loginUser(`${emailSlug}@example.com`, TEST_PASSWORD);
   await selectContext(cookie, membershipId, organisationId, facilityId);
-  return { cookie, tenantId, organisationId, facilityId, providerId };
+  return {
+    cookie,
+    tenantId,
+    organisationId,
+    facilityId,
+    providerId,
+    membershipId,
+  };
 }
 
 beforeEach(async () => {
@@ -518,6 +526,19 @@ describe('Provider Schedule Management', () => {
         'PROVIDER_SCHEDULE_PROVIDER_NOT_FOUND',
       );
     });
+
+    it('rejects a non-UUID providerId query with the approved 400 validation error', async () => {
+      const env = await seedEnvironment('ps-list-badid', 'R07_SCHEDULER');
+      const response = await request(server)
+        .get('/api/v1/provider-schedules?providerId=not-a-uuid')
+        .set('Origin', ORIGIN)
+        .set('Cookie', env.cookie);
+      expect(response.status).toBe(400);
+      const body = response.body as Record<string, unknown>;
+      expect((body.error as { code?: string })?.code).toBe(
+        'PROVIDER_SCHEDULE_VALIDATION_ERROR',
+      );
+    });
   });
 
   describe('DELETE /api/v1/provider-schedules/:id', () => {
@@ -573,6 +594,183 @@ describe('Provider Schedule Management', () => {
       const body = response.body as Record<string, unknown>;
       expect((body.error as { code?: string })?.code).toBe(
         'PROVIDER_SCHEDULE_NOT_FOUND',
+      );
+    });
+
+    it('denies deleting an entry in another facility of the SAME tenant and organisation', async () => {
+      const env = await seedEnvironment('ps-df-sameorg', 'R07_SCHEDULER');
+      // Second facility in the same tenant + organisation.
+      const { facilityId: facilityBId } = await createFacility(
+        env.tenantId,
+        env.organisationId,
+        'fac-ps-df-sameorg-b',
+        'Facility B',
+      );
+      // Create an entry while facility A is active.
+      const created = await request(server)
+        .post('/api/v1/provider-schedules')
+        .set('Origin', ORIGIN)
+        .set('Cookie', env.cookie)
+        .send({
+          providerId: env.providerId,
+          dayOfWeek: 3,
+          startTime: '08:00',
+          endTime: '14:00',
+        });
+      expect(created.status).toBe(201);
+      const id = (created.body as { id: string }).id;
+
+      // Switch the active context to facility B (same tenant, same
+      // organisation) and attempt to delete the facility-A entry.
+      await selectContext(
+        env.cookie,
+        env.membershipId,
+        env.organisationId,
+        facilityBId,
+      );
+      const csrf = await fetchCsrfToken(server, env.cookie);
+      const response = await request(server)
+        .delete(`/api/v1/provider-schedules/${id}`)
+        .set('Origin', ORIGIN)
+        .set('X-CSRF-Token', csrf)
+        .set('Cookie', env.cookie);
+      expect(response.status).toBe(404);
+      const body = response.body as Record<string, unknown>;
+      expect((body.error as { code?: string })?.code).toBe(
+        'PROVIDER_SCHEDULE_NOT_FOUND',
+      );
+
+      // The facility-A row must remain unchanged.
+      const row = await prisma.providerSchedule.findFirst({
+        where: { id },
+      });
+      expect(row).not.toBeNull();
+      expect(row!.facilityId).toBe(env.facilityId);
+
+      // No successful delete audit event must have been emitted.
+      const auditRows = await prisma.auditOutboxEvent.findMany();
+      const deletedEvents = auditRows.filter(
+        (r) =>
+          (r.canonicalEventDraft as { action?: string }).action ===
+          'provider_schedules.deleted',
+      );
+      expect(deletedEvents).toHaveLength(0);
+    });
+
+    it('denies deleting an entry in another organisation/facility of the SAME tenant', async () => {
+      const { userId } = await createUser(
+        'ps-df-crossorg@example.com',
+        'ps-df-crossorg',
+      );
+      const { tenantId } = await createTenant(
+        'tn-ps-df-crossorg',
+        'CrossOrg Tenant',
+      );
+      const { organisationId: orgAId } = await createOrganisation(
+        tenantId,
+        'org-ps-df-crossorg-a',
+        'Org A',
+      );
+      const { facilityId: facAId } = await createFacility(
+        tenantId,
+        orgAId,
+        'fac-ps-df-crossorg-a',
+        'Facility A',
+      );
+      const { organisationId: orgBId } = await createOrganisation(
+        tenantId,
+        'org-ps-df-crossorg-b',
+        'Org B',
+      );
+      const { facilityId: facBId } = await createFacility(
+        tenantId,
+        orgBId,
+        'fac-ps-df-crossorg-b',
+        'Facility B',
+      );
+      // Organisation-scoped R07 assignments at BOTH organisations so
+      // the principal can select either organisation context.
+      const { membershipId } = await createMembership(
+        userId,
+        tenantId,
+        'R07_SCHEDULER',
+        orgAId,
+      );
+      await roleAssignments.create({
+        tenantMembershipId: membershipId,
+        roleCode: 'R07_SCHEDULER',
+        scopeLevel: 'organisation',
+        scopeOrganisationId: orgBId,
+      } as Parameters<typeof roleAssignments.create>[0]);
+      const { providerId } = await createEligibleProvider(
+        tenantId,
+        orgAId,
+        facAId,
+      );
+      const cookie = await loginUser(
+        'ps-df-crossorg@example.com',
+        TEST_PASSWORD,
+      );
+      await selectContext(cookie, membershipId, orgAId, facAId);
+
+      const created = await request(server)
+        .post('/api/v1/provider-schedules')
+        .set('Origin', ORIGIN)
+        .set('Cookie', cookie)
+        .send({
+          providerId,
+          dayOfWeek: 4,
+          startTime: '08:00',
+          endTime: '14:00',
+        });
+      expect(created.status).toBe(201);
+      const id = (created.body as { id: string }).id;
+
+      // Switch the active context to organisation B / facility B and
+      // attempt to delete the facility-A entry.
+      await selectContext(cookie, membershipId, orgBId, facBId);
+      const csrf = await fetchCsrfToken(server, cookie);
+      const response = await request(server)
+        .delete(`/api/v1/provider-schedules/${id}`)
+        .set('Origin', ORIGIN)
+        .set('X-CSRF-Token', csrf)
+        .set('Cookie', cookie);
+      expect(response.status).toBe(404);
+      const body = response.body as Record<string, unknown>;
+      expect((body.error as { code?: string })?.code).toBe(
+        'PROVIDER_SCHEDULE_NOT_FOUND',
+      );
+
+      // The facility-A row must remain unchanged.
+      const row = await prisma.providerSchedule.findFirst({
+        where: { id },
+      });
+      expect(row).not.toBeNull();
+      expect(row!.organisationId).toBe(orgAId);
+      expect(row!.facilityId).toBe(facAId);
+
+      // No successful delete audit event must have been emitted.
+      const auditRows = await prisma.auditOutboxEvent.findMany();
+      const deletedEvents = auditRows.filter(
+        (r) =>
+          (r.canonicalEventDraft as { action?: string }).action ===
+          'provider_schedules.deleted',
+      );
+      expect(deletedEvents).toHaveLength(0);
+    });
+
+    it('rejects a non-UUID delete id with the approved 400 validation error', async () => {
+      const env = await seedEnvironment('ps-del-badid', 'R07_SCHEDULER');
+      const csrf = await fetchCsrfToken(server, env.cookie);
+      const response = await request(server)
+        .delete('/api/v1/provider-schedules/not-a-uuid')
+        .set('Origin', ORIGIN)
+        .set('X-CSRF-Token', csrf)
+        .set('Cookie', env.cookie);
+      expect(response.status).toBe(400);
+      const body = response.body as Record<string, unknown>;
+      expect((body.error as { code?: string })?.code).toBe(
+        'PROVIDER_SCHEDULE_VALIDATION_ERROR',
       );
     });
   });

@@ -758,6 +758,8 @@ describe('Provider Schedule / Availability Enforcement (Scheduling Completion Mi
       // Delete it — returns the deleted entry (truthful contract).
       const deleted = await providerSchedules.delete(
         tenantId as TenantId,
+        organisationId as OrganisationId,
+        facilityId as FacilityId,
         entry.id,
       );
       expect(deleted).not.toBeNull();
@@ -775,10 +777,23 @@ describe('Provider Schedule / Availability Enforcement (Scheduling Completion Mi
 
     it('delete on a non-existent or cross-tenant entry returns null (no error)', async () => {
       const { tenantId } = await createTenant('crud-tn2', 'CRUD Tenant 2');
+      const { organisationId } = await createOrganisation(
+        tenantId,
+        'crud-org2',
+        'CRUD Org 2',
+      );
+      const { facilityId } = await createFacility(
+        tenantId,
+        organisationId,
+        'crud-fac2',
+        'CRUD Facility 2',
+      );
       const fakeId = '00000000-0000-4000-a000-000000000000';
       const deleted = await providerSchedules.delete(
         tenantId as TenantId,
-        fakeId as Parameters<typeof providerSchedules.delete>[1],
+        organisationId as OrganisationId,
+        facilityId as FacilityId,
+        fakeId as Parameters<typeof providerSchedules.delete>[3],
       );
       expect(deleted).toBeNull();
     });

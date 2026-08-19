@@ -272,17 +272,24 @@ export interface ProviderScheduleRepository {
   ): Promise<ProviderScheduleEntry[]>;
 
   /**
-   * Delete a schedule entry by its ID, scoped to the authenticated
-   * tenant. Returns the deleted entry, or null if no entry was found
-   * for the given ID in the given tenant (cross-tenant deletes are
-   * safe no-ops that return null).
+   * Delete a schedule entry by its ID, scoped to the FULL authenticated
+   * tenant/organisation/facility context. Returns the deleted entry,
+   * or null if no entry matches ALL scope dimensions. Entries in
+   * another tenant, another organisation in the same tenant, another
+   * facility in the same organisation, or another facility in another
+   * organisation all return null (safe no-op, no existence leak) and
+   * remain unchanged.
    *
    * @param tenantId The tenant scope.
+   * @param organisationId The organisation scope.
+   * @param facilityId The facility scope.
    * @param entryId The schedule entry ID to delete.
-   * @returns The deleted entry, or null if not found.
+   * @returns The deleted entry, or null if not found in scope.
    */
   delete(
     tenantId: TenantId,
+    organisationId: OrganisationId,
+    facilityId: FacilityId,
     entryId: ProviderScheduleEntryId,
   ): Promise<ProviderScheduleEntry | null>;
 }

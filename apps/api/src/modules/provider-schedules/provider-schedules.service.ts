@@ -275,9 +275,12 @@ export class ProviderSchedulesService {
   }
 
   /**
-   * Delete a schedule entry by ID. Returns null when the session is
-   * invalid; 404 when the entry does not exist in the tenant scope.
-   * Emits `provider_schedules.deleted` on success.
+   * Delete a schedule entry by ID, scoped to the FULL authenticated
+   * tenant/organisation/facility context. Returns null when the
+   * session is invalid; 404 when the entry does not exist in the
+   * authenticated scope (including entries in another organisation or
+   * facility of the same tenant). Emits `provider_schedules.deleted`
+   * on success only.
    */
   async deleteEntry(
     entryId: string,
@@ -290,6 +293,8 @@ export class ProviderSchedulesService {
     }
     const deleted = await this.schedules.delete(
       scope.tenantId,
+      scope.organisationId,
+      scope.facilityId,
       entryId as ProviderScheduleEntryId,
     );
     if (deleted === null) {

@@ -16,7 +16,9 @@ import {
  *   identical for existence and eligibility failures so the boundary
  *   does not leak which dimension failed (no existence leak).
  * - `PROVIDER_SCHEDULE_NOT_FOUND` (404): the schedule entry does not
- *   exist (or exists in another tenant) at delete time.
+ *   exist in the FULL authenticated tenant/organisation/facility
+ *   scope (entries in another tenant, organisation, or facility also
+ *   return 404) at delete time.
  */
 export function providerScheduleValidationError(
   message: string,

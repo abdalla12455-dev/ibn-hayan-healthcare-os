@@ -7746,7 +7746,7 @@ See the pre-commit validation battery run immediately before commit; final numbe
 
 ### Remaining Deferred Scope
 
-- No-show grace-period enforcement — blocked on the canonical Configuration implementation (operator decision required; NOT started).
+- No-show grace-period enforcement — intentionally deferred by the operator until the canonical Configuration implementation exists (deferral already ratified; NOT started).
 - Cross-midnight schedule windows — fail-closed by contract + repository checks (deliberate).
 - No-show notification/reporting workflows — deferred.
 - Frontend (web) surfaces for provider schedule administration and no-show reason display — deferred.
@@ -7760,3 +7760,61 @@ See the pre-commit validation battery run immediately before commit; final numbe
 ### Immediate Next Step
 
 Wait for PR #30 exact-head Main CI (both jobs) to pass; then await operator merge review. Do NOT merge without explicit operator instruction.
+
+---
+
+## Scheduling Completion Milestone — Provider Schedule Delete Scope-Isolation Correction (corrective child commit)
+
+**Date:** 2026-08-19 · **Base commit (verified pre-task):** `33db0a464d9fab2e08c52862e5aef42530055068`
+
+### Task
+
+An independent post-CI security review found a merge-blocking scope-isolation defect in the new Provider Schedule Management API: `DELETE /api/v1/provider-schedules/:id` was scoped to tenant only (`where: { id, tenantId }`), so an R07 Scheduler in Facility A could delete a ProviderSchedule entry belonging to Facility B or another organisation inside the SAME tenant if the entry ID was known. The previous integration test only proved cross-TENANT isolation, leaving the same-tenant cross-facility bypass green in CI.
+
+### Correction
+
+- `ProviderScheduleRepository.delete()` contract changed in place from `(tenantId, entryId)` to `(tenantId, organisationId, facilityId, entryId)` — the Prisma `findFirst` now requires ALL authenticated scope dimensions.
+- `ProviderSchedulesService.deleteEntry()` passes the session-derived `organisationId` and `facilityId` through. Scope remains session-derived ONLY; no tenantId/organisationId/facilityId is accepted from the request.
+- Boundary UUID validation added: `GET ?providerId=` (malformed → 400 `PROVIDER_SCHEDULE_VALIDATION_ERROR`) and `DELETE /:id` (malformed → 400), so malformed input never reaches Prisma as an unhandled database error.
+- Permission matrix UNCHANGED: R07 is the only create/delete role; R09 read-only; R06/R01/R02/R13 denied.
+
+### New PostgreSQL 17 tests
+
+1. Same tenant + same organisation + different facility: delete is denied (404 safe not-found), row remains, no successful delete audit event.
+2. Same tenant + different organisation/facility: delete denied (404), row remains (org + facility ids verified unchanged), no successful delete audit event.
+3. Existing correct-facility deletion still succeeds (200, entries emptied).
+4. Cross-tenant deletion still fails safely (404).
+5. Invalid providerId query → controlled 400 validation error.
+6. Invalid delete id → controlled 400 validation error.
+
+**Modified:**
+
+- `packages/domain/src/workforce/workforce.repositories.ts` (delete contract)
+- `apps/api/src/infrastructure/database/repositories/prisma-provider-schedule.repository.ts` (scope-enforced findFirst)
+- `apps/api/src/modules/provider-schedules/provider-schedules.service.ts` (pass full scope)
+- `apps/api/src/modules/provider-schedules/provider-schedules.controller.ts` (UUID validation)
+- `apps/api/src/modules/provider-schedules/provider-schedules.errors.ts` (doc)
+- `apps/api/test/appointments/appointments-provider-schedule.integration.spec.ts` (repository call sites)
+- `apps/api/test/provider-schedules/provider-schedules.integration.spec.ts` (4 new tests)
+- `PROJECT_CONTINUITY.md` (this section)
+
+**Deleted:** none.
+
+### Validation Results
+
+- prisma format/validate/generate: PASS
+- Workspace lint: PASS — Workspace typecheck: PASS (after domain package rebuild)
+- Product builds (api nest SWC + web Next.js): PASS
+- Unit: contracts 208/208; domain 156/156; observability 96/96; web 227/227; api 492/492
+- PG17: Appointments 278/278 (9 files, includes 4 new scope-isolation/UUID tests); Database/BC10 196/196; Auth 35/35; Context 55/55; Clinic-admin 24/24
+- `git diff --check`: clean; conflict-marker scan: clean
+- Previous known pre-existing openapi production-mode failure remains (missing audit keys in local env; CI provides them)
+
+### Remaining Deferred Scope (unchanged)
+
+- No-show grace-period enforcement — intentionally deferred until the canonical Configuration implementation exists.
+- Cross-midnight windows fail-closed; no-show notification/reporting; web surfaces.
+
+### Recovery Information
+
+Pre-push base: `33db0a464d9fab2e08c52862e5aef42530055068`. Final commit SHA recorded in the external completion report.
