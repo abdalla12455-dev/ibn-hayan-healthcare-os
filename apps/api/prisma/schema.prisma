@@ -1525,3 +1525,65 @@ model ClinicalNoteRevision {
   @@index([clinicalNoteId, revisionNumber], map: "clinical_note_revisions_note_id_revision_number_idx")
   @@map("clinical_note_revisions")
 }
+
+// ---------------------------------------------------------------------------
+// Configuration (BC16)
+// ---------------------------------------------------------------------------
+
+/// The generic current-value store for registered Configuration keys.
+/// The first vertical slice reviews three persistence scopes: L1
+/// (Platform Default), L3 (Tenant), and L4 (Facility). The `value`
+/// column is generic JSONB — a per-type column such as `value_int`
+/// is deliberately not used, so future typed keys need no schema
+/// change. Uniqueness of one active value per (key, layer, scope) is
+/// enforced by partial unique indexes in the migration (one per
+/// scope level); the composite scope-hierarchy foreign key and the
+/// scope-coherence CHECK constraint are also enforced there. The
+/// `valueVersion` column is the optimistic record version, checked
+/// and incremented on every update.
+model ConfigurationValue {
+  id             String   @id @default(uuid()) @db.Uuid
+  key            String   @db.VarChar(160)
+  layer          String   @db.VarChar(2)
+  tenantId       String?  @map("tenant_id") @db.Uuid
+  organisationId String?  @map("organisation_id") @db.Uuid
+  facilityId     String?  @map("facility_id") @db.Uuid
+  value          Json     @db.JsonB
+  valueVersion   Int      @default(1) @map("value_version")
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  versions ConfigurationValueVersion[]
+
+  @@index([key], map: "configuration_values_key_idx")
+  @@index([tenantId], map: "configuration_values_tenant_id_idx")
+  @@map("configuration_values")
+}
+
+/// The append-only version history for Configuration values. Every
+/// successful create or update inserts exactly one immutable row in
+/// the same transaction as the current-value write. Version rows
+/// never receive UPDATE or DELETE statements (append-only); rollback
+/// and comparison endpoints are deferred. Scoping columns mirror the
+/// parent row so version history can be reconstructed by scope.
+model ConfigurationValueVersion {
+  id                   String   @id @default(uuid()) @db.Uuid
+  configurationValueId String   @map("configuration_value_id") @db.Uuid
+  key                  String   @db.VarChar(160)
+  layer                String   @db.VarChar(2)
+  tenantId             String?  @map("tenant_id") @db.Uuid
+  organisationId       String?  @map("organisation_id") @db.Uuid
+  facilityId           String?  @map("facility_id") @db.Uuid
+  value                Json     @db.JsonB
+  valueVersion         Int      @map("value_version")
+  actorId              String?  @map("actor_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  configurationValue ConfigurationValue @relation(fields: [configurationValueId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([configurationValueId], map: "configuration_value_versions_value_id_idx")
+  @@index([key], map: "configuration_value_versions_key_idx")
+  @@map("configuration_value_versions")
+}

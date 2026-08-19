@@ -282,3 +282,21 @@ export function appointmentVisitInvalidTransition(
     },
   });
 }
+
+/**
+ * Return a 422 when the no-show grace period has not elapsed. The
+ * stable controlled error code
+ * APPOINTMENT_NO_SHOW_GRACE_PERIOD_NOT_ELAPSED is enforced before
+ * the appointment can transition to no_show, using the canonical
+ * Configuration resolution port for
+ * scheduling.appointment.noShowGracePeriod.
+ */
+export function appointmentNoShowGracePeriodNotElapsed(): BadRequestException {
+  return new BadRequestException({
+    error: {
+      code: 'APPOINTMENT_NO_SHOW_GRACE_PERIOD_NOT_ELAPSED',
+      message:
+        'The no-show grace period has not elapsed. Please wait until the configured grace period passes before marking the appointment as no-show.',
+    },
+  });
+}

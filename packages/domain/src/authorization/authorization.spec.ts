@@ -239,12 +239,11 @@ describe('authorization permission catalogue', () => {
     // `appointments:start` and `appointments:complete` (granted to
     // R01 Physician only — clinical visit-progression actions).
     //
-    // Stage BC01 of Patient Demographics/Registration/Consent adds the
-    // eight `patients:*` permissions: register, view, search,
-    // update_demographics, manage_identifiers, consent_grant,
-    // consent_view, consent_withdraw. The catalogue now holds 32
-    // permission codes in total (7 context + 1 clinic-admin overview
-    // + 8 appointments + 8 encounters + 8 patients).
+    // The BC16 Configuration vertical slice adds the two
+    // `configuration:*` administration permissions (read + write). The
+    // catalogue now holds 42 permission codes in total (7 context + 1
+    // clinic-admin overview + 10 appointments + 2 provider_schedules
+    // + 8 encounters + 8 patients + 4 clinical_notes + 2 configuration).
     expect(PERMISSION_CODES).toEqual([
       'context:view',
       'context:select',
@@ -286,6 +285,8 @@ describe('authorization permission catalogue', () => {
       'clinical_notes:view',
       'clinical_notes:sign',
       'clinical_notes:amend',
+      'configuration:read',
+      'configuration:write',
     ]);
   });
 
@@ -399,7 +400,9 @@ describe('authorization role-permission matrix', () => {
         p !== 'clinical_notes:create' &&
         p !== 'clinical_notes:view' &&
         p !== 'clinical_notes:sign' &&
-        p !== 'clinical_notes:amend',
+        p !== 'clinical_notes:amend' &&
+        p !== 'configuration:read' &&
+        p !== 'configuration:write',
     );
     for (const code of humanRoles) {
       const permissions = ROLE_PERMISSION_MATRIX[code];
@@ -514,12 +517,15 @@ describe('authorization role-permission matrix', () => {
           p !== 'patients:update_demographics' &&
           p !== 'patients:manage_identifiers' &&
           p !== 'patients:consent_grant' &&
-          p !== 'patients:consent_withdraw',
+          p !== 'patients:consent_withdraw' &&
+          p !== 'configuration:read' &&
+          p !== 'configuration:write',
       ).sort(),
     );
-    // R13_SYSTEM_ADMINISTRATOR has only the seven context permissions
-    // (HUMAN_CONTEXT_PERMISSIONS). It does NOT hold any appointments,
-    // clinic-admin, encounter, or patient permissions. Per
+    // R13_SYSTEM_ADMINISTRATOR holds the seven context permissions
+    // (HUMAN_CONTEXT_PERMISSIONS) plus the two Configuration
+    // administration permissions (BC16). It does NOT hold any
+    // appointments, clinic-admin, encounter, or patient permissions. Per
     // USER_ROLES.md §10.1, R13's Encounter Records cell is "–" (no
     // encounter permissions) and its Patient Records cell is "–" (no
     // patient permissions).
@@ -612,14 +618,19 @@ describe('authorization role-permission matrix', () => {
     // — Stage BC01) plus the clinical-note write permissions
     // (clinical_notes:create, clinical_notes:view, clinical_notes:sign,
     // clinical_notes:amend — Stage BC03) = 24 distinct permissions. R13
-    // grants only the seven context permissions, which are a subset of
-    // R01's. The union is therefore R01's permissions (24), since R13's
-    // set adds nothing R01 does not already hold.
+    // grants the seven context permissions PLUS the two Configuration
+    // administration permissions (`configuration:read`,
+    // `configuration:write` — BC16). The union is R01's 24 permissions
+    // plus R13's two Configuration administrations (26), since besides
+    // context, R13 now also contributes the Configuration permissions
+    // R01 does not hold.
     const union = permissionsForRoles([
       'R01_PHYSICIAN',
       'R13_SYSTEM_ADMINISTRATOR',
     ]);
-    expect(union.size).toBe(24);
+    expect(union.size).toBe(26);
+    expect(union.has('configuration:read')).toBe(true);
+    expect(union.has('configuration:write')).toBe(true);
     expect(union.has('context:view')).toBe(true);
     expect(union.has('context:select')).toBe(true);
     expect(union.has('context:clear')).toBe(true);
@@ -765,14 +776,15 @@ describe('authorization role-permission matrix', () => {
   // `PERMISSION_CODES.filter(...)` pattern).
   // -------------------------------------------------------------------------
 
-  it('R09 Clinic Administrator receives EXACTLY 20 permissions (not PERMISSION_CODES.length)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 20: 7 context +
+  it('R09 Clinic Administrator receives EXACTLY 24 permissions (not PERMISSION_CODES.length)', () => {
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 24: 7 context +
     // clinic_admin_overview:view + appointments:view + appointments:book
     // + appointments:cancel + appointments:reschedule +
     // appointments:confirm + appointments:check_in +
     // appointments:no_show + encounters:view + patients:view +
-    // patients:search + patients:consent_view + clinical_notes:view —
-    // Stage BC03 clinical-note read).
+    // patients:search + patients:consent_view + clinical_notes:view +
+    // configuration:read + configuration:write — BC16 Configuration
+    // administration).
     // R09 does NOT receive appointments:start or appointments:complete
     // (clinical visit-progression actions reserved for R01 Physician)
     // and does NOT receive encounter write permissions (clinical
@@ -786,7 +798,7 @@ describe('authorization role-permission matrix', () => {
     // CLINIC_ADMIN_PERMISSIONS, R09 will NOT receive it. This is the
     // desired least-privilege behaviour.
     const r09Permissions = ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR;
-    expect(r09Permissions).toHaveLength(22);
+    expect(r09Permissions).toHaveLength(24);
     expect(r09Permissions).toEqual([
       'context:view',
       'context:select',
@@ -810,6 +822,8 @@ describe('authorization role-permission matrix', () => {
       'patients:search',
       'patients:consent_view',
       'clinical_notes:view',
+      'configuration:read',
+      'configuration:write',
     ]);
     expect(r09Permissions).not.toContain('appointments:start');
     expect(r09Permissions).not.toContain('appointments:complete');
@@ -828,14 +842,17 @@ describe('authorization role-permission matrix', () => {
     expect(r09Permissions).not.toContain('clinical_notes:amend');
   });
 
-  it('R13 System Administrator receives EXACTLY 7 permissions (not PERMISSION_CODES.filter(...))', () => {
-    // R13 receives HUMAN_CONTEXT_PERMISSIONS (explicit 7). If a
-    // future change adds a permission to PERMISSION_CODES, R13 will
-    // NOT receive it (because R13's matrix entry is the explicit
-    // list, not a filtered list). R13 is NOT granted ANY encounter
-    // permissions (USER_ROLES.md §10.1: R13 Encounter Records = "–").
+  it('R13 System Administrator receives EXACTLY 9 permissions (human context + Configuration, not PERMISSION_CODES.filter(...))', () => {
+    // R13 receives HUMAN_CONTEXT_PERMISSIONS (explicit 7) plus the
+    // two Configuration administration permissions (BC16:
+    // `configuration:read` and `configuration:write`; R13 has L3
+    // tenant-level override authority). If a future change adds a
+    // permission to PERMISSION_CODES, R13 will NOT receive it (because
+    // R13's matrix entry is the explicit list, not a filtered list).
+    // R13 is NOT granted ANY encounter permissions (USER_ROLES.md
+    // §10.1: R13 Encounter Records = "–").
     const r13Permissions = ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR;
-    expect(r13Permissions).toHaveLength(7);
+    expect(r13Permissions).toHaveLength(9);
     expect(r13Permissions).toEqual([
       'context:view',
       'context:select',
@@ -844,6 +861,8 @@ describe('authorization role-permission matrix', () => {
       'context:clear_organisation',
       'context:select_facility',
       'context:clear_facility',
+      'configuration:read',
+      'configuration:write',
     ]);
     expect(r13Permissions).not.toContain('clinic_admin_overview:view');
     expect(r13Permissions).not.toContain('appointments:book');
@@ -1157,63 +1176,96 @@ describe('authorization role-permission matrix', () => {
     expect(r10Permissions).not.toContain('patients:consent_withdraw');
   });
 
-  it('R11 HR Manager and R13 System Administrator receive EXACTLY 7 permissions (human context only)', () => {
-    // R11_HR_MANAGER and R13_SYSTEM_ADMINISTRATOR receive
-    // HUMAN_CONTEXT_PERMISSIONS (explicit 7). R13's Encounter Records
-    // cell is "–" (USER_ROLES.md §10.1); R11 has no encounter row.
+  it('R11 HR Manager receives EXACTLY 7 permissions (human context only)', () => {
+    // R11_HR_MANAGER receives HUMAN_CONTEXT_PERMISSIONS (explicit 7).
     // This verifies the matrix does NOT use `PERMISSION_CODES.filter(...)`
-    // (which would grant all future permissions).
-    const contextOnlyRoles = PLATFORM_ROLE_CODES.filter(
-      (code) =>
-        code === 'R11_HR_MANAGER' ||
-        code === 'R13_SYSTEM_ADMINISTRATOR',
-    );
-    expect(contextOnlyRoles).toHaveLength(2);
-    for (const code of contextOnlyRoles) {
-      const permissions = ROLE_PERMISSION_MATRIX[code];
-      expect(permissions).toHaveLength(7);
-      expect(permissions).not.toContain('clinic_admin_overview:view');
-      expect(permissions).not.toContain('appointments:book');
-      expect(permissions).not.toContain('appointments:cancel');
-      expect(permissions).not.toContain('appointments:reschedule');
-      expect(permissions).not.toContain('appointments:confirm');
-      expect(permissions).not.toContain('appointments:check_in');
-      expect(permissions).not.toContain('appointments:start');
-      expect(permissions).not.toContain('appointments:complete');
-      expect(permissions).not.toContain('encounters:view');
-      expect(permissions).not.toContain('encounters:create');
-      expect(permissions).not.toContain('patients:register');
-      expect(permissions).not.toContain('patients:view');
-      expect(permissions).not.toContain('patients:search');
-      expect(permissions).not.toContain('patients:update_demographics');
-      expect(permissions).not.toContain('patients:manage_identifiers');
-      expect(permissions).not.toContain('patients:consent_grant');
-      expect(permissions).not.toContain('patients:consent_view');
-      expect(permissions).not.toContain('patients:consent_withdraw');
-      // Every context-only role has the SAME 7 permissions as R13.
-      expect(permissions).toEqual(ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR);
-    }
+    // (which would grant all future permissions). Before BC16, this test
+    // grouped R11 and R13 together as "context-only"; the Configuration
+    // vertical slice now grants R13 the Configuration administration
+    // permissions, so R13's matrix entry is asserted separately below.
+    const code = 'R11_HR_MANAGER';
+    const permissions = ROLE_PERMISSION_MATRIX[code];
+    expect(permissions).toHaveLength(7);
+    expect(permissions).not.toContain('clinic_admin_overview:view');
+    expect(permissions).not.toContain('appointments:book');
+    expect(permissions).not.toContain('appointments:cancel');
+    expect(permissions).not.toContain('appointments:reschedule');
+    expect(permissions).not.toContain('appointments:confirm');
+    expect(permissions).not.toContain('appointments:check_in');
+    expect(permissions).not.toContain('appointments:start');
+    expect(permissions).not.toContain('appointments:complete');
+    expect(permissions).not.toContain('encounters:view');
+    expect(permissions).not.toContain('encounters:create');
+    expect(permissions).not.toContain('patients:register');
+    expect(permissions).not.toContain('patients:view');
+    expect(permissions).not.toContain('patients:search');
+    expect(permissions).not.toContain('patients:update_demographics');
+    expect(permissions).not.toContain('patients:manage_identifiers');
+    expect(permissions).not.toContain('patients:consent_grant');
+    expect(permissions).not.toContain('patients:consent_view');
+    expect(permissions).not.toContain('patients:consent_withdraw');
+    expect(permissions).not.toContain('configuration:read');
+    expect(permissions).not.toContain('configuration:write');
+  });
+
+  it('R13 System Administrator receives EXACTLY the 9 human context + Configuration permissions (BC16)', () => {
+    // R13_SYSTEM_ADMINISTRATOR receives HUMAN_CONTEXT_PERMISSIONS
+    // (explicit 7) PLUS `configuration:read` and `configuration:write`
+    // (the Configuration vertical slice's L3 tenant override authority).
+    // R13 must NOT inherit clinical operational, patient, encounter, or
+    // clinical-note permissions; Configuration administration carries
+    // no PHI and no secrets.
+    const permissions = ROLE_PERMISSION_MATRIX.R13_SYSTEM_ADMINISTRATOR;
+    expect(permissions).toHaveLength(9);
+    expect(permissions).toContain('configuration:read');
+    expect(permissions).toContain('configuration:write');
+    expect(permissions).not.toContain('clinic_admin_overview:view');
+    expect(permissions).not.toContain('appointments:book');
+    expect(permissions).not.toContain('appointments:cancel');
+    expect(permissions).not.toContain('appointments:reschedule');
+    expect(permissions).not.toContain('appointments:confirm');
+    expect(permissions).not.toContain('appointments:check_in');
+    expect(permissions).not.toContain('appointments:start');
+    expect(permissions).not.toContain('appointments:complete');
+    expect(permissions).not.toContain('encounters:view');
+    expect(permissions).not.toContain('encounters:create');
+    expect(permissions).not.toContain('patients:register');
+    expect(permissions).not.toContain('patients:view');
+    expect(permissions).not.toContain('patients:search');
+    expect(permissions).not.toContain('patients:update_demographics');
+    expect(permissions).not.toContain('patients:manage_identifiers');
+    expect(permissions).not.toContain('patients:consent_grant');
+    expect(permissions).not.toContain('patients:consent_view');
+    expect(permissions).not.toContain('patients:consent_withdraw');
   });
 
   it('R09 is NOT a hidden global super-administrator (R09 != PERMISSION_CODES)', () => {
-    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 20), NOT
-    // PERMISSION_CODES (which is currently 37). R09 does NOT receive
-    // appointments:start or appointments:complete (clinical
-    // visit-progression actions reserved for R01 Physician), does NOT
-    // receive encounter write permissions, does NOT receive the
-    // registration-desk patient write permissions (reserved for R06
-    // Receptionist), and does NOT receive clinical-note write
-    // permissions (create/sign/amend, reserved for R01/R02/R05), so
-    // R09's permission count is strictly less than
-    // PERMISSION_CODES.length. This test verifies R09's matrix entry is
-    // NOT a reference to PERMISSION_CODES and that R09 does not silently
-    // inherit clinical visit, encounter write, patient write, or
-    // clinical-note write permissions.
-    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(22);
-    expect(PERMISSION_CODES.length).toBe(40);
+    // R09 receives CLINIC_ADMIN_PERMISSIONS (explicit 24, including the
+    // BC16 Configuration administration permissions), NOT PERMISSION_CODES
+    // (currently 42). R09 does NOT receive appointments:start or
+    // appointments:complete (clinical visit-progression actions reserved
+    // for R01 Physician), does NOT receive encounter write permissions,
+    // does NOT receive the registration-desk patient write permissions
+    // (reserved for R06 Receptionist), and does NOT receive clinical-note
+    // write permissions (create/sign/amend, reserved for R01/R02/R05), so
+    // R09's permission count is strictly less than PERMISSION_CODES.length.
+    // This test verifies R09's matrix entry is NOT a reference to
+    // PERMISSION_CODES and that R09 does not silently inherit clinical
+    // visit, encounter write, patient write, or clinical-note write
+    // permissions.
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR.length).toBe(24);
+    expect(PERMISSION_CODES.length).toBe(42);
     // R09 must NOT equal the full PERMISSION_CODES catalogue.
     expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toEqual(
       PERMISSION_CODES,
+    );
+    // R09 receives the Configuration administration permissions needed
+    // for L4 facility override authority (BC16).
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).toContain(
+      'configuration:read',
+    );
+    expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).toContain(
+      'configuration:write',
     );
     // R09 must NOT hold the clinical visit-progression permissions.
     expect(ROLE_PERMISSION_MATRIX.R09_ADMINISTRATOR).not.toContain(

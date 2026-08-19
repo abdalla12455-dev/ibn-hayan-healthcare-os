@@ -662,6 +662,36 @@ export type ClinicalNotesActionCode =
   (typeof CLINICAL_NOTES_ACTION_CODES)[number];
 
 // ---------------------------------------------------------------------------
+// Configuration (BC16)
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration administration action codes for the first canonical
+ * Configuration vertical slice (BC16).
+ *
+ * The administrative effective-value read is audited when a
+ * Configuration administration endpoint is invoked; internal module
+ * resolution (e.g. Scheduling reading the no-show grace period) is NOT
+ * audited as an administrative read. Override writes are audited on
+ * the first create (`configuration.override.created`) and on every
+ * subsequent update (`configuration.override.updated`) in the same
+ * transaction as the value write and the version-history append, per
+ * the ADR-014 outbox guarantee.
+ *
+ * Metadata carries only the registered key, the layer, and safe scope
+ * identifiers. Value diffs are carried in `previousState`/`newState`.
+ * No PHI and no secrets may appear in Configuration audit metadata.
+ */
+export const CONFIGURATION_ACTION_CODES = [
+  'configuration.effective_value.viewed',
+  'configuration.override.created',
+  'configuration.override.updated',
+] as const;
+
+export type ConfigurationActionCode =
+  (typeof CONFIGURATION_ACTION_CODES)[number];
+
+// ---------------------------------------------------------------------------
 // Complete catalogue
 // ---------------------------------------------------------------------------
 
@@ -687,6 +717,7 @@ export const AUDIT_ACTION_CODES = [
   ...ENCOUNTERS_ACTION_CODES,
   ...PATIENTS_ACTION_CODES,
   ...CLINICAL_NOTES_ACTION_CODES,
+  ...CONFIGURATION_ACTION_CODES,
 ] as const;
 
 /**
@@ -795,6 +826,13 @@ export function inferCategoryFromAction(
   // operates within the authenticated tenant/organisation/facility scope).
   if (action.startsWith('clinical_notes.')) {
     return 'facility_context';
+  }
+  // Configuration administration actions are mapped to the
+  // `configuration` category (BC16). The category is registered in
+  // `categories.ts` and the audit-database CHECK constraint is extended
+  // by `apps/api/prisma-audit/migrations/20260819000001_audit_category_extend_for_configuration`.
+  if (action.startsWith('configuration.')) {
+    return 'configuration';
   }
   return null;
 }

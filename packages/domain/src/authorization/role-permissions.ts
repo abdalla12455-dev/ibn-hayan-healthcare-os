@@ -311,6 +311,15 @@ const CLINIC_ADMIN_PERMISSIONS: readonly PermissionCode[] = [
   'patients:search',
   'patients:consent_view',
   'clinical_notes:view',
+  /**
+   * Configuration administration (BC16). R09 may read effective
+   * Configuration and write L4 facility-level overrides within its
+   * authorized facility scope. Writing L3 tenant overrides remains out
+   * of reach and is enforced by the Configuration administration
+   * service.
+   */
+  'configuration:read',
+  'configuration:write',
 ] as const;
 
 /**
@@ -578,10 +587,18 @@ export const ROLE_PERMISSION_MATRIX: Readonly<
   // USER_ROLES.md 10.1, R13's Patient Records cell is "-" (no patient
   // access). Per ROLES_AND_PERMISSIONS.md 4.2, R13's "Clinical Doc" cell
   // is "-" (no clinical-documentation access). R13 receives
-  // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions) ONLY. R13 must
-  // NOT inherit clinical operational permissions, patient PHI access,
-  // or clinical-note PHI access.
-  R13_SYSTEM_ADMINISTRATOR: HUMAN_CONTEXT_PERMISSIONS,
+  // HUMAN_CONTEXT_PERMISSIONS (explicit 7 permissions) plus the
+  // Configuration administration permissions (BC16:
+  // `configuration:read` and `configuration:write`, granting L3
+  // tenant-level override authority within its authorized tenant
+  // context). R13 must NOT inherit clinical operational permissions,
+  // patient PHI access, or clinical-note PHI access; Configuration
+  // administration carries no PHI and no secrets.
+  R13_SYSTEM_ADMINISTRATOR: [
+    ...HUMAN_CONTEXT_PERMISSIONS,
+    'configuration:read',
+    'configuration:write',
+  ],
   // R14 Integration Account is denied the interactive workspace
   // context permissions. The integration account is non-human and
   // must not use browser workspace-selection endpoints. A principal

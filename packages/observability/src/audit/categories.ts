@@ -76,12 +76,26 @@ export type AuditEventCategory =
   | 'facility_context'
   | 'rbac'
   | 'audit'
-  | 'role_preview';
+  | 'role_preview'
+  | 'configuration';
 
 /**
  * The complete list of audit event categories implemented in this
  * batch. Used by the metadata validator and the audit-emission API
  * to reject unknown categories at the boundary.
+ *
+ * `configuration` is the category for Configuration administration
+ * events (BC16). It is inferred by `inferCategoryFromAction` for any
+ * action whose prefix is `configuration.` (e.g.
+ * `configuration.effective_value.viewed`,
+ * `configuration.override.created`,
+ * `configuration.override.updated`). The category entry is paired
+ * with the `20260819000001_audit_category_extend_for_configuration`
+ * migration in the audit database, which re-issues the
+ * `audit_events_category_check` CHECK constraint with the extended
+ * category list. No PHI and no secrets may appear in Configuration
+ * audit metadata — only the key, layer, scope identifiers, and value
+ * payloads of the registered Configuration key.
  */
 export const AUDIT_EVENT_CATEGORIES: readonly AuditEventCategory[] = [
   'security',
@@ -92,6 +106,7 @@ export const AUDIT_EVENT_CATEGORIES: readonly AuditEventCategory[] = [
   'rbac',
   'audit',
   'role_preview',
+  'configuration',
 ] as const;
 
 /**

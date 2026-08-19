@@ -49,8 +49,13 @@
  *   provider reference foundation required for other bounded contexts, especially
  *   Appointments, to verify that a provider reference genuinely exists within
  *   the authenticated tenant scope and is eligible for a specific facility.
+ * - configuration: ConfigurationValue and ConfigurationValueVersion domain
+ *   models, the ConfigurationValueRepository persistence port, and the
+ *   ConfigurationResolutionPort consumer contract (BC16). The first
+ *   vertical slice of the canonical eight-layer Configuration model with
+ *   generic JSONB value persistence and append-only version history.
  *
- * Additional bounded contexts (audit, billing, inventory, configuration, etc.)
+ * Additional bounded contexts (audit, billing, inventory, etc.)
  * arrive in subsequent batches alongside their respective vertical slices.
  */
 
@@ -66,3 +71,4 @@ export * from './patient/index.js';
 export * from './workforce/index.js';
 export * from './encounter/index.js';
 export * from './clinical-note/index.js';
+export * from './configuration/index.js';

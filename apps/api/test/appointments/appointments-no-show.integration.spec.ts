@@ -61,6 +61,7 @@ import {
   FACILITY_REPOSITORY,
 } from '../../src/infrastructure/database/database.module.js';
 import { setupDatabaseTests } from '../database/_pg-bootstrap.js';
+import { NO_SHOW_GRACE_PERIOD_KEY } from '@ibn-hayan/configuration';
 import { CLOCK_SERVICE_TOKEN } from '../../src/infrastructure/clock/clock.module.js';
 import type { ClockService } from '../../src/infrastructure/clock/clock.service.js';
 import { resetThrottlerStorageSafely } from '../clinic-admin/_clinic-admin-test-helpers.js';
@@ -131,6 +132,14 @@ afterAll(async () => {
 
 async function truncateAll(): Promise<void> {
   await prisma.auditOutboxEvent.deleteMany();
+  // Wipe only the override rows (L3/L4); the deterministic L1 seed row
+  // from the BC16 migration is never deleted by the test suite.
+  await prisma.configurationValueVersion.deleteMany({
+    where: { layer: { in: ['L3', 'L4'] } },
+  });
+  await prisma.configurationValue.deleteMany({
+    where: { layer: { in: ['L3', 'L4'] } },
+  });
   await prisma.appointment.deleteMany();
   await prisma.providerSchedule.deleteMany();
   await prisma.providerFacilityAssignment.deleteMany();
@@ -381,8 +390,14 @@ async function countOutboxByAction(action: string): Promise<number> {
 // Test data
 // ---------------------------------------------------------------------------
 
-const FUTURE_START = '2026-09-01T09:00:00.000Z';
-const FUTURE_END = '2026-09-01T09:30:00.000Z';
+// The no-show precondition gate (BC16) requires scheduledStart + the
+// resolved grace minutes to be <= the mocked clock "now"
+// (FIXED_TEST_INSTANT). Successful-transition scenarios therefore use
+// a start in the safe past so the L1 default 15-minute grace window is
+// always elapsed; the dedicated "Grace period (Configuration)"
+// describe covers the boundary/equality/override cases deliberately.
+const PAST_START = '2026-08-01T08:00:00.000Z';
+const PAST_END = '2026-08-01T08:30:00.000Z';
 
 type AppointmentStatus =
   | 'booked'
@@ -401,6 +416,8 @@ async function seedAppointment(
   emailSlug: string,
   role: PlatformRoleCode = 'R09_ADMINISTRATOR',
   status: AppointmentStatus = 'confirmed',
+  scheduledStart: string = PAST_START,
+  scheduledEnd: string = PAST_END,
 ): Promise<{
   cookie: string;
   appointmentId: string;
@@ -448,8 +465,8 @@ async function seedAppointment(
       facilityId,
       patientId,
       providerId,
-      scheduledStart: new Date(FUTURE_START),
-      scheduledEnd: new Date(FUTURE_END),
+      scheduledStart: new Date(scheduledStart),
+      scheduledEnd: new Date(scheduledEnd),
       status,
       typeCode: 'consultation',
     },
@@ -1021,6 +1038,184 @@ describe('Appointment No-Show Lifecycle (Scheduling Completion Milestone)', () =
         where: { id: appointmentId },
       });
       expect(['no_show', 'cancelled']).toContain(appt?.status);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Grace period (Configuration) — BC16
+  //
+  // The no-show precondition gate resolves
+  // `scheduling.appointment.noShowGracePeriod` through the canonical
+  // Configuration resolution port (L4 → L3 → L1) using the
+  // session-derived trusted scope. These tests exercise:
+  //   - rejection strictly before the boundary (fail-closed),
+  //   - acceptance at exact equality,
+  //   - acceptance after the boundary,
+  //   - L1 default 15 used when no override exists,
+  //   - L3 tenant override changes behaviour,
+  //   - L4 facility override beats the L3 tenant override,
+  //   - internal Scheduling resolution does NOT emit the
+  //     administrative Configuration read audit.
+  // -------------------------------------------------------------------------
+
+  describe('Grace period (Configuration)', () => {
+    const NOW = FIXED_TEST_INSTANT.getTime();
+    const at = (minutesBeforeNow: number): string =>
+      new Date(NOW - minutesBeforeNow * 60_000).toISOString();
+
+    async function seedOverride(
+      layer: 'L3' | 'L4',
+      tenantId: string,
+      valueMinutes: number,
+      organisationId?: string,
+      facilityId?: string,
+    ): Promise<void> {
+      const row = await prisma.configurationValue.create({
+        data: {
+          key: NO_SHOW_GRACE_PERIOD_KEY,
+          layer,
+          tenantId,
+          organisationId: layer === 'L4' ? (organisationId ?? null) : null,
+          facilityId: layer === 'L4' ? (facilityId ?? null) : null,
+          value: valueMinutes,
+          valueVersion: 1,
+        },
+      });
+      await prisma.configurationValueVersion.create({
+        data: {
+          configurationValueId: row.id,
+          key: NO_SHOW_GRACE_PERIOD_KEY,
+          layer,
+          tenantId: row.tenantId,
+          organisationId: row.organisationId,
+          facilityId: row.facilityId,
+          value: valueMinutes,
+          valueVersion: 1,
+        },
+      });
+    }
+
+    it('rejects strictly before the grace boundary (fail-closed)', async () => {
+      // now - start = 10 minutes < default 15.
+      const { cookie, appointmentId } = await seedAppointment(
+        'grace-before',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(10),
+      );
+      const response = await markNoShow(cookie, appointmentId);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe(
+        'APPOINTMENT_NO_SHOW_GRACE_PERIOD_NOT_ELAPSED',
+      );
+    });
+
+    it('allows at exact grace boundary (equality permitted)', async () => {
+      // now - start = 15 minutes == default 15.
+      const { cookie, appointmentId } = await seedAppointment(
+        'grace-equal',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(15),
+      );
+      const response = await markNoShow(cookie, appointmentId);
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe('no_show');
+    });
+
+    it('allows after the grace boundary', async () => {
+      // now - start = 30 minutes > default 15.
+      const { cookie, appointmentId } = await seedAppointment(
+        'grace-after',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(30),
+      );
+      const response = await markNoShow(cookie, appointmentId);
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe('no_show');
+    });
+
+    it('uses the L1 default 15 when no override exists', async () => {
+      const { cookie: c10, appointmentId: a10 } = await seedAppointment(
+        'grace-l1-10',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(10),
+      );
+      expect((await markNoShow(c10, a10)).status).toBe(400);
+      const { cookie: c15, appointmentId: a15 } = await seedAppointment(
+        'grace-l1-15',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(15),
+      );
+      expect((await markNoShow(c15, a15)).status).toBe(200);
+    });
+
+    it('L3 tenant override changes behaviour', async () => {
+      const { cookie, appointmentId, tenantId } = await seedAppointment(
+        'grace-l3',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(15),
+      );
+      // L3 override 30 minutes: 15 elapsed < 30 required -> reject.
+      await seedOverride('L3', tenantId, 30);
+      const rejected = await markNoShow(cookie, appointmentId);
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error.code).toBe(
+        'APPOINTMENT_NO_SHOW_GRACE_PERIOD_NOT_ELAPSED',
+      );
+
+      // 35 minutes elapsed >= 30 -> allowed.
+      const { cookie: c2, appointmentId: a2 } = await seedAppointment(
+        'grace-l3-2',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(35),
+      );
+      await seedOverride(
+        'L3',
+        (await prisma.appointment.findUnique({ where: { id: a2 } }))
+          ?.tenantId ?? '',
+        30,
+      );
+      expect((await markNoShow(c2, a2)).status).toBe(200);
+    });
+
+    it('L4 facility override beats L3 tenant override', async () => {
+      const { cookie, appointmentId, tenantId, organisationId, facilityId } =
+        await seedAppointment(
+          'grace-l4-beats-l3',
+          'R06_RECEPTIONIST',
+          'confirmed',
+          at(15),
+        );
+      await seedOverride('L3', tenantId, 30);
+      await seedOverride('L4', tenantId, 10, organisationId, facilityId);
+      const response = await markNoShow(cookie, appointmentId);
+      expect(response.status).toBe(200);
+      expect(response.body.status).toBe('no_show');
+    });
+
+    it('Scheduling internal resolution does NOT emit Configuration admin-read audit', async () => {
+      const { cookie, appointmentId } = await seedAppointment(
+        'grace-no-admin-read-audit',
+        'R06_RECEPTIONIST',
+        'confirmed',
+        at(60),
+      );
+      const response = await markNoShow(cookie, appointmentId);
+      expect(response.status).toBe(200);
+      const events = await prisma.auditOutboxEvent.findMany();
+      const actions = events.map(
+        (e) => (e.canonicalEventDraft as { action?: string }).action,
+      );
+      expect(actions).toContain('appointments.no_show_recorded');
+      expect(actions).not.toContain('configuration.effective_value.viewed');
+      expect(actions).not.toContain('configuration.override.created');
+      expect(actions).not.toContain('configuration.override.updated');
     });
   });
 });

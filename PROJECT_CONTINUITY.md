@@ -7868,3 +7868,95 @@ Verified on 2026-08-19 via direct remote reference (`git ls-remote`), GitHub API
 ### Immediate Next Step
 
 The next major project milestone has NOT yet been formally implemented or started. The leading architectural dependency for the next completion cycle is the **canonical Configuration vertical slice**: `packages/configuration` currently exists only as a package-boundary marker (its own `src/index.ts` docblock records that the Zod schemas and eight-layer precedence helpers arrive in a subsequent batch), and Scheduling no-show grace-period enforcement intentionally depends on the future canonical Configuration implementation. Configuration implementation was NOT performed as part of this documentation-only task. The next substantive stage must be identified and ratified by the operator before any code changes begin.
+
+## Canonical Configuration Vertical Slice — Configuration Vertical Slice v1 (BC16)
+
+**Date:** 2026-08-19 (UTC)
+**Type:** Feature branch milestone (NOT merged)
+**Branch:** `feature/configuration-vertical-slice-v1`
+**Verified pre-task base:** `254e736349b2244389413a34ae3f99907b0e78eb` (`origin/main` tip verified via `git ls-remote origin main` before branch creation; matched the operator-provided expected baseline exactly)
+
+### Status
+
+Canonical Configuration Vertical Slice v1 is IMPLEMENTED AND FULLY VALIDATED in this milestone commit; awaiting push and operator review. No merge, no deployment.
+
+### Configuration Key Implemented
+
+- **Canonical key:** `scheduling.appointment.noShowGracePeriod`
+- **Owner:** BC06 Scheduling
+- **Value type:** integer minutes, Zod-validated bounds **min 5 / max 120** (both edges accepted)
+- **L1 platform default (seeded by migration):** `15`
+- **Overridable layers in v1:** L3 Tenant, L4 Facility. L1 is platform-only and immutable through the administration API. L2/L5–L8 remain part of the canonical eight-layer type model but are NOT implemented as persistence scopes in this first slice.
+
+### Canonical Precedence Decision
+
+- Eight-layer ratified model per ADR-001 / CONFIGURATION_ARCHITECTURE.md: L1 Platform Default, L2 Edition, L3 Tenant, L4 Facility, L5 Department, L6 Care Team, L7 User, L8 Session. The conflicting ten-level prose found in other documentation is intentionally NOT implemented and is recorded as a later architecture-document reconciliation item.
+- Resolution order in v1: **L4 → L3 → L1**, deterministic; unknown keys fail closed; invalid persisted values fail closed (never silently fall back).
+
+### Clinic-Type Configuration Deferral
+
+Clinic-type-specific configuration is **intentionally deferred** until a canonical clinic-type representation is ratified. No `Facility.clinicType`, no clinic-type table, no precedence layer, no specialty key duplication, and no temporary clinic-type logic was added.
+
+### Persistence Model (PostgreSQL 17, Prisma)
+
+- `configuration_values` — one active row per (key, layer, normalized scope). Generic `jsonb value`. Optimistic `valueVersion`. `createdAt`/`updatedAt`/actor attribution (`createdByActorType`, `createdByActorId`, `updatedByActorType`, `updatedByActorId`).
+- `configuration_value_versions` — dedicated append-only version history (one immutable row per successful create/update, same transaction; audit trail is not the version history).
+- Scope coherence: L1 rows have NULL tenant/org/facility; L3 rows have exactly one tenant and NULL org/facility; L4 rows have tenant+organisation+facility populated, enforced by CHECK constraints `layers: ('L1','L3','L4')` and layer-specific scope coherence.
+- Composite foreign key `facility (tenantId, organisationId, facilityId)` for L4 rows combined with unique `(key, layer, normalized scope)` index preventing duplicate active values.
+- Migration: `apps/api/prisma/migrations/20260819000000_bc16_configuration_foundation/migration.sql` (forward-only, non-destructive; deterministic L1 seed value 15 for the grace-period key).
+
+### Authorization
+
+- New permissions: `configuration:read`, `configuration:write`.
+- **R13 Platform/System Administrator:** read effective configuration; write L3 tenant overrides within its authorized tenant scope. MUST NOT write L4.
+- **R09 Clinic Administrator:** read effective configuration; write L4 facility overrides within its authorized tenant/organisation/facility scope. MUST NOT write L3.
+- R06/R07 and other non-ratified roles: denied (403); missing facility context for L4: denied (403). Cross-scope requests fail with generic `CONFIGURATION_NOT_AUTHORIZED` — no existence leakage.
+
+### API Surface (BC16)
+
+- `GET /api/v1/configuration/:key` — returns effective value, source layer, value version, resolved-at timestamp; requires `configuration:read`.
+- `PUT /api/v1/configuration/:key` { layer: 'L3'|'L4', value } — creates/updates an override for the requested supported layer; requires `configuration:write`. Scope identifiers are derived server-side from the trusted session context; they are NEVER accepted from body/query. L1 immutable through this API (422 `CONFIGURATION_UNSUPPORTED_LAYER`).
+- Controlled error codes: `CONFIGURATION_UNKNOWN_KEY` (400), `CONFIGURATION_INVALID_VALUE` (400), `CONFIGURATION_UNSUPPORTED_LAYER` (422), `CONFIGURATION_NOT_AUTHORIZED` (403), `CONFIGURATION_CONFLICT` (409).
+
+### Audit Model
+
+- New category `configuration`; actions `configuration.effective_value.viewed`, `configuration.override.created`, `configuration.override.updated` (audit catalogue registered; `inferCategoryFromAction` mapping added).
+- Successful write + version append + audit event share a single Prisma transaction (atomicity verified by test).
+- Internal module resolution (Scheduling) never emits administrative read events.
+- Audit metadata carries key/layer/scope/value-version provenance only — no secrets, no PHI.
+
+### Scheduling Integration
+
+- `POST /api/v1/appointments/:id/no-show` now computes `earliestNoShow = scheduledStart + resolvedMinutes` before transition; rejects with `APPOINTMENT_NO_SHOW_GRACE_PERIOD_NOT_ELAPSED` (422) when `now < earliestNoShow`; equality allowed; same deterministic clock, repository scope, transition/idempotency, and audit semantics as before (recorded via `appointments.no_show_recorded`).
+- No hardcoded 15, no environment-variable fallback, no layer resolution inside Scheduling; resolution happens strictly through the canonical Configuration resolution port.
+
+### Validation Results (all run against PostgreSQL 17 disposable clusters where applicable)
+
+- `pnpm --filter @ibn-hayan/configuration test`: 11/11 (layers 5, key-registry 6)
+- `pnpm --filter @ibn-hayan/domain test`: 159/159
+- `pnpm --filter @ibn-hayan/observability test`: 97/97
+- API unit suites: 492/492
+- `pnpm test:configuration`: 20/20 (HTTP e2e + PG17; precedence L4>L3>L1 proven, atomic version+audit, fail-closed paths)
+- `pnpm test:appointments`: 285/285 (incl. 7 new grace-period tests + L3/L4 override behavior tests)
+- `pnpm test:database`: 196/196 (7 files; scope-coherence unique constraints proven)
+- `pnpm test:auth`: 35/35, `pnpm test:context`: 55/55
+- `pnpm test:clinic-admin`: 24/24, `pnpm test:encounters`: 42/42, `pnpm test:clinical-notes`: 52/52, `pnpm test:role-preview`: 53/53
+- Prisma format + validate + generate: clean; `git diff --check`: clean; API production build: OK (147 files); Web production build: OK.
+
+### Intentionally Deferred Scope
+
+- L2 Edition and L5-L8 persistence scopes. Rollback API. Version-comparison UI/API. Configuration module caching across requests. Clinic-type-specific configuration (pending canonical clinic-type representation). Web administration UI. Department/care-team/user/session override dimensions.
+
+### Known Risks
+
+- Module-boundary convention: the Configuration administration surface lives under `apps/api/src/modules/configuration`; the formal BC module number assignment is recorded for operator ratification during review.
+- Persistently-stored invalid override values fail closed (CONFIGURATION_CONFLICT) — remediation via override rewrite, not silent default (by design).
+
+### Recovery
+
+- If this feature branch has not yet been pushed, resume from `feature/configuration-vertical-slice-v1` and fetch first.
+- Base commit `254e736349b2244389413a34ae3f99907b0e78eb` is the verified pre-task `main`.
+
+### Immediate Next Step
+
+Push `feature/configuration-vertical-slice-v1`, create DRAFT PR to `main`, wait for exact-head Main CI (both required jobs), operator merge review. DO NOT merge.

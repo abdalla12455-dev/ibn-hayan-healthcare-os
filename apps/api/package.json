@@ -19,6 +19,7 @@
     "test:role-preview": "vitest run --config vitest.role-preview.config.ts",
     "test:clinic-admin": "vitest run --config vitest.clinic-admin.config.ts",
     "test:appointments": "vitest run --config vitest.appointments.config.ts",
+    "test:configuration": "vitest run --config vitest.configuration.config.ts",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -66,9 +67,11 @@
     "test:encounters": "vitest run --config vitest.encounters.config.ts",
     "pretest:encounters": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
     "test:clinical-notes": "vitest run --config vitest.clinical-notes.config.ts",
-    "pretest:clinical-notes": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
+    "pretest:clinical-notes": "prisma generate && prisma generate --schema prisma-audit/schema.prisma",
+    "pretest:configuration": "prisma generate && prisma generate --schema prisma-audit/schema.prisma"
   },
   "dependencies": {
+    "@ibn-hayan/configuration": "workspace:*",
     "@ibn-hayan/contracts": "workspace:*",
     "@ibn-hayan/domain": "workspace:*",
     "@ibn-hayan/observability": "workspace:*",

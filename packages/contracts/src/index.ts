@@ -34,3 +34,4 @@ export * from './workforce/index.js';
 export * from './encounters/index.js';
 export * from './patients/index.js';
 export * from './clinical-notes/index.js';
+export * from './configuration/index.js';

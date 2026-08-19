@@ -7,19 +7,31 @@ import type {
   AppointmentId,
   AppointmentTransitionInput,
 } from '@ibn-hayan/domain';
+import type {
+  ConfigurationResolutionPort,
+  Appointment,
+} from '@ibn-hayan/domain';
+import { ConfigurationResolutionError } from '@ibn-hayan/domain';
 import {
   TENANT_REPOSITORY,
   ORGANISATION_REPOSITORY,
   FACILITY_REPOSITORY,
   APPOINTMENT_REPOSITORY,
+  CONFIGURATION_RESOLUTION_PORT,
 } from '../../infrastructure/database/index.js';
+import {
+  CLOCK_SERVICE_TOKEN,
+  type ClockService,
+} from '../../infrastructure/clock/index.js';
 import { AuthService, type AuditRequestContext } from '../auth/auth.service.js';
 import { AuditHelperService } from '../audit/audit-helper.service.js';
 import { clinicAdminOverviewContextRequired } from '../clinic-admin/clinic-admin.errors.js';
 import type { AppointmentVisitLifecycleResponse } from '@ibn-hayan/contracts';
+import { NO_SHOW_GRACE_PERIOD_KEY } from '@ibn-hayan/configuration';
 import {
   appointmentNotFound,
   appointmentVisitInvalidTransition,
+  appointmentNoShowGracePeriodNotElapsed,
 } from './appointments.errors.js';
 
 /**
@@ -119,6 +131,10 @@ export class AppointmentsVisitLifecycleService {
     private readonly facilities: FacilityRepository,
     @Inject(APPOINTMENT_REPOSITORY)
     private readonly appointments: AppointmentRepository,
+    @Inject(CONFIGURATION_RESOLUTION_PORT)
+    private readonly configurationResolution: ConfigurationResolutionPort,
+    @Inject(CLOCK_SERVICE_TOKEN)
+    private readonly clock: ClockService,
     private readonly authService: AuthService,
     private readonly auditHelper: AuditHelperService,
   ) {}
@@ -282,7 +298,100 @@ export class AppointmentsVisitLifecycleService {
       'no_show',
       cookieValue,
       auditContext,
+      () =>
+        this.assertNoShowGracePeriodElapsed(
+          appointmentId,
+          cookieValue,
+          auditContext,
+        ),
     );
+  }
+
+  /**
+   * No-show grace-period gate (BC16). Resolves
+   * `scheduling.appointment.noShowGracePeriod` through the canonical
+   * Configuration resolution port with the session-derived trusted
+   * scope. Scheduling NEVER performs layer resolution itself; it
+   * only consumes the resolved value.
+   *
+   * The gate uses the injected clock and compares:
+   * earliestNoShow = scheduledStart + resolvedGraceMinutes
+   *   if now < earliestNoShow -> reject fail-closed
+   *   if now == earliestNoShow -> allowed (equality permitted)
+   *
+   * The check is fail-closed: a resolution or scope failure
+   * propagates and the transition is never attempted.
+   */
+  private async assertNoShowGracePeriodElapsed(
+    appointmentId: string,
+    cookieValue: string | undefined,
+    auditContext: AuditRequestContext | undefined,
+  ): Promise<void> {
+    // Re-resolve the session so the scope is derived from trusted
+    // context (never from the caller).
+    const authResult = await this.authService.getSessionFromCookie(
+      cookieValue,
+      auditContext,
+    );
+    if (authResult === null) {
+      return; // The outer transition returns null → 401.
+    }
+    const { session } = authResult;
+    if (
+      session.activeTenantMembershipId === null ||
+      session.activeOrganisationId === null ||
+      session.activeFacilityId === null
+    ) {
+      throw clinicAdminOverviewContextRequired();
+    }
+    const activeMembership = authResult.memberships.find(
+      (m) => m.id === session.activeTenantMembershipId,
+    );
+    if (activeMembership === undefined) {
+      throw clinicAdminOverviewContextRequired();
+    }
+    const tenantId = activeMembership.tenantId;
+    const organisationId = session.activeOrganisationId;
+    const facilityId = session.activeFacilityId;
+
+    // Obtain the appointment through the existing scoped repository
+    // logic (a scoped findById, never unscoped).
+    const appointment: Appointment | null = await this.appointments.findById(
+      tenantId,
+      organisationId,
+      facilityId,
+      appointmentId as AppointmentId,
+    );
+    if (appointment === null) {
+      throw appointmentNotFound();
+    }
+
+    // Resolve the grace period via the canonical Configuration port.
+    let graceMinutes: number;
+    try {
+      const resolved = await this.configurationResolution.resolve(
+        NO_SHOW_GRACE_PERIOD_KEY,
+        { tenantId, organisationId, facilityId },
+      );
+      graceMinutes = resolved.value as number;
+    } catch (error) {
+      if (error instanceof ConfigurationResolutionError) {
+        // Fail-closed: an incoherent registry/scope never silently
+        // defaults to 15.
+        throw new Error(
+          `Configuration resolution failed for ${NO_SHOW_GRACE_PERIOD_KEY}: ${error.reason}`,
+        );
+      }
+      throw error;
+    }
+
+    const earliestNoShow = new Date(
+      appointment.scheduledStart.getTime() + graceMinutes * 60_000,
+    );
+    const now = this.clock.now();
+    if (now.getTime() < earliestNoShow.getTime()) {
+      throw appointmentNoShowGracePeriodNotElapsed();
+    }
   }
 
   /**
@@ -302,6 +411,7 @@ export class AppointmentsVisitLifecycleService {
     actionLabel: 'confirm' | 'check-in' | 'start' | 'complete' | 'no_show',
     cookieValue: string | undefined,
     auditContext: AuditRequestContext | undefined,
+    precondition?: () => Promise<void>,
   ): Promise<AppointmentVisitLifecycleResponse | null> {
     const authResult = await this.authService.getSessionFromCookie(
       cookieValue,
@@ -351,6 +461,13 @@ export class AppointmentsVisitLifecycleService {
 
     if (facility.organisationId !== organisation.id) {
       throw clinicAdminOverviewContextRequired();
+    }
+
+    // Optional transition precondition (e.g. the no-show grace period
+    // check). A thrown controlled error short-circuits the transition
+    // before any mutation is attempted.
+    if (precondition !== undefined) {
+      await precondition();
     }
 
     // Perform the scoped, atomic transition. The repository handles
