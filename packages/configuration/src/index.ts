@@ -12,3 +12,16 @@
 export const CONFIGURATION_PACKAGE_VERSION = '0.0.0' as const;
 
 export const CONFIGURATION_PACKAGE_NAME = '@ibn-hayan/configuration' as const;
+
+export {
+  resolveValidatedConfiguration,
+} from './precedence/resolve.js';
+
+export type {
+  ConfigurationLayer,
+  ConfigurationContext,
+  ConfigurationDefinition,
+  ConfigurationOverride,
+  ResolvedConfiguration,
+  ValidatedConfigurationDefinition,
+} from './precedence/resolve.js';

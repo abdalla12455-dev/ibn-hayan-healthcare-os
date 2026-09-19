@@ -7989,3 +7989,185 @@ The next substantive implementation milestone requires
 operator approval before development begins.
 
 ---
+
+---
+
+## Canonical Configuration Foundation — Terminal Implementation (2026-09-19)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Development branch: feature/terminal-next-20260919
+
+Verified pre-task commit:
+e7343db9666f7f69d467ed4ef58d096fce3f6e6e
+
+The development branch was created from the verified remote main
+after the successful merge of PR #33.
+
+The previous development branch and local showcase backup remain
+preserved. The local main branch was not modified.
+
+### Completed implementation
+
+Implemented the first independent configuration foundation inside
+the existing packages/configuration package.
+
+The implementation includes:
+
+- Deterministic eight-layer configuration precedence.
+- Explicit per-key maximum override-layer enforcement.
+- Exact scope matching for tenant, organisation, facility,
+  department, care team, user, and session contexts.
+- Detection of duplicate matching overrides regardless of
+  input-record ordering.
+- Configuration value and default-value validation using Zod.
+- Rejection of invalid values and mismatched configuration keys.
+- Source-layer and last-modified metadata in resolved results.
+- A validated public resolver export.
+- A working TypeScript runtime build producing JavaScript and
+  declaration files.
+- Independent configuration unit tests.
+
+The original package boundary was preserved and extended.
+
+No new configuration module, screen, API endpoint, database table,
+migration, or authorization permission was created.
+
+### Files created
+
+- packages/configuration/src/precedence/resolve.ts
+- packages/configuration/src/precedence/resolve.spec.ts
+
+### Files modified
+
+- packages/configuration/package.json
+- packages/configuration/src/index.ts
+- packages/configuration/tsconfig.json
+- pnpm-lock.yaml
+- PROJECT_CONTINUITY.md
+
+Files deleted: none.
+
+### Validation evidence
+
+Configuration package typecheck: PASS.
+
+Configuration unit tests: 22 passed, 0 failed.
+
+Full project typecheck: PASS.
+
+Full project lint: PASS after restoring dependency installation
+from the existing lockfile.
+
+Full project unit tests: PASS in the earlier comprehensive run
+before the final package runtime-build metadata changes.
+
+Web production build: PASS in the earlier comprehensive run
+before the final package runtime-build metadata changes.
+
+Configuration package runtime build: PASS after metadata changes.
+
+Generated JavaScript and TypeScript declaration files: verified.
+
+Runtime import of the built configuration package: PASS.
+
+Runtime configuration resolution: PASS.
+
+Runtime invalid-value rejection: PASS.
+
+Validated public API export: PASS.
+
+Git diff --check: PASS.
+
+The generated dist directory is not a Git backup.
+
+No configuration database integration or production execution
+was performed.
+
+### Architectural boundaries
+
+The configuration resolver is a pure foundation, not the completed
+canonical Configuration service.
+
+The caller is currently responsible for supplying a trusted key
+definition and an authenticated, ownership-verified context.
+
+The current engine does NOT independently establish:
+
+- Whether a facility belongs to the supplied organisation and tenant.
+- Whether a department or care team belongs to the selected hierarchy.
+- Whether a user belongs to the selected tenant.
+- Whether the requesting actor may read or modify the configuration.
+- Whether an override was previously authorized and audited.
+- Whether a configuration key is registered in the canonical catalogue.
+- Referential, semantic, contextual, and regulatory validation.
+- Persistent configuration storage, versioning, or rollback.
+
+These responsibilities must be implemented before exposing
+configuration reads or writes to users.
+
+The legacy Settings documentation associates some configuration
+authority with R13, but the current implementation treats R13 as
+a platform-level identity and R09 as Clinic Administrator.
+
+Do not grant either role new configuration permissions based solely
+on legacy role descriptions. Ratify the role-specific configuration
+authority before implementing API or management surfaces.
+
+The resolver must not replace existing clinical-safety checks,
+including consent enforcement, facility timezone requirements,
+or provider availability enforcement.
+
+### Known unfinished work
+
+- Canonical configuration key catalogue and schema registration.
+- Complete five-category validation framework.
+- Configuration persistence and immutable version history.
+- Configuration authorization and tenant-ownership verification.
+- Configuration audit and governance workflow.
+- Integration with the existing API and consuming modules.
+- Configuration management UI.
+- Scheduling no-show grace-period configuration and enforcement.
+- Full integration and PostgreSQL 17 validation for future
+  configuration persistence.
+
+No production deployment was performed.
+
+### Current Git and recovery state
+
+This implementation is currently present as uncommitted changes
+on feature/terminal-next-20260919.
+
+The latest verified committed base before this task is:
+e7343db9666f7f69d467ed4ef58d096fce3f6e6e
+
+The previous configuration foundation is not yet backed up
+by a verified remote feature-branch commit.
+
+Before continuing, inspect the current repository, branch,
+working tree, Git remote, AGENTS.md, and PROJECT_CONTINUITY.md.
+
+Fetch the remote and verify that no newer remote work would be
+overwritten.
+
+Do not reset, restore, clean, or discard the current changes.
+
+### Immediate next step
+
+Review the complete implementation diff and dependency-lockfile
+changes, repeat relevant final validation after the latest
+package metadata changes, then obtain explicit operator approval
+for committing and pushing the completed configuration foundation.
+
+After pushing, compare the complete local and remote branch SHAs.
+
+Do not claim that the implementation is backed up on GitHub
+until commit, push, and SHA verification have succeeded.
+
+The next implementation milestone is the canonical configuration
+key catalogue and validation contracts, followed by authorized
+API integration and persistence under a separately approved scope.
+
+---
