@@ -69,7 +69,7 @@ describe('LoginPage (direct-link route)', () => {
     // the landing experience is rendered.
     await waitFor(() => {
       expect(
-        screen.getByText('نظام تشغيل موحّد للعيادات الحديثة'),
+        screen.getByText('مرحباً بعودتك'),
       ).toBeInTheDocument();
     });
     // The login form is also rendered (it is part of the landing experience).

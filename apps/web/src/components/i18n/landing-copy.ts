@@ -89,9 +89,9 @@ export const LANDING_COPY: Readonly<Record<'ar' | 'en', LandingCopy>> = {
 
     navLanguageSwitch: 'English',
 
-    heroHeading: 'نظام تشغيل موحّد للعيادات الحديثة',
+    heroHeading: 'مرحباً بعودتك',
     heroBody:
-      'مساحة عمل آمنة ومنظّمة تساعد فرق الرعاية الصحية على إدارة مؤسساتهم بوضوح، والانتقال بين بيئات العمل بثقة، والاستعداد للنمو دون تعقيد.',
+      'سجّل الدخول للوصول إلى مساحة عمل مؤسستك.',
 
     values: [
       {
@@ -177,10 +177,9 @@ export const LANDING_COPY: Readonly<Record<'ar' | 'en', LandingCopy>> = {
 
     navLanguageSwitch: 'العربية',
 
-    heroHeading:
-      'A unified operating system for modern healthcare organisations',
+    heroHeading: 'Welcome back',
     heroBody:
-      'A secure and structured workspace designed to help healthcare teams operate with clarity, manage organisational access, and scale with confidence.',
+      'Sign in to access your organisation workspace.',
 
     values: [
       {
