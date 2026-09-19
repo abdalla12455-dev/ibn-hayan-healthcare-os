@@ -2343,3 +2343,132 @@ body {
     padding: 1rem;
   }
 }
+
+
+/* IBN_HAYAN_MINIMAL_AUTH_V1 */
+
+.ih-auth-page {
+  --background: #f7f8fa;
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-muted: #f3f5f8;
+  --border: #e3e7ee;
+  --border-strong: #b9c2cf;
+  --text-primary: #19253b;
+  --text-secondary: #596579;
+  --text-muted: #667085;
+  --primary: #19253b;
+  --primary-hover: #293b57;
+  --primary-foreground: #ffffff;
+
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+.ih-auth-page .ih-header {
+  background: transparent;
+  border-bottom: 0;
+}
+
+.ih-auth-page .ih-header__inner {
+  max-width: 1120px;
+  padding: 1.5rem 1.75rem;
+}
+
+.ih-auth-page .ih-landing-main {
+  flex: 1;
+  justify-content: center;
+}
+
+.ih-auth-page .ih-hero {
+  background: transparent;
+  overflow: visible;
+}
+
+.ih-auth-page .ih-hero__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.75rem;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+}
+
+.ih-auth-page .ih-hero__brand {
+  width: 100%;
+  align-items: center;
+  text-align: center;
+}
+
+.ih-auth-page .ih-hero__text {
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ih-auth-page .ih-hero__title {
+  max-width: none;
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+
+.ih-auth-page .ih-hero__body {
+  max-width: 28rem;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.ih-auth-page .ih-hero__login {
+  width: 100%;
+  max-width: 450px;
+}
+
+.ih-auth-page .ih-login {
+  padding: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    0 12px 35px rgba(25, 37, 59, 0.035),
+    0 2px 6px rgba(25, 37, 59, 0.025);
+}
+
+.ih-auth-page .ih-login__note {
+  background: transparent;
+  padding: 0;
+  margin-top: 1.25rem;
+  font-size: 0.75rem;
+}
+
+.ih-auth-page .ih-input {
+  min-height: 46px;
+  background: #ffffff;
+}
+
+.ih-auth-page .ih-login__submit {
+  min-height: 46px;
+}
+
+.ih-auth-page .ih-language-switch {
+  background: #ffffff;
+  border-color: var(--border);
+}
+
+@media (max-width: 639px) {
+  .ih-auth-page .ih-header__inner {
+    padding: 1rem;
+  }
+
+  .ih-auth-page .ih-hero__inner {
+    padding: 1.5rem 1rem 2rem;
+  }
+
+  .ih-auth-page .ih-login {
+    padding: 1.5rem;
+  }
+}

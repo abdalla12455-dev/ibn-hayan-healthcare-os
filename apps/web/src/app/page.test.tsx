@@ -93,7 +93,7 @@ describe('LandingPage', () => {
     // The Arabic hero heading is the default because Arabic is the
     // default language.
     expect(
-      screen.getByText('نظام تشغيل موحّد للعيادات الحديثة'),
+      screen.getByText('مرحباً بعودتك'),
     ).toBeInTheDocument();
   });
 
@@ -158,7 +158,7 @@ describe('LandingPage', () => {
     });
     // The Arabic hero heading is present by default.
     expect(
-      screen.getByText('نظام تشغيل موحّد للعيادات الحديثة'),
+      screen.getByText('مرحباً بعودتك'),
     ).toBeInTheDocument();
     // The Arabic login-card title is present by default.
     expect(
@@ -173,7 +173,7 @@ describe('LandingPage', () => {
     });
     // The hero section carries dir="rtl" because Arabic is the default.
     const hero = screen.getByText(
-      'نظام تشغيل موحّد للعيادات الحديثة',
+      'مرحباً بعودتك',
     ).closest('section');
     expect(hero).not.toBeNull();
     expect(hero?.getAttribute('dir')).toBe('rtl');
@@ -203,7 +203,7 @@ describe('LandingPage', () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          'A unified operating system for modern healthcare organisations',
+          'Welcome back',
         ),
       ).toBeInTheDocument();
     });
@@ -215,7 +215,7 @@ describe('LandingPage', () => {
     // The hero section now carries dir="ltr".
     const hero = screen
       .getByText(
-        'A unified operating system for modern healthcare organisations',
+        'Welcome back',
       )
       .closest('section');
     expect(hero?.getAttribute('dir')).toBe('ltr');
@@ -272,51 +272,67 @@ describe('LandingPage', () => {
     expect(body).not.toMatch(/\d+ organisations/i);
   });
 
-  it('renders the login form early in document order on mobile-width viewports', async () => {
+  it('renders the login form before the footer', async () => {
     mockFetchPending();
+
     await act(async () => {
       renderLanding();
     });
-    // The login form is rendered as part of the hero, so it appears
-    // before the marketing sections below. Verify the login email
-    // input appears before the section-1 heading in DOM order.
-    const emailInput = screen.getByLabelText('البريد الإلكتروني');
-    const section1Heading = screen.getByText(
-      'مصمّمة من أجل الوضوح التشغيلي',
+
+    const emailInput = screen.getByLabelText(
+      'البريد الإلكتروني',
     );
-    const emailInputIndex = Array.prototype.indexOf.call(
+
+    const footer = document.querySelector('footer');
+
+    expect(footer).not.toBeNull();
+
+    const elements = Array.from(
       document.querySelectorAll('body *'),
-      emailInput,
     );
-    const section1Index = Array.prototype.indexOf.call(
-      document.querySelectorAll('body *'),
-      section1Heading,
+
+    expect(elements.indexOf(emailInput)).toBeGreaterThan(-1);
+    expect(elements.indexOf(footer!)).toBeGreaterThan(-1);
+
+    expect(
+      elements.indexOf(emailInput),
+    ).toBeLessThan(
+      elements.indexOf(footer!),
     );
-    expect(emailInputIndex).toBeGreaterThan(-1);
-    expect(section1Index).toBeGreaterThan(-1);
-    expect(emailInputIndex).toBeLessThan(section1Index);
   });
 
-  it('renders the four value indicators', async () => {
+  it('does not render the removed value grid', async () => {
     mockFetchPending();
+
     await act(async () => {
       renderLanding();
     });
-    // The four Arabic value titles.
-    expect(screen.getByText('وصول آمن')).toBeInTheDocument();
-    expect(screen.getByText('بيئات عمل منفصلة')).toBeInTheDocument();
-    expect(screen.getByText('تجربة ثنائية اللغة')).toBeInTheDocument();
-    expect(screen.getByText('بنية جاهزة للنمو')).toBeInTheDocument();
+
+    expect(
+      document.querySelector('.ih-value-grid'),
+    ).toBeNull();
+
+    expect(
+      screen.getByLabelText('البريد الإلكتروني'),
+    ).toBeInTheDocument();
   });
 
-  it('renders the three public sections below the hero', async () => {
+  it('does not render the removed marketing sections', async () => {
     mockFetchPending();
+
     await act(async () => {
       renderLanding();
     });
-    expect(screen.getByText('مصمّمة من أجل الوضوح التشغيلي')).toBeInTheDocument();
-    expect(screen.getByText('الأمان مبني في الأساس')).toBeInTheDocument();
-    expect(screen.getByText('جاهزة للنمو مع المؤسسة')).toBeInTheDocument();
+
+    expect(
+      document.querySelectorAll('.ih-section'),
+    ).toHaveLength(0);
+
+    expect(
+      screen.getByRole('button', {
+        name: 'تسجيل الدخول',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('does not render a generic Sign-in navigation button in the header', async () => {

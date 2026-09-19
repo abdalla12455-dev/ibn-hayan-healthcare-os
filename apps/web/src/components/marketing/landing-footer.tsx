@@ -1,7 +1,6 @@
 import { useLanguage } from '@/components/i18n/language-context';
 import { getCopy } from '@/components/i18n/landing-copy';
 import { BrandMark } from './brand-mark';
-import { LanguageSwitch } from './language-switch';
 
 /**
  * Refined landing footer.
@@ -32,7 +31,6 @@ export function LandingFooter() {
         </div>
         <div className="ih-footer__meta">
           <p className="ih-footer__copyright">{copy.footerCopyright}</p>
-          <LanguageSwitch />
         </div>
       </div>
     </footer>

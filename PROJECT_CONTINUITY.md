@@ -7868,3 +7868,124 @@ Verified on 2026-08-19 via direct remote reference (`git ls-remote`), GitHub API
 ### Immediate Next Step
 
 The next major project milestone has NOT yet been formally implemented or started. The leading architectural dependency for the next completion cycle is the **canonical Configuration vertical slice**: `packages/configuration` currently exists only as a package-boundary marker (its own `src/index.ts` docblock records that the Zod schemas and eight-layer precedence helpers arrive in a subsequent batch), and Scheduling no-show grace-period enforcement intentionally depends on the future canonical Configuration implementation. Configuration implementation was NOT performed as part of this documentation-only task. The next substantive stage must be identified and ratified by the operator before any code changes begin.
+
+---
+
+## Terminal Continuation — Minimal Login Redesign (2026-09-19)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Working branch: feature/terminal-continuation-20260919
+
+Verified pre-task commit:
+254e736349b2244389413a34ae3f99907b0e78eb
+
+The working branch was created from origin/main.
+
+The previous local showcase commit was preserved on:
+backup/local-showcase-20260919
+
+### Completed work
+
+Redesigned the existing public landing and login experience
+using the approved minimal, premium visual direction.
+
+- Replaced the marketing-heavy layout with a focused login page.
+- Introduced a white and light-grey authentication surface.
+- Preserved the existing Ibn Hayan brand mark.
+- Preserved the original LoginPanel implementation.
+- Preserved Arabic and English language switching.
+- Removed the decorative hero artwork and value grid.
+- Removed the three marketing sections from the rendered page.
+- Removed the duplicate footer language-switch button.
+- Retained one language-switch button in the header.
+- Updated presentation tests for the redesigned page.
+
+Both / and /login continue using the same LandingExperience.
+
+The existing authentication client, authorization logic,
+database schemas, migrations, and internal dashboards
+were not modified.
+
+### Files modified
+
+- apps/web/src/app/globals.css
+- apps/web/src/app/login/page.test.tsx
+- apps/web/src/app/page.test.tsx
+- apps/web/src/components/i18n/landing-copy.ts
+- apps/web/src/components/marketing/hero.tsx
+- apps/web/src/components/marketing/landing-experience.tsx
+- apps/web/src/components/marketing/landing-footer.tsx
+- PROJECT_CONTINUITY.md
+
+Files created in the repository: none.
+
+Files deleted: none.
+
+### Validation
+
+- Web TypeScript typecheck: PASS.
+- Web lint: PASS.
+- All web tests: 227 passed across 11 test files.
+- Login and landing tests: 28 passed.
+- Web production build: PASS.
+- Git diff --check: PASS.
+- Authentication and authorization source files: unchanged.
+- Local frontend and API previously returned HTTP 200.
+- Updated Arabic desktop layout visually reviewed.
+- One header language-switch button visually confirmed.
+- Duplicate footer language-switch button removed.
+
+The successful build and tests do not establish that every
+authenticated workflow has been manually verified.
+
+English visual layout, mobile responsiveness, browser console,
+and authenticated end-to-end flows remain to be verified
+before production release.
+
+No production deployment was performed.
+
+### Important decisions
+
+The current task changes the public login presentation only.
+
+No global design-token migration was performed.
+
+Internal role-specific interfaces remain unchanged.
+
+No changes were made to tenant isolation, permissions,
+authentication, or database contracts.
+
+### Known issues and unfinished work
+
+- The canonical Configuration implementation remains deferred.
+- No-show grace-period enforcement remains deferred.
+- Other deferred items remain governed by earlier continuity entries.
+- This redesign has not yet been committed or pushed.
+
+### Recovery and immediate next step
+
+The local showcase commit remains preserved on its backup branch.
+
+The current redesign is present as uncommitted changes on
+feature/terminal-continuation-20260919.
+
+Latest verified base commit:
+254e736349b2244389413a34ae3f99907b0e78eb
+
+Before resuming, fetch origin and inspect branch divergence,
+working-tree changes, AGENTS.md, and PROJECT_CONTINUITY.md.
+
+Review the exact changed files, validate the completed task,
+then obtain explicit operator authorization for the commit
+and push.
+
+After pushing, retrieve and compare complete local and
+remote branch SHAs before reporting that the backup is verified.
+
+The next substantive implementation milestone requires
+operator approval before development begins.
+
+---
