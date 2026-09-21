@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/precedence/resolve.spec.ts"
+    "test": "pnpm run build && node --experimental-strip-types --test src/precedence/resolve.spec.ts src/catalogue/catalogue.spec.ts"
   },
   "dependencies": {
     "zod": "^3.25.76"

@@ -9,7 +9,7 @@ import {
   type ConfigurationOverride,
 } from './resolve.ts';
 
-const key = 'scheduling.appointment.defaultDuration';
+const key = 'scheduling.appointment.defaultduration';
 
 const context: ConfigurationContext = {
   editionId: 'professional',

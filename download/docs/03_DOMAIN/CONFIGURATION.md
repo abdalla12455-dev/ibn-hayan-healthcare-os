@@ -76,7 +76,7 @@ Configuration is the structural mechanism by which Ibn Hayan maintains its one-p
 
 ### 2.1 Configuration Key Naming Conventions
 
-Configuration keys in Ibn Hayan follow a documented naming convention. The key is namespaced by module and by capability, reflecting the owning module and the semantic grouping. The namespace is stable; keys are not renamed casually, and renaming follows the platform's deprecation policy. The key's name is in dot-separated lowercase (for example, `billing.invoice.defaultCurrency`, `scheduling.appointment.defaultDuration`). The key's display name is a human-readable summary. The key's description is a one-sentence statement of the key's purpose, including the value type, the default value, and the overridability class.
+Configuration keys in Ibn Hayan follow a documented naming convention. The key is namespaced by module and by capability, reflecting the owning module and the semantic grouping. The namespace is stable; keys are not renamed casually, and renaming follows the platform's deprecation policy. The key's name uses dot-separated lowercase ASCII letters and digits only. Every segment begins with a lowercase letter, and a key has at least three segments. Uppercase letters and camelCase are not permitted (for example, `billing.invoice.defaultcurrency`, `scheduling.appointment.defaultduration`). The key's display name is a human-readable summary. The key's description is a one-sentence statement of the key's purpose, including the value type, the default value, and the overridability class.
 
 The naming convention is enforced by the Architecture Council at configuration key registration. A key that does not follow the convention is rejected; the rejection is recorded with the rationale. The convention is the structural mechanism by which the platform's configuration key catalogue remains coherent and navigable across the decade horizon documented in PRODUCT_BIBLE Section 2.2.
 
@@ -114,8 +114,8 @@ Tenant identity configuration governs the structural identity of a tenant in the
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| tenant.identity.tenantId | Tenant Identifier | BC16 | String | (auto-assigned) | Fixed at L1 | L1 |
-| tenant.identity.tenantName | Tenant Display Name | BC16 | String | — | Overridable to L3 | L3 |
+| tenant.identity.tenantid | Tenant Identifier | BC16 | String | (auto-assigned) | Fixed at L1 | L1 |
+| tenant.identity.tenantname | Tenant Display Name | BC16 | String | — | Overridable to L3 | L3 |
 | tenant.identity.edition | Tenant Edition | BC16 | Enum | Essential | Fixed at L2 | L2 |
 | tenant.identity.region | Tenant Region | BC16 | Enum | — | Overridable to L3 | L3 |
 | tenant.identity.timezone | Tenant Timezone | BC16 | Enum | UTC | Overridable to L3 | L3 |
@@ -128,10 +128,10 @@ Tenant localization configuration governs the locale, language, calendar, and re
 |---|---|---|---|---|---|---|
 | tenant.locale.language | Tenant Language | BC19 | Enum | en | Overridable to L3 | L3 |
 | tenant.locale.calendar | Tenant Calendar | BC19 | Enum | Gregorian | Overridable to L3 | L3 |
-| tenant.locale.dateFormat | Tenant Date Format | BC19 | String | YYYY-MM-DD | Overridable to L3 | L3 |
-| tenant.locale.numberFormat | Tenant Number Format | BC19 | String | (locale default) | Overridable to L3 | L3 |
+| tenant.locale.dateformat | Tenant Date Format | BC19 | String | YYYY-MM-DD | Overridable to L3 | L3 |
+| tenant.locale.numberformat | Tenant Number Format | BC19 | String | (locale default) | Overridable to L3 | L3 |
 | tenant.locale.currency | Tenant Currency | BC19 | Enum | USD | Overridable to L3 | L3 |
-| tenant.locale.regulatoryFramework | Tenant Regulatory Framework | BC19 | Enum | — | Overridable to L3 | L3 |
+| tenant.locale.regulatoryframework | Tenant Regulatory Framework | BC19 | Enum | — | Overridable to L3 | L3 |
 
 ### 3.3 Tenant Branding Configuration
 
@@ -139,9 +139,9 @@ Tenant branding configuration governs the visual identity of a tenant in user-fa
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| tenant.branding.logoUrl | Tenant Logo URL | BC16 | String | (platform default) | Overridable to L3 | L3 |
-| tenant.branding.primaryColor | Tenant Primary Color | BC16 | String | (platform default) | Overridable to L3 | L3 |
-| tenant.branding.secondaryColor | Tenant Secondary Color | BC16 | String | (platform default) | Overridable to L3 | L3 |
+| tenant.branding.logourl | Tenant Logo URL | BC16 | String | (platform default) | Overridable to L3 | L3 |
+| tenant.branding.primarycolor | Tenant Primary Color | BC16 | String | (platform default) | Overridable to L3 | L3 |
+| tenant.branding.secondarycolor | Tenant Secondary Color | BC16 | String | (platform default) | Overridable to L3 | L3 |
 | tenant.branding.theme | Tenant Theme | BC16 | Enum | Default | Overridable to L3 | L3 |
 
 ### 3.4 Tenant Operational Configuration
@@ -150,10 +150,10 @@ Tenant operational configuration governs the operational parameters of a tenant.
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| tenant.operating.facilityCount | Tenant Facility Count Limit | BC16 | Integer | (edition-defined) | Fixed at L2 | L2 |
-| tenant.operating.userCount | Tenant User Count Limit | BC16 | Integer | (edition-defined) | Fixed at L2 | L2 |
-| tenant.operating.storageLimit | Tenant Storage Limit | BC16 | Decimal | (edition-defined) | Fixed at L2 | L2 |
-| tenant.operating.auditRetention | Tenant Audit Retention Period | BC16 | Integer | (regulatory minimum) | Overridable to L3 | L3 |
+| tenant.operating.facilitycount | Tenant Facility Count Limit | BC16 | Integer | (edition-defined) | Fixed at L2 | L2 |
+| tenant.operating.usercount | Tenant User Count Limit | BC16 | Integer | (edition-defined) | Fixed at L2 | L2 |
+| tenant.operating.storagelimit | Tenant Storage Limit | BC16 | Decimal | (edition-defined) | Fixed at L2 | L2 |
+| tenant.operating.auditretention | Tenant Audit Retention Period | BC16 | Integer | (regulatory minimum) | Overridable to L3 | L3 |
 
 ### 3.5 Tenant Security Configuration
 
@@ -161,11 +161,11 @@ Tenant security configuration governs the security parameters of a tenant. The c
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| tenant.security.passwordPolicy | Tenant Password Policy | BC15 | Complex | (platform default) | Overridable to L3 | L3 |
-| tenant.security.mfaRequired | Tenant MFA Required | BC15 | Boolean | true | Overridable to L3 | L3 |
-| tenant.security.sessionTimeout | Tenant Session Timeout | BC15 | Integer | 30 (minutes) | Overridable to L3 | L3 |
-| tenant.security.breakGlassAllowed | Tenant Break-Glass Allowed | BC15 | Boolean | true | Overridable to L3 | L3 |
-| tenant.security.ipWhitelist | Tenant IP Whitelist | BC15 | Complex | (empty) | Overridable to L3 | L3 |
+| tenant.security.passwordpolicy | Tenant Password Policy | BC15 | Complex | (platform default) | Overridable to L3 | L3 |
+| tenant.security.mfarequired | Tenant MFA Required | BC15 | Boolean | true | Overridable to L3 | L3 |
+| tenant.security.sessiontimeout | Tenant Session Timeout | BC15 | Integer | 30 (minutes) | Overridable to L3 | L3 |
+| tenant.security.breakglassallowed | Tenant Break-Glass Allowed | BC15 | Boolean | true | Overridable to L3 | L3 |
+| tenant.security.ipwhitelist | Tenant IP Whitelist | BC15 | Complex | (empty) | Overridable to L3 | L3 |
 
 ---
 
@@ -234,12 +234,12 @@ Module default configuration governs the default parameter values for each modul
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| scheduling.appointment.defaultDuration | Default Appointment Duration | BC06 | Integer | 30 (minutes) | Overridable to L5 | L5 |
-| billing.invoice.defaultCurrency | Default Invoice Currency | BC07 | Enum | (tenant currency) | Overridable to L3 | L3 |
-| billing.invoice.defaultPaymentTerms | Default Payment Terms | BC07 | Integer | 30 (days) | Overridable to L3 | L3 |
-| pharmacy.dispensing.defaultUnits | Default Dispensing Units | BC05 | Enum | Metric | Overridable to L5 | L5 |
-| inventory.stock.defaultReorderPoint | Default Reorder Point | BC09 | Integer | 10 | Overridable to L5 | L5 |
-| notifications.dispatch.defaultChannel | Default Notification Channel | BC14 | Enum | InApp | Overridable to L7 | L7 |
+| scheduling.appointment.defaultduration | Default Appointment Duration | BC06 | Integer | 30 (minutes) | Overridable to L5 | L5 |
+| billing.invoice.defaultcurrency | Default Invoice Currency | BC07 | Enum | (tenant currency) | Overridable to L3 | L3 |
+| billing.invoice.defaultpaymentterms | Default Payment Terms | BC07 | Integer | 30 (days) | Overridable to L3 | L3 |
+| pharmacy.dispensing.defaultunits | Default Dispensing Units | BC05 | Enum | Metric | Overridable to L5 | L5 |
+| inventory.stock.defaultreorderpoint | Default Reorder Point | BC09 | Integer | 10 | Overridable to L5 | L5 |
+| notifications.dispatch.defaultchannel | Default Notification Channel | BC14 | Enum | InApp | Overridable to L7 | L7 |
 
 ### 5.3 Module Integration Configuration
 
@@ -422,9 +422,9 @@ Notification suppression configuration governs the rules under which notificatio
 
 | Configuration Key | Display Name | Module | Value Type | Default | Overridability | Layer |
 |---|---|---|---|---|---|---|
-| notification.suppression.optOut | Patient Opt-Out | BC14 | Boolean | false | Overridable to L7 | L7 |
-| notification.suppression.inactivePatient | Inactive Patient Suppression | BC14 | Boolean | true | Overridable to L3 | L3 |
-| notification.suppression.deceasedPatient | Deceased Patient Suppression | BC14 | Boolean | true | Fixed at L1 | L1 |
+| notification.suppression.optout | Patient Opt-Out | BC14 | Boolean | false | Overridable to L7 | L7 |
+| notification.suppression.inactivepatient | Inactive Patient Suppression | BC14 | Boolean | true | Overridable to L3 | L3 |
+| notification.suppression.deceasedpatient | Deceased Patient Suppression | BC14 | Boolean | true | Fixed at L1 | L1 |
 
 ### 8.5 Notification Audit Configuration
 

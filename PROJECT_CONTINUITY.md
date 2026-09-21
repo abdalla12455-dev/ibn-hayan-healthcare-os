@@ -8171,3 +8171,178 @@ key catalogue and validation contracts, followed by authorized
 API integration and persistence under a separately approved scope.
 
 ---
+
+---
+
+## Canonical Configuration Key Catalogue Foundation (2026-09-19)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Development branch: feature/configuration-catalogue-v1
+
+Verified pre-task commit:
+31dabd5cfd36ed8b209f442839736ad2eb9f196f
+
+The branch was created from the verified main branch after
+the successful merge of PR #34.
+
+The previous Configuration precedence implementation
+remains preserved.
+
+### Completed implementation
+
+Extended the existing packages/configuration package with
+a canonical configuration key catalogue foundation.
+
+Implemented:
+
+- Registration of trusted configuration key definitions.
+- Key naming validation using lowercase ASCII letters and digits.
+- A minimum of three dot-separated key segments.
+- Rejection of duplicate registrations and unknown keys.
+- Configuration key metadata and schema registration.
+- Default-value validation using Zod.
+- Runtime checks for string, integer, decimal, and boolean types.
+- Maximum override-layer enforcement through the existing resolver.
+- Rejection of retired keys during resolution.
+- Catalogue-based public configuration resolution.
+- Removal of the direct resolver export from the package entrypoint.
+- Regression tests covering public API access, key naming,
+  value types, registration, and configuration resolution.
+- Correction of 26 distinct mixed-case key examples in the
+  canonical Configuration domain documentation.
+
+The existing eight-layer precedence engine was preserved.
+
+No actual healthcare configuration keys were registered.
+
+No API endpoint, management screen, database table, migration,
+or new authorization permission was introduced.
+
+### Files created
+
+- packages/configuration/src/catalogue/catalogue.ts
+- packages/configuration/src/catalogue/catalogue.spec.ts
+
+### Files modified
+
+- packages/configuration/package.json
+- packages/configuration/src/index.ts
+- packages/configuration/src/precedence/resolve.spec.ts
+- download/docs/03_DOMAIN/CONFIGURATION.md
+- PROJECT_CONTINUITY.md
+
+Files deleted: none.
+
+### Validation
+
+Configuration unit tests: 44 passed, 0 failed.
+
+Configuration typecheck: PASS.
+
+Configuration build: PASS.
+
+Full project typecheck: PASS.
+
+Full project lint: PASS.
+
+Full project unit tests: PASS.
+
+Web production build: PASS.
+
+Built package runtime import: PASS.
+
+Catalogue resolution and unknown-key rejection: PASS.
+
+Lowercase naming and public API checks: PASS.
+
+Git diff --check: PASS.
+
+No production deployment or database modification was performed.
+
+### Architectural boundaries and unfinished work
+
+The catalogue is a local, trusted-code registration foundation,
+not a complete configuration management service.
+
+The catalogue does not independently authorize callers or
+verify tenant, organisation, facility, department, care-team,
+user, or session ownership.
+
+Its public entrypoint no longer exports the direct resolver.
+Internal source imports are not an authorization boundary.
+
+Primitive runtime type checks are implemented, but canonical
+enum, reference, and complex-value contracts remain incomplete.
+
+Referential, semantic, contextual, and regulatory validation
+remain deferred.
+
+The catalogue does not implement database persistence,
+immutable version history, audit events, configuration
+change approval, rollback, or module integration.
+
+The catalogue's metadata is shallow-frozen. General-purpose
+deep immutability for arbitrary complex values and custom
+schemas has not been established by this implementation.
+
+Deprecated keys remain resolvable. Historical key-version
+lookup and deprecation lifecycle enforcement are unfinished.
+
+The current key naming decision requires lowercase ASCII
+letters and digits in all segments. Previously documented
+mixed-case examples were corrected in the canonical
+Configuration domain document.
+
+This stage does not rename any persisted configuration data.
+
+No configuration functionality may be exposed to users
+before authentication, authorization, tenant ownership,
+and appropriate audit controls are implemented.
+
+Existing clinical-safety checks must remain unchanged.
+
+### Git backup and recovery
+
+At the time of this entry, the catalogue work is present
+as uncommitted changes on feature/configuration-catalogue-v1.
+
+The latest verified committed base is:
+31dabd5cfd36ed8b209f442839736ad2eb9f196f
+
+No remote backup of this catalogue stage has yet been verified.
+
+Before resuming, inspect the Git remote, branch, working tree,
+local and remote commits, AGENTS.md, and PROJECT_CONTINUITY.md.
+
+Never discard or overwrite the current uncommitted changes.
+
+The previous Configuration foundation remains available in
+the verified main-branch history and its preserved feature branch.
+
+### Immediate next step
+
+Review all seven changed files, including this continuity entry.
+
+Verify that the naming documentation changes are limited
+to the approved Configuration key convention.
+
+Repeat relevant validation if implementation changes occur.
+
+Review staged contents for secrets and accidental deletions.
+
+Obtain explicit operator approval before committing or pushing.
+
+After an approved commit and push, verify that the complete
+local and remote branch SHAs match exactly.
+
+Do not claim that this stage is backed up on GitHub
+until that verification succeeds.
+
+The next implementation milestone requires a separate review
+of the remaining value-type contracts and the authoritative
+configuration service architecture.
+
+---
