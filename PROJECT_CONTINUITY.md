@@ -8346,3 +8346,160 @@ of the remaining value-type contracts and the authoritative
 configuration service architecture.
 
 ---
+
+---
+
+## Configuration Enum Value Contract Foundation (2026-09-21)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Development branch: feature/configuration-value-contracts-v1
+
+Verified pre-task commit:
+af6202ede653f0acfafc75880dace53a98620d9a
+
+The development branch was created from the verified main
+branch after PR #35 was merged.
+
+The existing configuration catalogue and eight-layer
+precedence engine remain preserved.
+
+### Completed implementation
+
+Extended the existing configuration catalogue with
+structural validation for the enum value type.
+
+Implemented:
+
+- Required non-empty lists of registered enum options.
+- Rejection of duplicate or empty options.
+- Validation of registered options against the key schema.
+- Rejection of defaults outside registered options.
+- Rejection of overrides outside registered options.
+- Rejection of numeric and other non-string raw enum values,
+  even when Zod could coerce them into permitted strings.
+- Rejection of values transformed into different options.
+- Validation of supplied overrides regardless of precedence.
+- Defensive copying and freezing of enum option lists.
+- Regression tests for valid resolution, invalid defaults,
+  invalid overrides, transformations, precedence, and
+  mutation of the original option list.
+
+The existing precedence engine was not modified.
+
+No real healthcare configuration keys were registered.
+
+### Files created, modified, and deleted
+
+Files created: none.
+
+Files modified:
+
+- packages/configuration/src/catalogue/catalogue.ts
+- packages/configuration/src/catalogue/catalogue.spec.ts
+- PROJECT_CONTINUITY.md
+
+Files deleted: none.
+
+### Validation results
+
+Configuration tests: 55 passed, 0 failed.
+
+Full project typecheck: PASS.
+
+Full project lint: PASS.
+
+Full project unit tests: PASS.
+
+Web production build: PASS.
+
+Configuration runtime build and import: PASS.
+
+Valid enum resolution: PASS.
+
+Numeric override rejection: PASS.
+
+Numeric default rejection: PASS.
+
+Enum option-list protection: PASS.
+
+Git diff --check: PASS.
+
+The validation results above were obtained before this
+documentation-only continuity update.
+
+No production deployment or database modification
+was performed.
+
+### Architectural decisions and remaining work
+
+Enum options are registered through trusted project code.
+
+The existing configuration catalogue remains the public
+entrypoint for configuration resolution.
+
+This milestone does not implement user-facing configuration
+registration, configuration management, or persistence.
+
+Reference and complex value-type contracts remain unfinished.
+
+Actor authorization, tenant ownership verification,
+referential validation, semantic validation, contextual
+validation, regulatory validation, audit integration,
+configuration approval, and version history remain unfinished.
+
+Structural enum validation is not an authorization or
+tenant-isolation mechanism.
+
+No existing authentication, authorization, clinical-safety,
+database, or API contracts were changed by this milestone.
+
+### Git and recovery state
+
+The Enum implementation and this continuity update are
+currently uncommitted on:
+
+feature/configuration-value-contracts-v1
+
+Latest verified committed base:
+af6202ede653f0acfafc75880dace53a98620d9a
+
+A remote backup of this Enum milestone has not yet
+been verified.
+
+Before resuming, inspect the current repository and
+working directory, Git remote, current branch, Git status,
+modified, deleted, ignored, staged, and untracked files,
+recent commits, AGENTS.md, and PROJECT_CONTINUITY.md.
+
+Fetch origin and check local and remote branch divergence
+before making further changes.
+
+Preserve all existing committed and uncommitted work.
+Do not reset, restore, clean, overwrite, or discard files.
+
+Do not rely on temporary backups or workspace snapshots
+as authoritative Git backups.
+
+### Immediate next step
+
+Review the exact three changed files.
+
+Check the implementation diff, documentation, secrets,
+unexpected files, and accidental deletions.
+
+Obtain explicit operator approval before staging,
+committing, or pushing the completed milestone.
+
+After an approved commit and push, retrieve the complete
+local and remote branch SHAs and verify they match exactly.
+
+Do not claim that the milestone is backed up on GitHub
+until commit, push, and SHA verification have succeeded.
+
+The next implementation milestone is a separate review
+of reference and complex configuration value contracts.
+
+---

@@ -36,6 +36,7 @@ export interface ConfigurationKeyRegistration
   readonly owningModule: string;
   readonly owningBoundedContext: string;
   readonly valueType: ConfigurationValueType;
+  readonly allowedValues?: readonly string[];
   readonly version: string;
   readonly status: ConfigurationKeyStatus;
   readonly ratifiedByAdr: string;
@@ -165,6 +166,35 @@ export function createConfigurationCatalogue(
       throw new Error('CONFIGURATION_DUPLICATE_KEY');
     }
 
+    // Enum values are registered by trusted module code.
+    // The declared list, not a permissive schema alone,
+    // is authoritative for the allowed values.
+    if (registration.valueType === 'enum') {
+      const allowed = registration.allowedValues;
+
+      if (
+        !Array.isArray(allowed)
+        || allowed.length === 0
+        || allowed.some(
+          value => typeof value !== 'string'
+            || value.trim().length === 0
+        )
+        || new Set(allowed).size !== allowed.length
+      ) {
+        throw new Error('CONFIGURATION_INVALID_ENUM_VALUES');
+      }
+
+      for (const value of allowed) {
+        const parsed = registration.valueSchema.safeParse(value);
+
+        if (!parsed.success || parsed.data !== value) {
+          throw new Error('CONFIGURATION_INVALID_ENUM_VALUES');
+        }
+      }
+    } else if (registration.allowedValues !== undefined) {
+      throw new Error('CONFIGURATION_INVALID_REGISTRATION');
+    }
+
     const parsedDefault =
       registration.valueSchema.safeParse(
         registration.defaultValue
@@ -181,10 +211,26 @@ export function createConfigurationCatalogue(
       throw new Error('CONFIGURATION_VALUE_TYPE_MISMATCH');
     }
 
+    if (
+      registration.valueType === 'enum'
+      && (
+        typeof registration.defaultValue !== 'string'
+        || !registration.allowedValues?.includes(
+          registration.defaultValue,
+        )
+        || parsedDefault.data !== registration.defaultValue
+      )
+    ) {
+      throw new Error('CONFIGURATION_VALUE_TYPE_MISMATCH');
+    }
+
     // Snapshot registration metadata. External changes to the
     // original registration object cannot replace its fields.
     const stored = Object.freeze({
       ...registration,
+      allowedValues: registration.allowedValues
+        ? Object.freeze([...registration.allowedValues])
+        : undefined,
       defaultValue: parsedDefault.data,
     });
 
@@ -236,15 +282,38 @@ export function createConfigurationCatalogue(
           continue;
         }
 
+        if (
+          definition.valueType === 'enum'
+          && (
+            typeof record.value !== 'string'
+            || !definition.allowedValues?.includes(
+              record.value,
+            )
+          )
+        ) {
+          throw new Error('CONFIGURATION_VALUE_TYPE_MISMATCH');
+        }
+
         const parsedValue = definition.valueSchema.safeParse(
           record.value,
         );
 
         if (
           parsedValue.success
-          && !matchesDeclaredPrimitiveType(
-            definition.valueType,
-            parsedValue.data,
+          && (
+            !matchesDeclaredPrimitiveType(
+              definition.valueType,
+              parsedValue.data,
+            )
+            || (
+              definition.valueType === 'enum'
+              && (
+                parsedValue.data !== record.value
+                || !definition.allowedValues?.includes(
+                  parsedValue.data as string,
+                )
+              )
+            )
           )
         ) {
           throw new Error('CONFIGURATION_VALUE_TYPE_MISMATCH');
