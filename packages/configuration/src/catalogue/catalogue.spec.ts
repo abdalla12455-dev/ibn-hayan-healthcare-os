@@ -402,3 +402,308 @@ test('numeric characters remain valid in lowercase keys', () => {
     true,
   );
 });
+
+
+test('enum registrations require declared values', () => {
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...registration,
+        valueType: 'enum',
+        defaultValue: 'en',
+        valueSchema: z.string(),
+      },
+    ]),
+    /CONFIGURATION_INVALID_ENUM_VALUES/,
+  );
+});
+
+test('enum registrations reject duplicate and empty options', () => {
+  for (const values of [
+    [],
+    ['en', 'en'],
+    ['en', ''],
+  ]) {
+    assert.throws(
+      () => createConfigurationCatalogue([
+        {
+          ...registration,
+          valueType: 'enum',
+          defaultValue: 'en',
+          valueSchema: z.string(),
+          allowedValues: values,
+        },
+      ]),
+      /CONFIGURATION_INVALID_ENUM_VALUES/,
+    );
+  }
+});
+
+test('enum defaults must belong to the registered options', () => {
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...registration,
+        valueType: 'enum',
+        defaultValue: 'fr',
+        valueSchema: z.string(),
+        allowedValues: ['en', 'ar'],
+      },
+    ]),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+});
+
+test('enum options must satisfy the declared schema', () => {
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...registration,
+        valueType: 'enum',
+        defaultValue: 'en',
+        valueSchema: z.enum(['en', 'ar']),
+        allowedValues: ['en', 'ar', 'fr'],
+      },
+    ]),
+    /CONFIGURATION_INVALID_ENUM_VALUES/,
+  );
+});
+
+test('enum resolution accepts registered options only', () => {
+  const enumCatalogue = createConfigurationCatalogue([
+    {
+      ...registration,
+      valueType: 'enum',
+      defaultValue: 'en',
+      valueSchema: z.string(),
+      allowedValues: ['en', 'ar'],
+    },
+  ]);
+
+  assert.equal(
+    enumCatalogue.resolve(key, context, []).value,
+    'en',
+  );
+
+  assert.equal(
+    enumCatalogue.resolve(
+      key,
+      context,
+      [override('ar')],
+    ).value,
+    'ar',
+  );
+
+  assert.throws(
+    () => enumCatalogue.resolve(
+      key,
+      context,
+      [override('fr')],
+    ),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+});
+
+test('higher priority cannot hide an invalid enum option', () => {
+  const enumCatalogue = createConfigurationCatalogue([
+    {
+      ...registration,
+      valueType: 'enum',
+      defaultValue: 'en',
+      valueSchema: z.string(),
+      allowedValues: ['en', 'ar'],
+    },
+  ]);
+
+  const lower = {
+    ...override('fr'),
+    layer: 3 as const,
+    scope: { tenantId: 'tenant-a' },
+  };
+
+  const higher = override('ar');
+
+  for (const records of [
+    [lower, higher],
+    [higher, lower],
+  ]) {
+    assert.throws(
+      () => enumCatalogue.resolve(key, context, records),
+      /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+    );
+  }
+});
+
+test('enum options cannot be changed after registration', () => {
+  const allowedValues = ['en', 'ar'];
+
+  const enumCatalogue = createConfigurationCatalogue([
+    {
+      ...registration,
+      valueType: 'enum',
+      defaultValue: 'en',
+      valueSchema: z.string(),
+      allowedValues,
+    },
+  ]);
+
+  allowedValues.push('fr');
+
+  assert.throws(
+    () => enumCatalogue.resolve(
+      key,
+      context,
+      [override('fr')],
+    ),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+
+  const metadata = enumCatalogue.getMetadata(key);
+
+  assert.equal(
+    Object.isFrozen(metadata?.allowedValues),
+    true,
+  );
+});
+
+
+test('enum rejects coerced numeric defaults and overrides', () => {
+  const definition = {
+    ...registration,
+    valueType: 'enum' as const,
+    defaultValue: '1',
+    valueSchema: z.coerce.string(),
+    allowedValues: ['1', '2'],
+  };
+
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...definition,
+        defaultValue: 1,
+      },
+    ]),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+
+  const catalogue = createConfigurationCatalogue([
+    definition,
+  ]);
+
+  assert.equal(
+    catalogue.resolve(key, context, []).value,
+    '1',
+  );
+
+  assert.equal(
+    catalogue.resolve(
+      key,
+      context,
+      [override('2')],
+    ).value,
+    '2',
+  );
+
+  assert.throws(
+    () => catalogue.resolve(
+      key,
+      context,
+      [override(1)],
+    ),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+});
+
+test('enum rejects values transformed into allowed options', () => {
+  const definition = {
+    ...registration,
+    valueType: 'enum' as const,
+    defaultValue: 'en',
+    valueSchema: z.string().trim(),
+    allowedValues: ['en', 'ar'],
+  };
+
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...definition,
+        defaultValue: ' en ',
+      },
+    ]),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+
+  const catalogue = createConfigurationCatalogue([
+    definition,
+  ]);
+
+  assert.throws(
+    () => catalogue.resolve(
+      key,
+      context,
+      [override(' en ')],
+    ),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+});
+
+test('enum rejects schema transformations between allowed options', () => {
+  const schema = z.string().transform(
+    value => value === 'en' ? 'ar' : value,
+  );
+
+  const catalogue = createConfigurationCatalogue([
+    {
+      ...registration,
+      valueType: 'enum',
+      defaultValue: 'ar',
+      valueSchema: schema,
+      allowedValues: ['ar'],
+    },
+  ]);
+
+  // The registered option "ar" itself is unchanged.
+  assert.equal(
+    catalogue.resolve(key, context, []).value,
+    'ar',
+  );
+
+  assert.throws(
+    () => catalogue.resolve(
+      key,
+      context,
+      [override('en')],
+    ),
+    /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+  );
+});
+
+test('a higher layer cannot hide a coerced enum value', () => {
+  const catalogue = createConfigurationCatalogue([
+    {
+      ...registration,
+      valueType: 'enum',
+      defaultValue: '1',
+      valueSchema: z.coerce.string(),
+      allowedValues: ['1', '2'],
+    },
+  ]);
+
+  const lower = {
+    ...override(1),
+    layer: 3 as const,
+    scope: { tenantId: 'tenant-a' },
+  };
+
+  const higher = override('2');
+
+  for (const records of [
+    [lower, higher],
+    [higher, lower],
+  ]) {
+    assert.throws(
+      () => catalogue.resolve(key, context, records),
+      /CONFIGURATION_VALUE_TYPE_MISMATCH/,
+    );
+  }
+});
