@@ -26,6 +26,10 @@ import {
 } from '../../infrastructure/transport/index.js';
 
 import { PlatformAdminAccessService } from './platform-admin-access.service.js';
+import {
+  PlatformAdminTenantsService,
+  type PlatformTenantList,
+} from './platform-admin-tenants.service.js';
 
 export interface PlatformAdminOverviewResponse {
   readonly administrator: {
@@ -52,6 +56,7 @@ export class PlatformAdminController {
   constructor(
     private readonly authService: AuthService,
     private readonly platformAccess: PlatformAdminAccessService,
+    private readonly tenantsService: PlatformAdminTenantsService,
   ) {}
 
   @Get('overview')
@@ -116,5 +121,67 @@ export class PlatformAdminController {
         displayName: authenticated.user.displayName,
       },
     };
+  }
+
+  /**
+   * Read-only platform-wide customer listing.
+   *
+   * The authenticated user identity comes exclusively from
+   * the existing server-side session.
+   *
+   * PlatformAdminTenantsService performs a fresh independent
+   * platform-grant check before reading customer records.
+   */
+  @Get('tenants')
+  @HttpCode(HttpStatus.OK)
+  @ApiSecurity('session')
+  @ApiOperation({
+    summary: 'List customers for an authorized platform administrator',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'A bounded list of registered platform customers.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'An authenticated session is required.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Platform administration access is not authorized.',
+  })
+  async listTenants(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<PlatformTenantList> {
+    res.setHeader('Cache-Control', 'no-store');
+
+    const authenticated = await this.authService.getSessionFromCookie(
+      readCookie(req, SESSION_COOKIE_NAME),
+      buildAuditContext(req),
+    );
+
+    if (authenticated === null) {
+      throw sessionRequired();
+    }
+
+    // Preserve the existing session-rotation behaviour.
+    if (authenticated.rotatedRawToken !== null) {
+      const isProduction = process.env['NODE_ENV'] === 'production';
+
+      const maxAge = authenticated.expiresAt.getTime() - Date.now();
+
+      res.cookie(
+        SESSION_COOKIE_NAME,
+        authenticated.rotatedRawToken,
+        buildSessionCookieOptions(isProduction, maxAge),
+      );
+    }
+
+    // Never accept user identity or platform authority from
+    // request parameters, tenant roles, or browser state.
+    return this.tenantsService.listForPlatformAdministrator(
+      authenticated.user.id,
+    );
   }
 }

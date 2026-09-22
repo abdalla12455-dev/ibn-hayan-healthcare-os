@@ -1097,3 +1097,179 @@ describe('Platform administration endpoint authorization', () => {
     await request(server).get(endpoint).set('Cookie', cookie).expect(401);
   });
 });
+
+describe('Platform administrator customer-list endpoint authorization', () => {
+  const endpoint = '/api/v1/platform-admin/tenants';
+
+  it('rejects unauthenticated requests without exposing customer data', async () => {
+    const response = await request(server).get(endpoint).expect(401);
+
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).not.toHaveProperty('items');
+  });
+
+  it('rejects a tenant user without an independent platform grant', async () => {
+    await bootstrapTestUser();
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    const response = await request(server)
+      .get(endpoint)
+      .set('Cookie', cookie)
+      .expect(403);
+
+    expect(response.body).not.toHaveProperty('items');
+    expect(JSON.stringify(response.body)).not.toContain(
+      TEST_TENANT_DISPLAY_NAME,
+    );
+  });
+
+  it('returns only approved customer fields for a platform administrator', async () => {
+    const user = await users.create({
+      email: TEST_EMAIL,
+      displayName: TEST_DISPLAY_NAME,
+    });
+
+    const hash = await passwordService.hash(TEST_PASSWORD);
+
+    await credentials.createCredential({
+      userId: user.id,
+      passwordHash: hash,
+      passwordChangedAt: new Date(),
+    });
+
+    await prisma.platformAdministrator.create({
+      data: {
+        userId: user.id,
+      },
+    });
+
+    const tenant = await tenants.create({
+      slug: TEST_TENANT_SLUG,
+      displayName: TEST_TENANT_DISPLAY_NAME,
+    });
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    const response = await request(server)
+      .get(endpoint)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.headers['cache-control']).toBe('no-store');
+
+    const responseBody: unknown = response.body;
+
+    if (
+      typeof responseBody !== 'object' ||
+      responseBody === null ||
+      !('items' in responseBody) ||
+      !Array.isArray(responseBody.items) ||
+      responseBody.items.length !== 1
+    ) {
+      throw new Error('Unexpected tenant-list response.');
+    }
+
+    const firstItem: unknown = responseBody.items[0];
+
+    if (
+      typeof firstItem !== 'object' ||
+      firstItem === null ||
+      !('createdAt' in firstItem) ||
+      typeof firstItem.createdAt !== 'string'
+    ) {
+      throw new Error('Invalid tenant creation timestamp.');
+    }
+
+    expect(new Date(firstItem.createdAt).toISOString()).toBe(
+      firstItem.createdAt,
+    );
+
+    expect(responseBody).toEqual({
+      items: [
+        {
+          id: tenant.id,
+          slug: TEST_TENANT_SLUG,
+          displayName: TEST_TENANT_DISPLAY_NAME,
+          status: 'active',
+          createdAt: firstItem.createdAt,
+        },
+      ],
+      hasMore: false,
+    });
+
+    const body = JSON.stringify(response.body);
+
+    expect(body).not.toContain(TEST_EMAIL);
+    expect(body).not.toContain(TEST_PASSWORD);
+    expect(body).not.toContain('passwordHash');
+    expect(body).not.toContain('tokenHash');
+    expect(body).not.toContain('memberships');
+  });
+
+  it('rejects a platform-only session after grant revocation', async () => {
+    const user = await users.create({
+      email: TEST_EMAIL,
+      displayName: TEST_DISPLAY_NAME,
+    });
+
+    const hash = await passwordService.hash(TEST_PASSWORD);
+
+    await credentials.createCredential({
+      userId: user.id,
+      passwordHash: hash,
+      passwordChangedAt: new Date(),
+    });
+
+    await prisma.platformAdministrator.create({
+      data: {
+        userId: user.id,
+      },
+    });
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    await prisma.platformAdministrator.update({
+      where: {
+        userId: user.id,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    const response = await request(server)
+      .get(endpoint)
+      .set('Cookie', cookie)
+      .expect(401);
+
+    expect(response.body).not.toHaveProperty('items');
+  });
+});

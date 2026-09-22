@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/index.js';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
 
 import { PlatformAdminAccessService } from './platform-admin-access.service.js';
+import { PlatformAdminTenantsService } from './platform-admin-tenants.service.js';
 import { PlatformAdminController } from './platform-admin.controller.js';
 
 /**
@@ -15,6 +16,6 @@ import { PlatformAdminController } from './platform-admin.controller.js';
 @Module({
   imports: [AuthModule, DatabaseModule],
   controllers: [PlatformAdminController],
-  providers: [PlatformAdminAccessService],
+  providers: [PlatformAdminAccessService, PlatformAdminTenantsService],
 })
 export class PlatformAdminModule {}

@@ -9232,3 +9232,109 @@ Keep Clinic Admin and Platform Super Admin
 authorization boundaries separate.
 
 ---
+
+---
+
+## Platform Administrator Tenant Read API V1
+
+### Repository and branch
+
+Repository:
+abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch:
+feature/configuration-service-foundation-v1
+
+Starting verified commit:
+2315cacfeed35043af64cd90ea1773234242532a
+
+Pull request: 39 (Draft).
+
+### Completed work
+
+- Implemented the read-only platform tenant service.
+- Added GET /api/v1/platform-admin/tenants.
+- Registered the service in the existing platform module.
+- Reused the existing authenticated session.
+- Required an independent active platform grant.
+- Limited the response to 25 customer records.
+- Returned only the approved tenant fields.
+- Added eight service regression tests.
+- Added four HTTP authorization and response tests.
+- Preserved the existing platform overview.
+- Preserved Clinic Admin authorization and workflows.
+
+### Security
+
+The authenticated user ID originates from the
+verified server-side session.
+
+Tenant roles do not independently grant platform access.
+
+Unauthorized requests must not return tenant data.
+
+The endpoint is read-only and uses no-store caching.
+
+No clinical, patient, credential, or membership
+records are returned.
+
+No tenant creation, modification, or deletion
+operations were introduced.
+
+### Files modified
+
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin.module.ts
+- apps/api/test/auth/auth.e2e.auth-spec.ts
+- PROJECT_CONTINUITY.md
+
+### Files created
+
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.ts
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.spec.ts
+
+Files deleted: none.
+
+### Validation
+
+Local typecheck: passed.
+Local lint: passed.
+Local project tests: passed.
+Local API build: passed.
+Tenant service regression tests: 8 passed.
+
+The HTTP integration tests require PostgreSQL 17
+validation through GitHub Actions.
+
+The new tenant endpoint is not yet connected
+to the Platform Super Admin frontend.
+
+### Recovery
+
+Starting verified commit:
+2315cacfeed35043af64cd90ea1773234242532a
+
+Before resuming, verify Git status, Git remote,
+the current branch, local and remote SHAs,
+AGENTS.md, ENGINEERING_STANDARDS.md,
+and PROJECT_CONTINUITY.md.
+
+The completed commit and push must be verified
+against the remote branch before claiming backup.
+
+### Immediate next step
+
+Verify the GitHub Actions PostgreSQL 17
+authentication and authorization tests.
+
+Then introduce the shared tenant-list API contract
+and connect the existing Platform Super Admin
+frontend to the real read-only endpoint.
+
+Preserve tenant isolation and the independent
+Platform Super Admin authorization boundary.
+
+Do not merge PR 39 or deploy to production
+before the integration is fully validated.
+
+---
