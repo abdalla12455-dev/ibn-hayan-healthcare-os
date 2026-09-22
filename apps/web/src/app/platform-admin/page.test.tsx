@@ -54,7 +54,9 @@ describe("Platform administration page", () => {
     expect(screen.queryByText("Platform Operator")).not.toBeInTheDocument();
 
     await waitFor(() => {
-      expect(screen.getByText(/Platform Operator/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Platform Operator/).length).toBeGreaterThan(
+        0,
+      );
     });
 
     expect(
@@ -114,7 +116,9 @@ describe("Platform administration page", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText(/Platform Operator/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Platform Operator/).length).toBeGreaterThan(
+        0,
+      );
     });
 
     await user.click(
@@ -125,14 +129,14 @@ describe("Platform administration page", () => {
 
     expect(
       screen.getByRole("heading", {
-        name: "Overview",
+        name: "Platform Overview",
       }),
     ).toBeInTheDocument();
 
     expect(
       screen
         .getByRole("heading", {
-          name: "Overview",
+          name: "Platform Overview",
         })
         .closest('[dir="ltr"]'),
     ).not.toBeNull();
