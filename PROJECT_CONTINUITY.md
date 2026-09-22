@@ -8662,3 +8662,122 @@ reference-validation contract and its integration with
 existing tenant-scoped repositories and authorization.
 
 ---
+
+---
+
+## Configuration Reference Validation Contract (2026-09-22)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch: feature/configuration-reference-validation-v1
+
+Verified base commit:
+41d7d1e100827800a6508c39a65374cc17eb5859
+
+### Completed work
+
+Added an isolated configuration-record reference
+validation contract and seven unit tests.
+
+The contract accepts an explicit positive result from
+a supplied lookup and rejects missing validators,
+negative results, repository failures, invalid inputs,
+and non-boolean results.
+
+The existing configuration catalogue continues to
+block reference-key registration.
+
+The precedence engine, authentication, authorization,
+database schema, and application workflows are unchanged.
+
+### Security findings
+
+An intentionally unsafe lookup returning true can cause
+the isolated validation contract to accept a reference
+belonging to another tenant.
+
+This demonstrates that the contract itself does not
+establish tenant ownership or authenticate the lookup.
+
+A successful result from the isolated contract must
+not be treated as proof of authorization or tenant
+isolation.
+
+The contract is not connected to a real configuration
+repository, authenticated service, or production workflow.
+
+The existing reference-registration guard must remain
+enabled until the complete trusted integration is
+implemented and independently tested.
+
+### Validation
+
+Configuration typecheck: PASS.
+Configuration build: PASS.
+Configuration tests: 64 passed, 0 failed.
+
+Security investigation:
+- Unsafe lookup returning true: ACCEPTED.
+- Missing validator: REJECTED.
+- Negative lookup result: REJECTED.
+
+These results establish contract behaviour only.
+They do not establish real database or tenant isolation.
+
+### Files created
+
+- packages/configuration/src/references/reference-validation.ts
+- packages/configuration/src/references/reference-validation.spec.ts
+
+### Files modified
+
+- packages/configuration/package.json
+- PROJECT_CONTINUITY.md
+
+Files deleted: none.
+
+### Current Git and recovery state
+
+This implementation and documentation update remain
+uncommitted on feature/configuration-reference-validation-v1.
+
+Latest verified committed base:
+41d7d1e100827800a6508c39a65374cc17eb5859
+
+No verified GitHub backup of this milestone exists yet.
+
+Before resuming, inspect AGENTS.md, PROJECT_CONTINUITY.md,
+Git status, the repository remote, current branch,
+recent commits, and local/remote divergence.
+
+Preserve all committed and uncommitted work.
+
+Do not discard, reset, restore, clean, or overwrite
+existing project changes.
+
+### Immediate next step
+
+Review the four changed and new files.
+
+Run full project validation and review the security
+boundary and public package API.
+
+Obtain explicit operator authorization before staging,
+committing, or pushing the completed contract milestone.
+
+After an approved push, compare complete local and
+remote branch SHAs before claiming a verified backup.
+
+The next substantive milestone is the authoritative
+Configuration storage and service architecture,
+including trusted authentication context, tenant-scoped
+repository access, authorization, reference validation,
+and audit integration.
+
+Do not activate reference-key registration before the
+complete security integration has been implemented
+and validated.
+
+---
