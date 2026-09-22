@@ -19,18 +19,19 @@
  * in subsequent batches alongside their respective vertical slices.
  */
 
-export const CONTRACTS_PACKAGE_VERSION = '0.0.0' as const;
+export const CONTRACTS_PACKAGE_VERSION = "0.0.0" as const;
 
-export const CONTRACTS_PACKAGE_NAME = '@ibn-hayan/contracts' as const;
+export const CONTRACTS_PACKAGE_NAME = "@ibn-hayan/contracts" as const;
 
-export * from './health/index.js';
-export * from './auth/index.js';
-export * from './context/index.js';
-export * from './authorization/index.js';
-export * from './role-preview/index.js';
-export * from './clinic-admin/index.js';
-export * from './appointments/index.js';
-export * from './workforce/index.js';
-export * from './encounters/index.js';
-export * from './patients/index.js';
-export * from './clinical-notes/index.js';
+export * from "./health/index.js";
+export * from "./auth/index.js";
+export * from "./context/index.js";
+export * from "./authorization/index.js";
+export * from "./role-preview/index.js";
+export * from "./clinic-admin/index.js";
+export * from "./platform-admin/index.js";
+export * from "./appointments/index.js";
+export * from "./workforce/index.js";
+export * from "./encounters/index.js";
+export * from "./patients/index.js";
+export * from "./clinical-notes/index.js";
