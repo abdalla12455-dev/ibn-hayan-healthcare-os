@@ -308,6 +308,104 @@ describe('18. User without active membership returns the same generic 401', () =
   });
 });
 
+describe('Platform-only administrator authentication', () => {
+  async function createPlatformOnlyUser(
+    revokedAt: Date | null = null,
+  ): Promise<string> {
+    const user = await users.create({
+      email: TEST_EMAIL,
+      displayName: TEST_DISPLAY_NAME,
+    });
+
+    const hash = await passwordService.hash(TEST_PASSWORD);
+
+    await credentials.createCredential({
+      userId: user.id,
+      passwordHash: hash,
+      passwordChangedAt: new Date(),
+    });
+
+    await prisma.platformAdministrator.create({
+      data: {
+        userId: user.id,
+        revokedAt,
+      },
+    });
+
+    return user.id;
+  }
+
+  it('allows an active platform administrator without tenant membership', async () => {
+    await createPlatformOnlyUser();
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD })
+      .expect(200);
+
+    const parsed = SessionResponseSchema.safeParse(login.body);
+
+    expect(parsed.success).toBe(true);
+
+    if (parsed.success) {
+      expect(parsed.data.memberships).toEqual([]);
+      expect(parsed.data.activeTenantContext).toBeNull();
+    }
+
+    const cookie = extractSessionCookie(login);
+
+    expect(cookie).not.toBe('');
+
+    const session = await request(server)
+      .get('/api/v1/auth/session')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const sessionParsed = SessionResponseSchema.safeParse(session.body);
+
+    expect(sessionParsed.success).toBe(true);
+
+    if (sessionParsed.success) {
+      expect(sessionParsed.data.memberships).toEqual([]);
+    }
+  });
+
+  it('rejects login when the platform grant was revoked', async () => {
+    await createPlatformOnlyUser(new Date());
+
+    const response = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD })
+      .expect(401);
+
+    expect(AuthErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it('rejects an existing platform-only session after grant revocation', async () => {
+    const userId = await createPlatformOnlyUser();
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    await prisma.platformAdministrator.update({
+      where: { userId },
+      data: { revokedAt: new Date() },
+    });
+
+    await request(server)
+      .get('/api/v1/auth/session')
+      .set('Cookie', cookie)
+      .expect(401);
+  });
+});
+
 describe('19. Successful login sets an HttpOnly cookie', () => {
   it('sets a cookie with HttpOnly and the session name', async () => {
     await bootstrapTestUser();
