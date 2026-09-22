@@ -20,6 +20,7 @@ export function PlatformAdminVisualPreview() {
 
       <PlatformAdminOverviewView
         displayName={lang === "ar" ? "معاينة التصميم" : "Design Preview"}
+        tenantState={{ kind: "preview" }}
         lang={lang}
         dir={dir}
         signingOut={false}

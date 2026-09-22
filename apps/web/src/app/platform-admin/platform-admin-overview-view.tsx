@@ -2,6 +2,8 @@
 
 import type { ReactElement } from "react";
 
+import type { PlatformTenantList } from "@ibn-hayan/contracts";
+
 import { BrandMark } from "@/components/marketing/brand-mark";
 import { LanguageSwitch } from "@/components/marketing/language-switch";
 
@@ -9,8 +11,19 @@ import type { Language, Direction } from "@/components/i18n/language-context";
 
 import { PLATFORM_ADMIN_COPY } from "./platform-admin-copy";
 
+export type PlatformTenantViewState =
+  | { readonly kind: "preview" }
+  | { readonly kind: "loading" }
+  | {
+      readonly kind: "ready";
+      readonly data: PlatformTenantList;
+    }
+  | { readonly kind: "error" };
+
 export interface PlatformAdminOverviewViewProps {
   readonly displayName: string;
+  readonly tenantState: PlatformTenantViewState;
+  readonly onRetryTenants?: () => void;
   readonly lang: Language;
   readonly dir: Direction;
   readonly signingOut: boolean;
@@ -37,8 +50,18 @@ const LABELS = {
       "المرضى الجدد",
     ],
     unavailable: "بانتظار ربط البيانات",
-    organisations: "نشاط المؤسسات الأخير",
-    organisationName: "اسم المؤسسة",
+    organisations: "الجهات المشتركة الأخيرة",
+    tenantSlug: "المعرّف",
+    registeredAt: "تاريخ التسجيل",
+    tenantActive: "نشطة",
+    tenantSuspended: "معلّقة",
+    tenantLoading: "جارٍ تحميل بيانات الجهات المشتركة…",
+    tenantError: "تعذّر تحميل بيانات الجهات المشتركة.",
+    tenantEmpty: "لا توجد جهات مشتركة مسجلة حالياً.",
+    tenantPreview: "المعاينة لا تعرض بيانات حقيقية.",
+    tenantMore: "توجد جهات إضافية لم تُعرض بعد.",
+    tenantRetry: "إعادة المحاولة",
+    organisationName: "الجهة المشتركة",
     type: "النوع",
     status: "الحالة",
     region: "المنطقة",
@@ -87,8 +110,18 @@ const LABELS = {
       "New Patients",
     ],
     unavailable: "Awaiting data integration",
-    organisations: "Recent Organisations",
-    organisationName: "Organisation Name",
+    organisations: "Recent Customers",
+    tenantSlug: "Identifier",
+    registeredAt: "Registration Date",
+    tenantActive: "Active",
+    tenantSuspended: "Suspended",
+    tenantLoading: "Loading registered customers…",
+    tenantError: "Unable to load registered customers.",
+    tenantEmpty: "No registered customers are available.",
+    tenantPreview: "The preview does not display real data.",
+    tenantMore: "Additional customers are not displayed yet.",
+    tenantRetry: "Retry",
+    organisationName: "Customer Name",
     type: "Type",
     status: "Status",
     region: "Region",
@@ -154,6 +187,8 @@ function NavigationIcon({ index }: { readonly index: number }): ReactElement {
 
 export function PlatformAdminOverviewView({
   displayName,
+  tenantState,
+  onRetryTenants,
   lang,
   dir,
   signingOut,
@@ -321,15 +356,14 @@ export function PlatformAdminOverviewView({
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[650px] text-sm">
+                    <table className="w-full min-w-[580px] text-sm">
                       <thead className="bg-[#f4f7fa] text-[#475569]">
                         <tr>
                           {[
                             labels.organisationName,
-                            labels.type,
+                            labels.tenantSlug,
                             labels.status,
-                            labels.region,
-                            labels.activity,
+                            labels.registeredAt,
                           ].map((heading) => (
                             <th
                               key={heading}
@@ -343,17 +377,88 @@ export function PlatformAdminOverviewView({
                       </thead>
 
                       <tbody>
-                        <tr>
-                          <td
-                            colSpan={5}
-                            className="px-5 py-12 text-center text-sm leading-7 text-[#64748b]"
-                          >
-                            {labels.emptyOrganisations}
-                          </td>
-                        </tr>
+                        {tenantState.kind === "ready" &&
+                          tenantState.data.items.map((tenant) => (
+                            <tr
+                              key={tenant.id}
+                              className={`border-t ${BORDER}`}
+                            >
+                              <td className="px-4 py-4 font-medium">
+                                {tenant.displayName}
+                              </td>
+
+                              <td
+                                dir="ltr"
+                                className="px-4 py-4 text-start text-[#64748b]"
+                              >
+                                {tenant.slug}
+                              </td>
+
+                              <td className="px-4 py-4">
+                                <span
+                                  className={
+                                    tenant.status === "active"
+                                      ? "rounded-md bg-emerald-50 px-2 py-1 text-emerald-800"
+                                      : "rounded-md bg-amber-50 px-2 py-1 text-amber-800"
+                                  }
+                                >
+                                  {tenant.status === "active"
+                                    ? labels.tenantActive
+                                    : labels.tenantSuspended}
+                                </span>
+                              </td>
+
+                              <td className="px-4 py-4 text-[#64748b]">
+                                {new Intl.DateTimeFormat(
+                                  lang === "ar" ? "ar-IQ" : "en-GB",
+                                  {
+                                    dateStyle: "medium",
+                                    timeZone: "UTC",
+                                  },
+                                ).format(new Date(tenant.createdAt))}
+                              </td>
+                            </tr>
+                          ))}
+
+                        {(tenantState.kind !== "ready" ||
+                          tenantState.data.items.length === 0) && (
+                          <tr>
+                            <td
+                              colSpan={4}
+                              className="px-5 py-12 text-center text-sm leading-7 text-[#64748b]"
+                            >
+                              <div role="status">
+                                {tenantState.kind === "preview"
+                                  ? labels.tenantPreview
+                                  : tenantState.kind === "loading"
+                                    ? labels.tenantLoading
+                                    : tenantState.kind === "error"
+                                      ? labels.tenantError
+                                      : labels.tenantEmpty}
+                              </div>
+
+                              {tenantState.kind === "error" &&
+                                onRetryTenants !== undefined && (
+                                  <button
+                                    type="button"
+                                    onClick={onRetryTenants}
+                                    className={`mt-3 rounded-lg border ${BORDER} px-4 py-2 text-sm font-medium text-[#173d53]`}
+                                  >
+                                    {labels.tenantRetry}
+                                  </button>
+                                )}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
+
+                  {tenantState.kind === "ready" && tenantState.data.hasMore && (
+                    <p className="border-t border-[#d8e0e8] px-5 py-3 text-sm text-[#64748b]">
+                      {labels.tenantMore}
+                    </p>
+                  )}
                 </section>
 
                 <section className={`rounded-lg border ${BORDER} bg-white p-5`}>

@@ -9338,3 +9338,123 @@ Do not merge PR 39 or deploy to production
 before the integration is fully validated.
 
 ---
+
+---
+
+## Platform Tenant Frontend Integration V1
+
+### Repository and branch
+
+Repository:
+abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch:
+feature/configuration-service-foundation-v1
+
+Starting verified commit:
+c9b4303e7deb5fcc84c7dec185ef50e21ad70ce1
+
+Pull request: 39 (Draft).
+
+### Completed work
+
+- Added the shared platform tenant-list data contract.
+- Added strict response validation with Zod.
+- Added the authenticated read-only tenant API client.
+- Connected the existing Platform Super Admin page
+  to the protected tenant-list endpoint.
+- Added actual customer names, identifiers, status,
+  and registration dates to the existing table.
+- Preserved Arabic RTL and English LTR support.
+- Implemented loading, empty, error, and retry states.
+- Preserved the development preview without real data.
+- Added contract, API client, and UI regression tests.
+- Corrected the unstable router test mock.
+- Corrected the React effect state-update issue.
+
+### Files modified
+
+- packages/contracts/src/platform-admin/index.ts
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- apps/web/src/app/platform-admin/platform-admin-overview-view.tsx
+- apps/web/src/app/platform-admin/visual-preview/platform-admin-visual-preview.tsx
+- PROJECT_CONTINUITY.md
+
+### Files created
+
+- packages/contracts/src/platform-admin/platform-tenants.schema.ts
+- packages/contracts/src/platform-admin/platform-tenants.schema.spec.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.spec.ts
+
+Files deleted: none.
+
+### Security and architecture
+
+The backend remains the authoritative platform
+authorization boundary.
+
+The frontend requests tenant data only after
+the authenticated platform overview succeeds.
+
+HTTP 401 and 403 responses prevent continued
+display of the protected administration workspace.
+
+The visual preview does not call the protected
+tenant-list API.
+
+No tenant creation, modification, or deletion
+operations were introduced.
+
+Clinic Admin permissions and workflows remain unchanged.
+
+Database schema and production data were not modified.
+
+### Validation
+
+Local project typecheck, lint, tests, and web build
+passed before this checkpoint.
+
+GitHub CI for the new commit remains pending.
+
+A structural security review and unit tests do not
+replace authenticated browser integration testing.
+
+The first 25 customers are displayed.
+The API indicates whether additional customers exist,
+but pagination is not yet implemented.
+
+Subscription, billing, patient, and booking statistics
+remain unconnected and must not be represented as
+real platform-wide metrics.
+
+### Recovery
+
+Verify Git status, remote, current branch,
+local and remote commit SHAs, AGENTS.md,
+ENGINEERING_STANDARDS.md, and PROJECT_CONTINUITY.md.
+
+Starting verified commit:
+c9b4303e7deb5fcc84c7dec185ef50e21ad70ce1
+
+The new commit SHA must be retrieved and compared
+with the remote branch SHA after pushing.
+
+### Immediate next step
+
+Verify GitHub CI for the new frontend integration.
+
+Test the authenticated platform workflow in a
+controlled development or isolated test environment.
+
+Verify tenant-list rendering, loading, retry,
+session expiry, authorization revocation,
+Arabic RTL, English LTR, and responsive layout.
+
+Then continue the platform customer-management workflow.
+
+Do not merge or deploy this milestone to production
+before the remaining integration checks are complete.
+
+---

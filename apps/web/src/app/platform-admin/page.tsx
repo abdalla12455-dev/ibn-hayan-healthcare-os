@@ -2,7 +2,10 @@
 
 import { PLATFORM_ADMIN_COPY } from "./platform-admin-copy";
 
-import { PlatformAdminOverviewView } from "./platform-admin-overview-view";
+import {
+  PlatformAdminOverviewView,
+  type PlatformTenantViewState,
+} from "./platform-admin-overview-view";
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
 
@@ -11,6 +14,8 @@ import { useRouter } from "next/navigation";
 import { useLanguage } from "@/components/i18n/language-context";
 
 import { getCsrfToken, logout } from "@/lib/api/auth/auth.client";
+
+import { getPlatformAdminTenants } from "@/lib/api/platform-admin/platform-tenants.client";
 
 import {
   getPlatformAdminOverview,
@@ -38,6 +43,12 @@ export default function PlatformAdminPage(): ReactElement {
   });
 
   const [attempt, setAttempt] = useState(0);
+
+  const [tenantAttempt, setTenantAttempt] = useState(0);
+
+  const [tenantState, setTenantState] = useState<PlatformTenantViewState>({
+    kind: "loading",
+  });
 
   const [signingOut, setSigningOut] = useState(false);
 
@@ -90,6 +101,58 @@ export default function PlatformAdminPage(): ReactElement {
       active = false;
     };
   }, [attempt, router]);
+
+  // Customer data is requested only after the protected
+  // platform overview confirms the authenticated identity.
+  useEffect(() => {
+    if (state.kind !== "ready") {
+      return;
+    }
+
+    let active = true;
+
+    void getPlatformAdminTenants()
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+
+        if (result.ok) {
+          setTenantState({
+            kind: "ready",
+            data: result.data,
+          });
+          return;
+        }
+
+        if (result.error.statusCode === 401) {
+          setState({ kind: "loading" });
+          router.replace("/login");
+          return;
+        }
+
+        if (result.error.statusCode === 403) {
+          setState({ kind: "denied" });
+          return;
+        }
+
+        setTenantState({ kind: "error" });
+      })
+      .catch(() => {
+        if (active) {
+          setTenantState({ kind: "error" });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [state.kind, tenantAttempt, router]);
+
+  function retryTenants(): void {
+    setTenantState({ kind: "loading" });
+    setTenantAttempt((previous) => previous + 1);
+  }
 
   function retry(): void {
     pendingRef.current = null;
@@ -169,6 +232,8 @@ export default function PlatformAdminPage(): ReactElement {
   return (
     <PlatformAdminOverviewView
       displayName={state.displayName}
+      tenantState={tenantState}
+      onRetryTenants={retryTenants}
       lang={lang}
       dir={dir}
       signingOut={signingOut}
