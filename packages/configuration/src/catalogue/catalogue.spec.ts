@@ -707,3 +707,32 @@ test('a higher layer cannot hide a coerced enum value', () => {
     );
   }
 });
+
+
+test('reference registration fails closed without validation', () => {
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...registration,
+        valueType: 'reference',
+        defaultValue: '550e8400-e29b-41d4-a716-446655440000',
+        valueSchema: z.string().uuid(),
+      },
+    ]),
+    /CONFIGURATION_REFERENCE_VALIDATION_UNAVAILABLE/,
+  );
+});
+
+test('reference registration cannot rely on a permissive schema', () => {
+  assert.throws(
+    () => createConfigurationCatalogue([
+      {
+        ...registration,
+        valueType: 'reference',
+        defaultValue: 'unverified-record',
+        valueSchema: z.string(),
+      },
+    ]),
+    /CONFIGURATION_REFERENCE_VALIDATION_UNAVAILABLE/,
+  );
+});
