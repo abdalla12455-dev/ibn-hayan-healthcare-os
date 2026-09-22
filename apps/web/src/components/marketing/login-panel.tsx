@@ -1,14 +1,14 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import { login, getSession } from '@/lib/api/auth/auth.client';
-import { useLanguage } from '@/components/i18n/language-context';
-import { getCopy } from '@/components/i18n/landing-copy';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Field } from '@/components/ui/field';
-import { StatusMessage } from '@/components/ui/status-message';
+import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { login, getSession } from "@/lib/api/auth/auth.client";
+import { useLanguage } from "@/components/i18n/language-context";
+import { getCopy } from "@/components/i18n/landing-copy";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field } from "@/components/ui/field";
+import { StatusMessage } from "@/components/ui/status-message";
 
 /**
  * Premium login panel — integrated into the landing hero.
@@ -50,15 +50,15 @@ import { StatusMessage } from '@/components/ui/status-message';
  *   check completes (when no session exists).
  */
 
-type LoginError = 'invalid' | 'network' | 'generic' | null;
+type LoginError = "invalid" | "network" | "generic" | null;
 
 export function LoginPanel() {
   const router = useRouter();
   const { lang, dir } = useLanguage();
   const copy = getCopy(lang);
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<LoginError>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +84,11 @@ export function LoginPanel() {
       const result = await getSession();
       if (cancelled) return;
       if (result.ok) {
-        router.replace('/dashboard');
+        router.replace(
+          result.data.memberships.length === 0
+            ? "/platform-admin"
+            : "/dashboard",
+        );
         return;
       }
       // No session — the form remains available. Focus the email
@@ -108,7 +112,9 @@ export function LoginPanel() {
     const result = await login({ email, password });
 
     if (result.ok) {
-      router.replace('/dashboard');
+      router.replace(
+        result.data.memberships.length === 0 ? "/platform-admin" : "/dashboard",
+      );
       return;
     }
 
@@ -117,21 +123,21 @@ export function LoginPanel() {
     // wrong password, disabled user, no active membership) — all
     // produce the same generic message.
     if (result.error.statusCode === 401) {
-      setError('invalid');
-    } else if (result.error.category === 'NETWORK_ERROR') {
-      setError('network');
+      setError("invalid");
+    } else if (result.error.category === "NETWORK_ERROR") {
+      setError("network");
     } else {
-      setError('generic');
+      setError("generic");
     }
     setLoading(false);
   }
 
   const errorMessage =
-    error === 'invalid'
+    error === "invalid"
       ? copy.errorInvalid
-      : error === 'network'
+      : error === "network"
         ? copy.errorNetwork
-        : error === 'generic'
+        : error === "generic"
           ? copy.errorGeneric
           : null;
 
@@ -168,7 +174,7 @@ export function LoginPanel() {
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
             aria-describedby="ih-login-email-help"
-            invalid={error === 'invalid'}
+            invalid={error === "invalid"}
           />
         </Field>
 
@@ -190,7 +196,7 @@ export function LoginPanel() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
             aria-describedby="ih-login-password-help"
-            invalid={error === 'invalid'}
+            invalid={error === "invalid"}
           />
         </Field>
 

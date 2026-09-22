@@ -300,6 +300,7 @@ jobs:
             pnpm --filter @ibn-hayan/observability... build
             cd apps/api
             pnpm test:context
+            pnpm test:auth
             pnpm test:database
             pnpm test:clinic-admin
             pnpm test:appointments

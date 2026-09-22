@@ -32,6 +32,7 @@ import {
   generateSessionTokenAndHash,
 } from './session-token.service.js';
 import { CsrfService } from './csrf.service.js';
+import { PlatformAdminAccessService } from '../platform-admin/platform-admin-access.service.js';
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_IDLE_TOUCH_INTERVAL_MS,
@@ -113,6 +114,7 @@ export class AuthService {
     @Inject(TENANT_ROLE_ASSIGNMENT_REPOSITORY)
     private readonly roleAssignments: TenantRoleAssignmentRepository,
     private readonly prisma: PrismaService,
+    private readonly platformAdminAccess: PlatformAdminAccessService,
     private readonly auditHelper: AuditHelperService,
     private readonly passwordService: PasswordService,
     private readonly sessionTokens: SessionTokenService,
@@ -229,13 +231,18 @@ export class AuthService {
       (m) => m.status === 'active',
     );
     if (activeMemberships.length === 0) {
-      await this.emitFailedLogin(
-        input.email,
-        'no_active_membership',
-        input.auditContext,
-        user.id,
-      );
-      throw invalidCredentials();
+      const hasPlatformGrant =
+        await this.platformAdminAccess.hasActivePlatformGrant(user.id);
+
+      if (!hasPlatformGrant) {
+        await this.emitFailedLogin(
+          input.email,
+          'no_active_membership',
+          input.auditContext,
+          user.id,
+        );
+        throw invalidCredentials();
+      }
     }
 
     // Create the session AND the audit outbox row in a single
@@ -247,12 +254,10 @@ export class AuthService {
     const expiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS);
     const { raw, hash } = generateSessionTokenAndHash(this.sessionTokens);
 
-    // Resolve the tenant for the first active membership (for
-    // audit chain scoping). The login event is tenant-scoped if
-    // the user has at least one active membership; otherwise it
-    // would be platform-scoped (but we already rejected that case
-    // above).
-    const firstMembership = activeMemberships[0]!;
+    // An independently authorized platform administrator may
+    // have no tenant membership. Such logins use platform audit
+    // scope rather than attributing activity to an unrelated tenant.
+    const loginTenantId = activeMemberships[0]?.tenantId ?? null;
 
     const session = await this.prisma.$transaction(async (tx) => {
       const row = await tx.authSession.create({
@@ -279,7 +284,7 @@ export class AuthService {
           action: 'authentication.login.succeeded',
           outcome: 'success',
           source: 'api',
-          tenantId: firstMembership.tenantId,
+          tenantId: loginTenantId,
           actorType: 'USER',
           actorId: user.id,
           sessionId: createdSession.id,
@@ -415,10 +420,15 @@ export class AuthService {
       (m) => m.status === 'active',
     );
     if (activeMemberships.length === 0) {
-      // No active memberships: the session is still valid, but the
-      // user has no tenancy. Return null without emitting an
-      // audit event (this is not a session-invalid condition).
-      return null;
+      // Platform-only sessions require a fresh authoritative grant
+      // check. Revoked grants cannot retain access through an
+      // existing session.
+      const hasPlatformGrant =
+        await this.platformAdminAccess.hasActivePlatformGrant(user.id);
+
+      if (!hasPlatformGrant) {
+        return null;
+      }
     }
 
     // Decide whether to touch, rotate, or do nothing.
