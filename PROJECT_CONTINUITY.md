@@ -8503,3 +8503,162 @@ The next implementation milestone is a separate review
 of reference and complex configuration value contracts.
 
 ---
+
+---
+
+## Configuration Reference Registration Safety (2026-09-22)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Development branch:
+feature/configuration-reference-contracts-v1
+
+Verified pre-task commit:
+645a99ebe19b622303f32af06186cabf22ced212
+
+The branch was created from the verified main branch
+after the successful merge of PR #36.
+
+The existing Configuration catalogue, strict Enum
+contract, and eight-layer precedence engine are preserved.
+
+### Completed implementation
+
+Added a temporary fail-closed registration guard
+for Configuration keys with valueType 'reference'.
+
+The catalogue rejects reference-key registration with:
+
+CONFIGURATION_REFERENCE_VALIDATION_UNAVAILABLE
+
+The guard prevents new reference keys from being
+registered through createConfigurationCatalogue until
+authoritative referential validation is implemented.
+
+Two regression tests were added:
+
+- Reference registration is rejected even when a
+  UUID-shaped default passes structural validation.
+- Reference registration is rejected when a permissive
+  string schema accepts an unverified reference.
+
+This is a temporary safety restriction, not a complete
+reference value-type contract.
+
+No real healthcare reference keys were registered.
+
+### Files created, modified, and deleted
+
+Files created: none.
+
+Files modified:
+
+- packages/configuration/src/catalogue/catalogue.ts
+- packages/configuration/src/catalogue/catalogue.spec.ts
+- PROJECT_CONTINUITY.md
+
+Files deleted: none.
+
+### Validation results
+
+Configuration typecheck: PASS.
+
+Configuration build: PASS.
+
+Configuration tests: 57 passed, 0 failed.
+
+Full project typecheck: PASS.
+
+Full project lint: PASS.
+
+Full project unit tests: PASS.
+
+Web production build: PASS.
+
+Git diff --check: PASS.
+
+Validation was completed before this documentation-only
+continuity update.
+
+### Architectural decisions and remaining work
+
+Reference-key registration remains blocked until
+authoritative reference validation is implemented.
+
+The current catalogue does not verify actual record
+existence, active status, ownership, or permitted scope.
+
+Structural validation of a reference identifier does not
+prove that the referenced record exists or is authorized.
+
+The future Configuration service must derive the active
+tenant and applicable scope from trusted authentication
+context and use existing scoped repository contracts.
+
+Referential validation must reject missing, inactive,
+archived, revoked, or out-of-scope references as applicable
+to the referenced entity type.
+
+Different reference types may require different validation
+contracts. Do not assume every reference is a provider,
+patient, or UUID.
+
+Authentication, authorization, tenant isolation, audit
+integration, persistence, semantic validation, contextual
+validation, and regulatory validation remain separate
+implementation responsibilities.
+
+The existing API, database schema, authorization rules,
+appointment workflows, and precedence engine were not
+modified by this milestone.
+
+No production deployment or production data modification
+was performed.
+
+### Git backup and recovery
+
+At the time of this entry, the reference protection and
+this continuity update are uncommitted on:
+
+feature/configuration-reference-contracts-v1
+
+Latest verified committed base:
+645a99ebe19b622303f32af06186cabf22ced212
+
+The current reference protection has not yet been
+verified as backed up on GitHub.
+
+Before resuming, inspect the repository, Git remote,
+current branch, Git status, staged and untracked files,
+recent commits, local and remote divergence, AGENTS.md,
+and PROJECT_CONTINUITY.md.
+
+Preserve all existing committed and uncommitted work.
+
+Do not reset, restore, clean, overwrite, or discard
+existing work without explicit operator approval.
+
+### Immediate next step
+
+Review the exact three changed files, including this
+continuity update.
+
+Verify the implementation diff, file scope, secrets,
+accidental deletions, and preservation of existing work.
+
+Obtain explicit operator approval before staging,
+committing, or pushing this milestone.
+
+After an approved commit and push, compare the complete
+local and remote branch SHAs.
+
+Do not claim that the milestone is backed up on GitHub
+until commit, push, and SHA verification have succeeded.
+
+The next implementation milestone is the authoritative
+reference-validation contract and its integration with
+existing tenant-scoped repositories and authorization.
+
+---

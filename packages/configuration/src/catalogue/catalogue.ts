@@ -162,6 +162,16 @@ export function createConfigurationCatalogue(
       throw new Error('CONFIGURATION_INVALID_REGISTRATION');
     }
 
+    // Reference values require authoritative verification
+    // of existence, status, ownership, and permitted scope.
+    // Until the backend validation service is integrated,
+    // reference keys must not be registered.
+    if (registration.valueType === 'reference') {
+      throw new Error(
+        'CONFIGURATION_REFERENCE_VALIDATION_UNAVAILABLE',
+      );
+    }
+
     if (definitions.has(registration.key)) {
       throw new Error('CONFIGURATION_DUPLICATE_KEY');
     }
