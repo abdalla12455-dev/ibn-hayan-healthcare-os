@@ -8781,3 +8781,81 @@ complete security integration has been implemented
 and validated.
 
 ---
+
+---
+
+## Engineering Standards Migration (2026-09-22)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch: feature/configuration-service-foundation-v1
+
+Verified starting commit:
+ddc1343f3c043e2b0ce799dac5a94d86d0314c10
+
+### Completed work
+
+Established ENGINEERING_STANDARDS.md as the primary
+engineering and repository-safety document.
+
+Preserved AGENTS.md as a compatibility entry point
+for existing repository references.
+
+Updated the engineering standards to document the
+terminal-based development workflow.
+
+Routine Git operations are authorized within requested
+development tasks, subject to repository safety,
+validation, file-scope review, and SHA verification.
+
+Destructive operations and production changes continue
+to require separate explicit approval.
+
+Existing historical records remain preserved.
+
+No application code, database schema, authentication,
+authorization, or UI implementation was changed.
+
+### Files
+
+Created:
+- ENGINEERING_STANDARDS.md
+
+Modified:
+- AGENTS.md
+- PROJECT_CONTINUITY.md
+
+Deleted: none.
+
+### Recovery
+
+The original AGENTS.md content was preserved in
+ENGINEERING_STANDARDS.md before the standards update.
+
+A protective local backup was created outside the
+repository.
+
+The current changes remain uncommitted at the time
+of this continuity update.
+
+The latest verified committed base is:
+ddc1343f3c043e2b0ce799dac5a94d86d0314c10
+
+Before resuming, verify the repository, remote,
+branch, Git status, recent commits, and local/remote
+divergence.
+
+### Immediate next step
+
+Review the documentation changes and verify that
+the updated engineering standards are internally
+consistent.
+
+Complete the normal validated Git backup workflow.
+
+Then continue the Platform Super Admin identity,
+backend authorization, and frontend implementation.
+
+---
