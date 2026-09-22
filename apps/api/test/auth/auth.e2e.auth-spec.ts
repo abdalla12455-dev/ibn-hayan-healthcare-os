@@ -1016,3 +1016,84 @@ describe('36. Non-login auth endpoints are not subjected to login throttle', () 
     }
   });
 });
+
+describe('Platform administration endpoint authorization', () => {
+  const endpoint = '/api/v1/platform-admin/overview';
+
+  it('rejects requests without an authenticated session', async () => {
+    await request(server).get(endpoint).expect(401);
+  });
+
+  it('rejects an authenticated tenant user without a platform grant', async () => {
+    await bootstrapTestUser();
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    await request(server).get(endpoint).set('Cookie', cookie).expect(403);
+  });
+
+  it('allows a platform administrator without tenant membership', async () => {
+    const user = await users.create({
+      email: TEST_EMAIL,
+      displayName: TEST_DISPLAY_NAME,
+    });
+
+    const passwordHash = await passwordService.hash(TEST_PASSWORD);
+
+    await credentials.createCredential({
+      userId: user.id,
+      passwordHash,
+      passwordChangedAt: new Date(),
+    });
+
+    await prisma.platformAdministrator.create({
+      data: {
+        userId: user.id,
+      },
+    });
+
+    const login = await request(server)
+      .post('/api/v1/auth/login')
+      .set('Origin', 'http://localhost:3000')
+      .send({
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+      })
+      .expect(200);
+
+    const cookie = extractSessionCookie(login);
+
+    const response = await request(server)
+      .get(endpoint)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(response.body).toEqual({
+      administrator: {
+        displayName: TEST_DISPLAY_NAME,
+      },
+    });
+
+    expect(response.headers['cache-control']).toBe('no-store');
+
+    await prisma.platformAdministrator.update({
+      where: {
+        userId: user.id,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    await request(server).get(endpoint).set('Cookie', cookie).expect(401);
+  });
+});
