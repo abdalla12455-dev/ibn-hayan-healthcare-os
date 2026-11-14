@@ -9458,3 +9458,98 @@ Do not merge or deploy this milestone to production
 before the remaining integration checks are complete.
 
 ---
+
+---
+
+## Local Platform Administrator Bootstrap and Audit Recovery (2026-11-14)
+
+### Verified repository baseline
+
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+- Development branch: feature/configuration-service-foundation-v1
+- Last verified pre-milestone commit: 11b6a8ad19b514cee8f0fea39c3bdd4b3c54e0fa
+- The local and remote branch matched before these changes.
+- This record does not claim a new Git commit or remote backup.
+
+### Completed work
+
+- Restored the isolated local PostgreSQL 17 development environment.
+- Verified connectivity to the application and audit databases.
+- Started the backend API and frontend successfully.
+- Created one local Platform Super Administrator identity with an
+  Argon2id password credential and an independent platform grant.
+- Created no Tenant, TenantMembership, or tenant role.
+- Added a development-only administrator bootstrap command.
+- Added a platform-specific audit action and bootstrap safety policy.
+- Recorded the initial platform grant in the transactional audit outbox.
+- Delivered three platform audit events: grant, successful login,
+  and session rotation.
+- Verified the three-event audit integrity chain successfully.
+- Verified the Arabic RTL and English LTR desktop admin layouts
+  through authenticated browser screenshots.
+- Confirmed that the empty customer list matches the empty tenant database.
+
+### Source files created
+
+- apps/api/src/scripts/platform-admin-bootstrap-dev.ts
+- apps/api/src/modules/platform-admin/platform-admin-bootstrap-policy.ts
+- apps/api/src/modules/platform-admin/platform-admin-bootstrap-policy.spec.ts
+- packages/observability/src/audit/platform-admin-action-code.spec.ts
+
+### Source files modified
+
+- apps/api/package.json
+- packages/observability/src/audit/action-codes.ts
+
+### Documentation
+
+- PROJECT_CONTINUITY.md updated in this milestone.
+
+Files deleted: none.
+
+### Validation
+
+- Platform administrator backend regression tests: passed.
+- New audit action tests: passed.
+- Typecheck, lint, and selected frontend tests: run during
+  this milestone's final validation.
+- Authenticated desktop layouts inspected in Arabic and English.
+- Audit recovery: 3 delivered, 0 pending, 0 delivery failures
+  at the time of the verified recovery check.
+- Platform audit integrity verification: passed, 3 events checked.
+- No production deployment or schema migration performed.
+
+### Known limitations and next checks
+
+- Mobile responsiveness has not been inspected in this milestone.
+- Browser console and network inspection are not yet recorded.
+- Session expiry, explicit revocation, and negative authorization
+  browser cases require additional integration checks.
+- The platform administrator overview contains placeholder metrics.
+- Customer listing currently has no registered tenants.
+- Pagination and customer-management operations are not implemented.
+- UI terminology must distinguish platform customer Tenants from
+  Organisations belonging to a Tenant.
+- Pending audit events may accumulate after future authenticated
+  operations until the dispatcher runs again.
+- No GitHub CI result is claimed for the uncommitted changes.
+
+### Recovery
+
+- Preserve the local Git working tree until committed and pushed.
+- Fetch the remote development branch before resuming work.
+- Restore only through a separately reviewed recovery procedure.
+- Post-bootstrap database backup: /Users/mike/.local/state/ibn-hayan/db-backups/20261114-232255-post-admin
+- Audit integrity keys are preserved separately outside Git.
+- Do not commit or expose local database dumps, HMAC keys, or passwords.
+- Local services: API port 3001 and web port 3000.
+
+### Immediate next step
+
+Review the complete source diff and all untracked files, check for
+secrets and accidental changes, commit only reviewed project files,
+push the current development branch to the correct origin, retrieve
+complete local and remote commit SHAs, and verify an exact match.
+
+Then complete remaining browser security, responsive, and
+authorization tests before proceeding with customer management.

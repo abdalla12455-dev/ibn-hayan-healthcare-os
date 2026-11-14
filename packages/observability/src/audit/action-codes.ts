@@ -158,6 +158,7 @@ export type FacilityContextActionCode =
 export const RBAC_ACTION_CODES = [
   'rbac.role.assigned',
   'rbac.role.assignment.failed',
+  'rbac.platform_administrator.granted',
 ] as const;
 
 export type RbacActionCode = (typeof RBAC_ACTION_CODES)[number];
@@ -450,7 +451,7 @@ export type AppointmentsActionCode =
 
 
 // ---------------------------------------------------------------------------
-// Provider Schedules (Workforce bounded context — BC10)
+// Provider Schedules (Workforce bounded context ï¿½ BC10)
 // ---------------------------------------------------------------------------
 
 /**
@@ -464,7 +465,7 @@ export type AppointmentsActionCode =
  * The `provider_schedules.created` event is emitted after a schedule
  * entry is created. The `provider_schedules.deleted` event is emitted
  * after a schedule entry is deleted. Metadata carries only
- * `{ endpoint, providerId, scheduleEntryId }` — stable identifiers
+ * `{ endpoint, providerId, scheduleEntryId }` ï¿½ stable identifiers
  * for traceability. No working hours, no patient data, no clinical
  * content (no PHI/PII).
  *
