@@ -174,8 +174,8 @@ documented in PROJECT_CONTINUITY.md.
 | Document | Purpose |
 |---|---|
 | `PROJECT_CONTINUITY.md` | Current project state, canonical commits, active branches, recovery checkpoints |
-| `docs/AI_AGENT_SAFETY_SKILL.md` | Historical recovery and repository-safety reference |
-| `docs/adr/` | Architecture Decision Records |
+| `AGENTS.md` | Repository entrypoint to engineering requirements |
+| `download/docs/12_ADR/` | Architecture Decision Records |
 | `.github/workflows/` | CI validation workflows |
 
 ## Escalation
@@ -190,3 +190,138 @@ If you encounter any of the following, **STOP immediately** and report to the hu
 - Any sign of a leaked secret (in a commit, in the working tree, in a log)
 
 **When in doubt, stop and ask.** The cost of asking is a few seconds. The cost of a wrong force-push or a leaked key is hours to days of recovery.
+
+## Specialized Engineering Controls
+
+These requirements consolidate the repository's former specialized
+development guidance. They apply alongside the critical invariants
+above and the approved architecture and product documentation.
+
+### Repository Inspection and Change Scope
+
+- Inspect the repository root, remote, current branch, recent commits,
+  staged changes, modified files, deleted files, untracked files,
+  ignored files, and local-versus-remote divergence before editing.
+- Fetch remote refs and confirm the working copy is not behind or
+  diverged from the intended development branch.
+- Read AGENTS.md, PROJECT_CONTINUITY.md, relevant Architecture
+  Decision Records, product specifications, and module documentation.
+- Verify the exact target role, interface, module, workflow, and
+  expected result before changing implementation.
+- Diagnose root causes before fixing defects.
+- Modify the established implementation in place. Do not create
+  duplicate routes, components, services, schemas, or competing flows.
+- Preserve existing features, architectural contracts, approved
+  designs, tenant isolation, and permission boundaries.
+- Avoid unrelated refactoring, dependency upgrades, file
+  regeneration, and lockfile changes.
+- Preserve all existing committed and uncommitted work.
+
+### Database and Multi-Tenant Integrity
+
+- Inspect Prisma schemas, migration history, data ownership,
+  canonical database documentation, and applicable ADRs first.
+- Maintain strict Tenant, Organisation, and Facility separation.
+- Verify ownership chains and use composite constraints where needed
+  to prevent cross-tenant or cross-organisation relationships.
+- Never weaken tenant isolation or authorization for convenience.
+- Reuse established identifiers, types, timestamps, relationships,
+  indexing conventions, and referential actions.
+- Keep domain data in its owning module: Patient for patient identity,
+  Workforce for provider and workforce identity, and Billing for
+  financial records.
+- Do not introduce fabricated domain entities or premature
+  references to modules that have not been implemented.
+- Preserve timestamps in UTC and configured facility timezones as
+  valid IANA identifiers.
+- For facility-local date workflows, missing facility timezone is
+  a configuration-required state, not permission to silently
+  substitute UTC, browser time, server time, or tenant timezone.
+- Prefer forward-only and non-destructive migrations.
+- Never reset databases, rewrite applied shared migrations, or
+  perform destructive data changes without explicit authorization.
+- Correct already-applied migrations through reviewed forward
+  migrations rather than rewriting applied history.
+- Validate Prisma schema, client generation, migration SQL,
+  constraints, referential actions, and PostgreSQL 17 behavior
+  where applicable.
+- Use only isolated synthetic database fixtures for destructive
+  integration tests. Never point test cleanup at operational data.
+
+### Authentication, Authorization, and Audit
+
+- Platform Super Admin is platform-scoped and independent of tenant
+  memberships and R09 or R13 tenant roles.
+- Clinic Admin remains tenant-, organisation-, and facility-scoped.
+- Never infer authority from browser-supplied identity, role,
+  membership, tenant, or facility identifiers.
+- Preserve existing authentication, session lifecycle, CSRF,
+  authorization, and audit contracts.
+- Preserve generic client-facing authorization denials and avoid
+  leaking internal grant or membership details.
+- Reuse the canonical audit infrastructure and approved event
+  catalogue rather than implementing competing audit stores.
+- Exclude credentials, raw tokens, cookies, private keys, and
+  clinical information from logs and audit metadata.
+- Treat test success as evidence for the tested controls only,
+  not as a security certification.
+
+### UI, Accessibility, and Language Direction
+
+- Identify the exact user role, route, tenant context, organisation,
+  facility, locale, and workflow before changing a screen.
+- Follow the approved DESIGN_BIBLE.md and existing design system.
+- Keep Clinic Admin and Platform Super Admin interfaces separate.
+- Preserve approved hierarchy, terminology, navigation, responsive
+  behavior, permissions, and error states.
+- Edit existing components rather than producing duplicate screens.
+- Maintain safe spacing on all viewport edges, including mobile
+  safe areas, dialogs, cards, tables, controls, and profile sections.
+- Verify text overflow, long Arabic and English labels, narrow
+  screens, and desktop/tablet/mobile layouts.
+- Support Arabic RTL and English LTR using semantic direction and
+  logical CSS properties, never by reversing text manually.
+- Represent unsupported, empty, loading, configuration-required,
+  and permission-denied states accurately.
+- Do not introduce interactive actions without a corresponding
+  verified backend, permission, and data contract.
+- Validate accessibility, browser console output, network requests,
+  role-specific workflows, and visual behavior where applicable.
+
+### Verification, Continuity, and Delivery
+
+- Run relevant typechecks, lint, tests, build, schema checks,
+  authorization tests, tenant-isolation tests, and browser reviews.
+- Distinguish failures introduced by the task from existing defects.
+- Never declare completion merely because code was written.
+- Update PROJECT_CONTINUITY.md after each coherent completed task:
+  record repository, branch, verified starting commit, current state,
+  files created/modified/deleted, decisions, validation results,
+  outstanding risks, next work, and recovery instructions.
+- Maintain AGENTS.md and PROJECT_CONTINUITY.md in the repository.
+- Stage only individually reviewed project files and inspect staged
+  changes for secrets, unrelated edits, and accidental deletions.
+- Use descriptive commits on the approved development branch.
+- After pushing, compare complete local, direct remote, and
+  remote-tracking commit SHAs. Do not claim a verified Git backup
+  without a successful commit, push, and exact SHA match.
+- Preserve a clean worktree or explicitly document unfinished files
+  when ending or resuming work.
+- On resumption, inspect Git and continuity before editing.
+- Report the outcome, repository, branch, modified files, validation,
+  commit and push status, exact SHAs, remaining risks, and next step.
+- Historical incident and recovery records remain available through
+  Git history and chronological continuity entries.
+
+### Documentation and Presentation Quality
+
+- Maintain a clear distinction between implemented capabilities,
+  planned modules, and experimental functionality.
+- Write product-facing documentation for engineering teams,
+  healthcare stakeholders, and implementation reviewers.
+- Keep historical recovery details separate from the primary
+  product introduction.
+- Do not claim features, certifications, operational readiness,
+  performance measurements, or team credentials without evidence.
+- Never rewrite Git history to change the historical development
+  record.

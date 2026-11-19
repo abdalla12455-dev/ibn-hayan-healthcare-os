@@ -1,6 +1,6 @@
 # PROJECT_CONTINUITY.md — Ibn Hayan Healthcare OS
 
-> **This document captures the canonical state of the Ibn Hayan project for cross-session continuity. Any AI agent resuming work on this project must read this file first, then `AGENTS.md`, then `docs/AI_AGENT_SAFETY_SKILL.md`.**
+> **Engineering continuity record. Before continuing development, review AGENTS.md, ENGINEERING_STANDARDS.md, this document, and the relevant architecture and module documentation. Verify the live Git state independently.**
 
 ## Repository
 
@@ -9663,3 +9663,53 @@ authorization tests before proceeding with customer management.
 - Continuity backup: stored under ~/.local/state/ibn-hayan/security-lab/audit-checkpoint.*.
 - Latest verified pre-task Git commit: cd2e7bb6b856d1cf06d545403ac3fb6db1c55d42.
 - Next: commit these four files, push the feature branch, compare full local and remote SHAs, and verify the resulting GitHub CI run.
+
+## 2026-11-19 — Engineering Documentation Consolidation
+
+### Repository and baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting commit: 9f9c3199ccdb269c9fd67b5bd5325da75c00199c.
+- GitHub Main CI run 146 passed for the starting commit.
+
+### Completed documentation changes
+- Consolidated specialized development, Git recovery, database,
+  tenant isolation, UI, RTL/LTR, and verification requirements into
+  ENGINEERING_STANDARDS.md.
+- Retained AGENTS.md as the lightweight engineering entrypoint.
+- Preserved the existing historical continuity records.
+- Created a professional repository README.md describing project
+  scope, verified foundations, architecture, and development status.
+- Retired five redundant, tool-specific documentation files after
+  creating verified external copies.
+- Historical file contents remain recoverable from Git history.
+
+### Created files
+- README.md
+
+### Modified files
+- ENGINEERING_STANDARDS.md
+- PROJECT_CONTINUITY.md
+
+### Retired files
+- docs/AI_AGENT_SAFETY_SKILL.md
+- .agents/skills/ibn-hayan-completion-git-proof/SKILL.md
+- .agents/skills/ibn-hayan-database-tenancy/SKILL.md
+- .agents/skills/ibn-hayan-implementation-guardian/SKILL.md
+- .agents/skills/ibn-hayan-ui-role-rtl/SKILL.md
+
+### Validation and scope
+- Documentation reference and backup checks required.
+- No runtime code, schema, migration, permission, or CI changes.
+- No application or audit database operations.
+- Historic continuity citations to retired paths describe their
+  previous existence and must remain unchanged.
+- CI for the new documentation commit remains to be verified.
+
+### Remaining risks and next step
+- Historical handover copies and captured tool outputs remain in
+  the repository; assess them separately before any archive cleanup.
+- Archived historical material is not a current feature inventory.
+- Review documentation diff, verify retained engineering controls,
+  commit and push the development branch, and compare exact SHAs.
+- Keep PR 39 unmerged until the separate full change review ends.
