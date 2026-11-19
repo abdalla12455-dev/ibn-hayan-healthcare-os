@@ -8,6 +8,8 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { PrismaService } from '../src/infrastructure/database/prisma.service.js';
 import { PasswordService } from '../src/modules/auth/password.service.js';
+import { AuditPrismaService } from '../src/modules/audit/audit-prisma.service.js';
+import { AuditDispatcherService } from '../src/modules/audit/audit-dispatcher.service.js';
 import { setupDatabaseTests } from './database/_pg-bootstrap.js';
 
 if (process.env['DATABASE_URL'] || process.env['AUDIT_DATABASE_URL']) {
@@ -139,6 +141,115 @@ async function expectDenied(cookie: string, status: 401 | 403) {
     expect(response.body).not.toHaveProperty('items');
     expect(response.body).not.toHaveProperty('administrator');
   }
+}
+
+async function verifyPersistedPlatformDecision(
+  actor: {
+    readonly user: {
+      readonly id: string;
+      readonly email: string;
+    };
+    readonly cookie: string;
+  },
+  action: 'authorization.decision.allowed' | 'authorization.decision.denied',
+  expectedOutcome: 'success' | 'denied',
+): Promise<void> {
+  const dispatcher = app.get(AuditDispatcherService);
+  const auditStore = app.get(AuditPrismaService);
+
+  // Deliver all pending events, using the existing dispatcher.
+  // No operational database or external audit store is used.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const cycle = await dispatcher.dispatchOnce({ batchSize: 100 });
+
+    expect(cycle.transientFailures).toBe(0);
+    expect(cycle.permanentFailures).toBe(0);
+    expect(cycle.lostLeases).toBe(0);
+
+    if (cycle.claimed === 0) {
+      break;
+    }
+  }
+
+  const persisted = await auditStore.auditEvent.findMany({
+    where: {
+      actorId: actor.user.id,
+      action,
+    },
+  });
+
+  expect(persisted).toHaveLength(URLS.length);
+
+  for (const url of URLS) {
+    const matching = persisted.filter(
+      (event) =>
+        (
+          event.metadata as {
+            endpoint?: string;
+          } | null
+        )?.endpoint === url,
+    );
+
+    expect(matching).toHaveLength(1);
+
+    expect(matching[0]).toMatchObject({
+      actorId: actor.user.id,
+      action,
+      tenantId: null,
+      scope: 'authorization',
+      outcome: expectedOutcome,
+      metadata: {
+        endpoint: url,
+        method: 'GET',
+      },
+    });
+
+    expect(matching[0]?.sessionId).toBeTruthy();
+
+    if (expectedOutcome === 'denied') {
+      expect(matching[0]?.reasonCode).toBe('platform_grant_required');
+    }
+  }
+
+  // A successfully delivered event must also be acknowledged
+  // in the transactional outbox.
+  const outbox = await db.auditOutboxEvent.findMany({
+    where: {
+      eventId: {
+        in: persisted.map((event) => event.eventId),
+      },
+    },
+    select: {
+      eventId: true,
+      deliveredAt: true,
+    },
+  });
+
+  expect(outbox).toHaveLength(URLS.length);
+
+  for (const record of outbox) {
+    expect(record.deliveredAt).not.toBeNull();
+  }
+
+  // Repeating a dispatch must not duplicate persisted events.
+  await dispatcher.dispatchOnce({ batchSize: 100 });
+
+  const persistedCount = await auditStore.auditEvent.count({
+    where: {
+      actorId: actor.user.id,
+      action,
+    },
+  });
+
+  expect(persistedCount).toBe(URLS.length);
+
+  const serialized = JSON.stringify(persisted, (_key, value: unknown) =>
+    typeof value === 'bigint' ? value.toString() : value,
+  );
+
+  expect(serialized).not.toContain(PASSWORD);
+  expect(serialized).not.toContain(actor.cookie);
+  expect(serialized).not.toContain(actor.user.email);
 }
 
 describe('Platform Admin HTTP security boundaries', () => {
@@ -336,6 +447,12 @@ describe('Platform Admin HTTP security boundaries', () => {
     expect(serialized).not.toContain(PASSWORD);
     expect(serialized).not.toContain(actor.cookie);
     expect(serialized).not.toContain(actor.user.email);
+
+    await verifyPersistedPlatformDecision(
+      actor,
+      'authorization.decision.allowed',
+      'success',
+    );
   });
 
   it('records denied platform access for a real Clinic Admin', async () => {
@@ -389,5 +506,11 @@ describe('Platform Admin HTTP security boundaries', () => {
     expect(serialized).not.toContain(PASSWORD);
     expect(serialized).not.toContain(actor.cookie);
     expect(serialized).not.toContain(actor.user.email);
+
+    await verifyPersistedPlatformDecision(
+      actor,
+      'authorization.decision.denied',
+      'denied',
+    );
   });
 });

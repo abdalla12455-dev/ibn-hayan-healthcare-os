@@ -9758,3 +9758,51 @@ authorization tests before proceeding with customer management.
 - Verified pre-task commit: 165ccea6088273eadf37933ff0780bbd146eaf8c.
 - Protective copies stored outside the repository under ~/.local/state/ibn-hayan/security-lab/.
 - Retrieve the new full local and remote commit SHAs from the completion report after the push.
+
+## 2026-11-19 — Platform Authorization Audit Delivery Regression
+
+### Repository and verified baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting local and remote SHA: faec3578069337b1673650690c4584b73679bda0.
+- GitHub Main CI run 148 succeeded on the starting commit.
+- PR #39 remains open and in draft state.
+
+### Completed work
+- Extended the existing Platform Admin HTTP security regression suite.
+- Verified that authorized and denied platform access events are emitted to the transactional audit outbox.
+- Invoked the existing audit dispatcher against isolated PostgreSQL test databases.
+- Verified corresponding events reach the dedicated audit store.
+- Checked event identity, actor, action, outcome, endpoint, method, session, and platform scope.
+- Verified outbox delivered-at acknowledgement and absence of duplicate persisted events after a repeat dispatch.
+- Checked persisted events do not contain the test password, cookie, or actor email.
+- Reused existing authenticated sessions without increasing login attempts.
+- Preserved Platform Super Admin and Clinic Admin authorization separation.
+- No application source code, database schema, or migration changes.
+
+### Files
+- Modified: apps/api/test/security.platform-admin-spec.ts.
+- Modified: PROJECT_CONTINUITY.md.
+- Created: none.
+- Deleted: none.
+
+### Validation
+- Platform Admin HTTP security suite: 11 of 11 passed.
+- TypeScript: passed.
+- ESLint: passed.
+- Audit delivery tests ran in disposable isolated PostgreSQL environments.
+- Initial test-only TypeScript definition error was corrected before successful validation.
+- No operational development or production databases were modified.
+- GitHub CI for this new checkpoint remains pending until the new commit is pushed and checked.
+
+### Remaining risks
+- This verifies event delivery in isolated tests, not production dispatcher availability.
+- Further review of audit failure recovery, tenant isolation, and operational security remains necessary.
+- PR #39 must not be merged solely on the basis of these test results.
+
+### Recovery and next step
+- Verified starting commit: faec3578069337b1673650690c4584b73679bda0.
+- Protective copies are stored outside the repository under ~/.local/state/ibn-hayan/security-lab/.
+- Commit and push the reviewed test and continuity updates.
+- Verify complete local and remote branch SHAs and the new GitHub CI result.
+- Continue PR #39 review before merging or advancing platform administration features.
