@@ -9553,3 +9553,60 @@ complete local and remote commit SHAs, and verify an exact match.
 
 Then complete remaining browser security, responsive, and
 authorization tests before proceeding with customer management.
+
+## 2026-11-19 — Platform Administration Security Regression
+
+### Repository and state
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting verified local and remote SHA: e14d0faf2ffed6e0abe5f5b30221df00d73d95b6.
+- Current task: establish permanent HTTP-level Platform Administration authorization regression tests.
+- The real local Platform Super Admin account and development databases were not used for test fixtures.
+
+### Completed work
+- Added nine Platform Admin HTTP security regression tests.
+- Verified that authenticated tenant R09 and tenant R13 identities without independent platform grants receive HTTP 403.
+- Verified active platform-grant access and denial after grant revocation, user disabling, session expiry, and session revocation.
+- Added an isolated-database environment-variable guard for the test suite.
+- Added root and API package commands to run the suite.
+- Wired the suite into the PostgreSQL 17 validation job in the existing main CI workflow.
+- Kept Platform Super Admin independent from tenant-scoped roles.
+
+### Created files
+- apps/api/test/security.platform-admin-spec.ts
+- apps/api/vitest.security-extra.config.ts
+
+### Modified files
+- apps/api/package.json
+- package.json
+- .github/workflows/main-ci.yml
+- PROJECT_CONTINUITY.md
+
+### Deleted files
+- None.
+
+### Validation
+- Existing isolated Clinic Admin suite: 24 tests passed.
+- New isolated Platform Admin suite: 9 tests passed.
+- TypeScript checks: passed after correcting test response typing.
+- ESLint and Prettier checks: passed for the security test files.
+- Full workspace typecheck, lint, unit tests, and audit configuration suite: passed in isolated Docker.
+- Production build: passed inside Docker with network access to fetch Google Fonts.
+- The first offline production-build attempt failed solely because Google Fonts could not be fetched with networking disabled.
+- Security integration tests used disposable PostgreSQL 17 inside a network-isolated container.
+- The official project security test command was revalidated before checkpoint creation.
+- GitHub CI for this new commit remains unverified until a PR triggers it and the run finishes.
+
+### Decisions and remaining risks
+- Preserve the separate Platform Super Admin grant; do not infer platform authority from R09 or R13.
+- Run security tests during development, not only at release time.
+- Test-database identity protection should be hardened beyond environment-variable presence checks in a future task.
+- Further security reviews must cover tenant isolation, sensitive-data exposure, authentication, dependencies, and audit integrity.
+- This successful regression suite does not constitute a full penetration test or a production security certification.
+- The current main CI workflow runs on main pushes and pull requests targeting main, not routine feature-branch pushes.
+
+### Recovery and next step
+- Protective configuration and test backups remain outside Git under ~/.local/state/ibn-hayan/security-lab/.
+- Latest verified pre-task GitHub commit: e14d0faf2ffed6e0abe5f5b30221df00d73d95b6.
+- Immediate next step: create and push a reviewed security-regression commit, verify complete local and remote SHAs, then open a PR targeting main to run GitHub CI.
+- Do not modify the real administrator account, audit database, or production environment during the pending CI verification.

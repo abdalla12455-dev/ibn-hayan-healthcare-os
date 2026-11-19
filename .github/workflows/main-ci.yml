@@ -303,6 +303,7 @@ jobs:
             pnpm test:auth
             pnpm test:database
             pnpm test:clinic-admin
+            pnpm test:platform-admin-security
             pnpm test:appointments
             pnpm test:encounters
             pnpm test:role-preview
