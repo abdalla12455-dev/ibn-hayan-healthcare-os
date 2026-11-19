@@ -9713,3 +9713,48 @@ authorization tests before proceeding with customer management.
 - Review documentation diff, verify retained engineering controls,
   commit and push the development branch, and compare exact SHAs.
 - Keep PR 39 unmerged until the separate full change review ends.
+
+## 2026-11-19 — Platform and Clinic Role Isolation Regression
+
+### Repository and baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting local and remote commit: 165ccea6088273eadf37933ff0780bbd146eaf8c.
+- GitHub CI #147 passed on the starting commit.
+- PR #39 remains subject to security review before merging into main.
+
+### Completed work
+- Extended the existing Platform Admin HTTP security test to verify that a platform-only administrator cannot access tenant context or Clinic Admin Overview.
+- Confirmed the platform-only session can access its authorized Platform Admin Overview.
+- Verified attempts to forge tenant roles and tenant identity through request headers do not bypass server-side authorization.
+- Reused an existing authenticated test session so the suite does not exhaust the production login rate limiter.
+- Preserved the existing 10-login-attempts-per-60-seconds security control.
+- No application source code, API contracts, database schemas, or migrations changed.
+
+### Files
+- Modified: apps/api/test/security.platform-admin-spec.ts.
+- Modified: PROJECT_CONTINUITY.md.
+- Created: none.
+- Deleted: none.
+
+### Validation
+- Platform Admin HTTP security suite: 11/11 tests passed.
+- TypeScript check: passed.
+- ESLint check: passed.
+- PostgreSQL tests used a disposable isolated test environment.
+- No real development or production databases were modified.
+- A first attempt with an additional login reached HTTP 429; the test was corrected to reuse the existing session.
+- The comprehensive workspace and Clinic Admin tests passed at the preceding application checkpoint; they have not been rerun for this test-only change.
+- GitHub CI for the new commit requires separate verification after push.
+
+### Risks and next steps
+- Passing authorization tests does not constitute complete security certification.
+- Verify the new commit's GitHub CI.
+- Continue the remaining security review of PR #39, including audit durability and tenant isolation, before any merge.
+- Preserve independent Platform Super Admin and tenant-scoped Clinic Admin authority.
+- Do not merge into main, deploy to production, or modify production data without completing the relevant review.
+
+### Recovery
+- Verified pre-task commit: 165ccea6088273eadf37933ff0780bbd146eaf8c.
+- Protective copies stored outside the repository under ~/.local/state/ibn-hayan/security-lab/.
+- Retrieve the new full local and remote commit SHAs from the completion report after the push.

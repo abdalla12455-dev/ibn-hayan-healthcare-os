@@ -197,6 +197,23 @@ describe('Platform Admin HTTP security boundaries', () => {
 
     expect(Array.isArray(tenantsBody.items)).toBe(true);
     expect(tenantsBody).toHaveProperty('hasMore');
+
+    // Platform authority does not grant tenant or clinic access.
+    // Reuse this authenticated session to avoid exhausting
+    // the production login rate limiter during the test suite.
+    for (const url of ['/api/v1/context', '/api/v1/clinic-admin/overview']) {
+      const response = await request(server)
+        .get(url)
+        .set('Cookie', actor.cookie)
+        .set('X-Role', 'R09_ADMINISTRATOR')
+        .set('X-Tenant-Id', 'forged-tenant')
+        .expect(403);
+
+      expect(response.body).toHaveProperty('error');
+      expect(response.body).not.toHaveProperty('activeContext');
+      expect(response.body).not.toHaveProperty('regions');
+      expect(response.body).not.toHaveProperty('items');
+    }
   });
 
   it('rejects revoked grants even with an active tenant role', async () => {
