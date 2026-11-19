@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Controller,
   Get,
   HttpCode,
@@ -18,6 +19,7 @@ import { AuthService } from '../auth/auth.service.js';
 import { SESSION_COOKIE_NAME } from '../auth/auth.constants.js';
 import { buildSessionCookieOptions } from '../auth/auth.cookies.js';
 import { sessionRequired } from '../auth/auth.errors.js';
+import { AuditHelperService } from '../audit/audit-helper.service.js';
 import { authorizationForbidden } from '../authorization/authorization.errors.js';
 
 import {
@@ -57,7 +59,42 @@ export class PlatformAdminController {
     private readonly authService: AuthService,
     private readonly platformAccess: PlatformAdminAccessService,
     private readonly tenantsService: PlatformAdminTenantsService,
+    private readonly auditHelper: AuditHelperService,
   ) {}
+
+  private async auditPlatformDecision(
+    req: Request,
+    actorId: string,
+    sessionId: string,
+    decision: 'allowed' | 'denied',
+  ): Promise<void> {
+    const context = buildAuditContext(req);
+
+    await this.auditHelper.emitDirect({
+      action:
+        decision === 'allowed'
+          ? 'authorization.decision.allowed'
+          : 'authorization.decision.denied',
+      outcome: decision === 'allowed' ? 'success' : 'denied',
+      ...(decision === 'denied'
+        ? { reasonCode: 'platform_grant_required' }
+        : {}),
+      source: 'api',
+      tenantId: null,
+      actorType: 'USER',
+      actorId,
+      sessionId,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      scope: 'authorization',
+      metadata: {
+        endpoint: req.path,
+        method: req.method,
+      },
+    });
+  }
 
   @Get('overview')
   @HttpCode(HttpStatus.OK)
@@ -113,8 +150,21 @@ export class PlatformAdminController {
     );
 
     if (!authorized) {
+      await this.auditPlatformDecision(
+        req,
+        authenticated.user.id,
+        authenticated.session.id,
+        'denied',
+      );
       throw authorizationForbidden();
     }
+
+    await this.auditPlatformDecision(
+      req,
+      authenticated.user.id,
+      authenticated.session.id,
+      'allowed',
+    );
 
     return {
       administrator: {
@@ -180,8 +230,31 @@ export class PlatformAdminController {
 
     // Never accept user identity or platform authority from
     // request parameters, tenant roles, or browser state.
-    return this.tenantsService.listForPlatformAdministrator(
+    let result: PlatformTenantList;
+
+    try {
+      result = await this.tenantsService.listForPlatformAdministrator(
+        authenticated.user.id,
+      );
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        await this.auditPlatformDecision(
+          req,
+          authenticated.user.id,
+          authenticated.session.id,
+          'denied',
+        );
+      }
+      throw error;
+    }
+
+    await this.auditPlatformDecision(
+      req,
       authenticated.user.id,
+      authenticated.session.id,
+      'allowed',
     );
+
+    return result;
   }
 }

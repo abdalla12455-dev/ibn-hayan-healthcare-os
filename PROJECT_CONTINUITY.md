@@ -9610,3 +9610,56 @@ authorization tests before proceeding with customer management.
 - Latest verified pre-task GitHub commit: e14d0faf2ffed6e0abe5f5b30221df00d73d95b6.
 - Immediate next step: create and push a reviewed security-regression commit, verify complete local and remote SHAs, then open a PR targeting main to run GitHub CI.
 - Do not modify the real administrator account, audit database, or production environment during the pending CI verification.
+
+## 2026-11-19 — Platform Admin Authorization Audit Hardening
+
+### Repository and verified starting point
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting local and remote commit: cd2e7bb6b856d1cf06d545403ac3fb6db1c55d42.
+- Main branch was not modified or merged.
+
+### Completed work
+- Integrated Platform Admin authorization-decision auditing with the existing AuditHelperService and AuditModule.
+- Both platform administration endpoints now emit allowed or denied authorization decisions after authenticated platform-grant evaluation.
+- Preserved independent Platform Super Admin grants, session validation, and separation from Clinic Admin and tenant roles.
+- Added two isolated HTTP integration tests checking successful and denied audit events and absence of sensitive credentials in recorded event payloads.
+- No database schema changes or migrations.
+
+### Files modified
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin.module.ts
+- apps/api/test/security.platform-admin-spec.ts
+- PROJECT_CONTINUITY.md
+
+### Files created or deleted
+- Created: none.
+- Deleted: none.
+
+### Validation results
+- Platform administration HTTP security suite: 11/11 passed.
+- Clinic Admin integration suite: 24/24 passed.
+- Workspace TypeScript: passed.
+- Workspace ESLint: passed.
+- Workspace unit tests: passed.
+- Audit configuration tests: passed.
+- Production build: passed with network access for build-time Google Fonts.
+- PostgreSQL integration tests ran in disposable network-isolated Docker PostgreSQL environments.
+- Real local development databases and production databases were not used for these tests.
+- The preceding commit cd2e7bb passed GitHub Main CI run 145.
+- GitHub CI verification of this new checkpoint is pending until the new commit's workflow completes.
+
+### Decisions, known risks and remaining work
+- Continue using existing authorization.decision.allowed and authorization.decision.denied action codes.
+- Platform authorization audit events use platform scope with tenantId null.
+- Audit emission follows the existing best-effort read-only authorization convention; successful event delivery to the dedicated audit store has not been demonstrated by these tests.
+- Keep the existing generic 401 and 403 responses without disclosing grant details.
+- Verify audit dispatcher and audit-store persistence separately before claiming end-to-end audit durability.
+- Continue security review of PR #39 before any merge into main.
+- Do not run destructive database operations or production deployments without explicit approval.
+
+### Recovery and immediate next step
+- Source backup: ~/.local/state/ibn-hayan/security-lab/audit-hardening.Q7Tny2/.
+- Continuity backup: stored under ~/.local/state/ibn-hayan/security-lab/audit-checkpoint.*.
+- Latest verified pre-task Git commit: cd2e7bb6b856d1cf06d545403ac3fb6db1c55d42.
+- Next: commit these four files, push the feature branch, compare full local and remote SHAs, and verify the resulting GitHub CI run.

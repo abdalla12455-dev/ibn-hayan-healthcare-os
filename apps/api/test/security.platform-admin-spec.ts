@@ -266,4 +266,111 @@ describe('Platform Admin HTTP security boundaries', () => {
 
     await expectDenied(actor.cookie, 401);
   });
+
+  it('records successful platform access for both endpoints', async () => {
+    const actor = await createActor({ platformGrant: true });
+
+    for (const url of URLS) {
+      await request(server).get(url).set('Cookie', actor.cookie).expect(200);
+    }
+
+    const rows = await db.auditOutboxEvent.findMany({
+      select: { canonicalEventDraft: true },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    const events = rows
+      .map(
+        (row) =>
+          row.canonicalEventDraft as {
+            action?: string;
+            actorId?: string;
+            sessionId?: string;
+            tenantId?: string | null;
+            outcome?: string;
+            metadata?: { endpoint?: string; method?: string };
+          },
+      )
+      .filter(
+        (event) =>
+          event.actorId === actor.user.id &&
+          event.action === 'authorization.decision.allowed',
+      );
+
+    for (const url of URLS) {
+      const matching = events.filter(
+        (event) => event.metadata?.endpoint === url,
+      );
+
+      expect(matching).toHaveLength(1);
+      expect(matching[0]).toMatchObject({
+        action: 'authorization.decision.allowed',
+        actorId: actor.user.id,
+        tenantId: null,
+        outcome: 'success',
+        metadata: { endpoint: url, method: 'GET' },
+      });
+
+      expect(matching[0]?.sessionId).toBeTruthy();
+    }
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(PASSWORD);
+    expect(serialized).not.toContain(actor.cookie);
+    expect(serialized).not.toContain(actor.user.email);
+  });
+
+  it('records denied platform access for a real Clinic Admin', async () => {
+    const actor = await createActor({
+      role: 'R09_ADMINISTRATOR',
+    });
+
+    await expectDenied(actor.cookie, 403);
+
+    const rows = await db.auditOutboxEvent.findMany({
+      select: { canonicalEventDraft: true },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    const events = rows
+      .map(
+        (row) =>
+          row.canonicalEventDraft as {
+            action?: string;
+            actorId?: string;
+            tenantId?: string | null;
+            outcome?: string;
+            reasonCode?: string;
+            metadata?: { endpoint?: string; method?: string };
+          },
+      )
+      .filter(
+        (event) =>
+          event.actorId === actor.user.id &&
+          event.action === 'authorization.decision.denied',
+      );
+
+    for (const url of URLS) {
+      const matching = events.filter(
+        (event) => event.metadata?.endpoint === url,
+      );
+
+      expect(matching).toHaveLength(1);
+      expect(matching[0]).toMatchObject({
+        action: 'authorization.decision.denied',
+        actorId: actor.user.id,
+        tenantId: null,
+        outcome: 'denied',
+        reasonCode: 'platform_grant_required',
+        metadata: { endpoint: url, method: 'GET' },
+      });
+    }
+
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain(PASSWORD);
+    expect(serialized).not.toContain(actor.cookie);
+    expect(serialized).not.toContain(actor.user.email);
+  });
 });

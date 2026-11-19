@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/index.js';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
+import { AuditModule } from '../audit/index.js';
 
 import { PlatformAdminAccessService } from './platform-admin-access.service.js';
 import { PlatformAdminTenantsService } from './platform-admin-tenants.service.js';
@@ -14,7 +15,7 @@ import { PlatformAdminController } from './platform-admin.controller.js';
  * tenant-scoped role authorization.
  */
 @Module({
-  imports: [AuthModule, DatabaseModule],
+  imports: [AuthModule, DatabaseModule, AuditModule],
   controllers: [PlatformAdminController],
   providers: [PlatformAdminAccessService, PlatformAdminTenantsService],
 })
