@@ -46,6 +46,10 @@ export default function PlatformAdminPage(): ReactElement {
 
   const [tenantAttempt, setTenantAttempt] = useState(0);
 
+  const [loadingMoreTenants, setLoadingMoreTenants] = useState(false);
+  const [loadMoreTenantsError, setLoadMoreTenantsError] = useState(false);
+  const loadMorePendingRef = useRef(false);
+
   const [tenantState, setTenantState] = useState<PlatformTenantViewState>({
     kind: "loading",
   });
@@ -149,6 +153,62 @@ export default function PlatformAdminPage(): ReactElement {
     };
   }, [state.kind, tenantAttempt, router]);
 
+  async function loadMoreTenants(): Promise<void> {
+    if (
+      loadMorePendingRef.current ||
+      tenantState.kind !== "ready" ||
+      !tenantState.data.hasMore ||
+      !tenantState.data.nextCursor
+    ) {
+      return;
+    }
+
+    const cursor = tenantState.data.nextCursor;
+    loadMorePendingRef.current = true;
+    setLoadingMoreTenants(true);
+    setLoadMoreTenantsError(false);
+
+    try {
+      const result = await getPlatformAdminTenants(cursor);
+
+      if (result.ok) {
+        setTenantState((current) => {
+          if (current.kind !== "ready" || current.data.nextCursor !== cursor) {
+            return current;
+          }
+
+          const knownIds = new Set(current.data.items.map((item) => item.id));
+
+          const additions = result.data.items.filter(
+            (item) => !knownIds.has(item.id),
+          );
+
+          return {
+            kind: "ready",
+            data: {
+              items: [...current.data.items, ...additions],
+              hasMore: result.data.hasMore,
+              ...(result.data.nextCursor === undefined
+                ? {}
+                : { nextCursor: result.data.nextCursor }),
+            },
+          };
+        });
+      } else if (result.error.statusCode === 401) {
+        router.replace("/login");
+      } else if (result.error.statusCode === 403) {
+        setState({ kind: "denied" });
+      } else {
+        setLoadMoreTenantsError(true);
+      }
+    } catch {
+      setLoadMoreTenantsError(true);
+    } finally {
+      loadMorePendingRef.current = false;
+      setLoadingMoreTenants(false);
+    }
+  }
+
   function retryTenants(): void {
     setTenantState({ kind: "loading" });
     setTenantAttempt((previous) => previous + 1);
@@ -234,6 +294,9 @@ export default function PlatformAdminPage(): ReactElement {
       displayName={state.displayName}
       tenantState={tenantState}
       onRetryTenants={retryTenants}
+      onLoadMoreTenants={() => void loadMoreTenants()}
+      loadingMoreTenants={loadingMoreTenants}
+      loadMoreTenantsError={loadMoreTenantsError}
       lang={lang}
       dir={dir}
       signingOut={signingOut}

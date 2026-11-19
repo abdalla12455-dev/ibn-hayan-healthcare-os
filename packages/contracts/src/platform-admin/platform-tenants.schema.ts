@@ -24,6 +24,7 @@ export const PlatformTenantListSchema = z
   .object({
     items: z.array(PlatformTenantSummarySchema).max(25),
     hasMore: z.boolean(),
+    nextCursor: z.string().min(1).max(256).optional(),
   })
   .strict();
 

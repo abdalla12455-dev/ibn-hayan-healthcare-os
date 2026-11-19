@@ -38,6 +38,16 @@ describe("PlatformTenantListSchema", () => {
     ).toBe(true);
   });
 
+  it("accepts an optional continuation cursor", () => {
+    expect(
+      PlatformTenantListSchema.safeParse({
+        items: [validTenant],
+        hasMore: true,
+        nextCursor: "safe-cursor-token",
+      }).success,
+    ).toBe(true);
+  });
+
   it("rejects unexpected sensitive fields", () => {
     expect(
       PlatformTenantListSchema.safeParse({

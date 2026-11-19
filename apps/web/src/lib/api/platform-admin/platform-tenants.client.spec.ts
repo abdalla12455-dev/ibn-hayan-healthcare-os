@@ -53,6 +53,26 @@ describe("Platform tenant API client", () => {
     expect(options.body).toBeUndefined();
   });
 
+  it("sends only an encoded pagination cursor", async () => {
+    const fetchMock = mockResponse(200, {
+      items: [],
+      hasMore: false,
+    });
+
+    const result = await getPlatformAdminTenants("cursor/value");
+
+    expect(result.ok).toBe(true);
+
+    const [url, options] = fetchMock.mock.calls[0]!;
+
+    expect(url).toContain("cursor=cursor%2Fvalue");
+    expect(options).toMatchObject({
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+    });
+  });
+
   it("rejects unauthorized access", async () => {
     mockResponse(403, {});
 

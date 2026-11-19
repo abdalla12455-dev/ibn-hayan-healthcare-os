@@ -24,6 +24,9 @@ export interface PlatformAdminOverviewViewProps {
   readonly displayName: string;
   readonly tenantState: PlatformTenantViewState;
   readonly onRetryTenants?: () => void;
+  readonly onLoadMoreTenants?: () => void;
+  readonly loadingMoreTenants?: boolean;
+  readonly loadMoreTenantsError?: boolean;
   readonly lang: Language;
   readonly dir: Direction;
   readonly signingOut: boolean;
@@ -60,6 +63,9 @@ const LABELS = {
     tenantEmpty: "لا توجد جهات مشتركة مسجلة حالياً.",
     tenantPreview: "المعاينة لا تعرض بيانات حقيقية.",
     tenantMore: "توجد جهات إضافية لم تُعرض بعد.",
+    tenantLoadMore: "عرض المزيد",
+    tenantLoadingMore: "جارٍ تحميل المزيد…",
+    tenantLoadMoreError: "تعذّر تحميل المزيد. حاول مجدداً.",
     tenantRetry: "إعادة المحاولة",
     organisationName: "الجهة المشتركة",
     type: "النوع",
@@ -120,6 +126,9 @@ const LABELS = {
     tenantEmpty: "No registered customers are available.",
     tenantPreview: "The preview does not display real data.",
     tenantMore: "Additional customers are not displayed yet.",
+    tenantLoadMore: "Load more",
+    tenantLoadingMore: "Loading more…",
+    tenantLoadMoreError: "Unable to load more customers. Retry.",
     tenantRetry: "Retry",
     organisationName: "Customer Name",
     type: "Type",
@@ -189,6 +198,9 @@ export function PlatformAdminOverviewView({
   displayName,
   tenantState,
   onRetryTenants,
+  onLoadMoreTenants,
+  loadingMoreTenants = false,
+  loadMoreTenantsError = false,
   lang,
   dir,
   signingOut,
@@ -455,9 +467,30 @@ export function PlatformAdminOverviewView({
                   </div>
 
                   {tenantState.kind === "ready" && tenantState.data.hasMore && (
-                    <p className="border-t border-[#d8e0e8] px-5 py-3 text-sm text-[#64748b]">
-                      {labels.tenantMore}
-                    </p>
+                    <div className="border-t border-[#d8e0e8] px-5 py-3 text-sm">
+                      {tenantState.data.nextCursor !== undefined &&
+                      onLoadMoreTenants !== undefined ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={onLoadMoreTenants}
+                            disabled={loadingMoreTenants}
+                            className="rounded-lg border border-[#d8e0e8] px-4 py-2 font-medium text-[#173d53] hover:bg-[#f1f5f9] disabled:opacity-50"
+                          >
+                            {loadingMoreTenants
+                              ? labels.tenantLoadingMore
+                              : labels.tenantLoadMore}
+                          </button>
+                          {loadMoreTenantsError && (
+                            <p role="alert" className="mt-2 text-red-700">
+                              {labels.tenantLoadMoreError}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-[#64748b]">{labels.tenantMore}</p>
+                      )}
+                    </div>
                   )}
                 </section>
 

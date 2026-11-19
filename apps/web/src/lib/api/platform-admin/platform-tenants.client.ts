@@ -32,12 +32,19 @@ export type PlatformTenantsClientResult =
  *
  * Authenticated responses are never cached.
  */
-export async function getPlatformAdminTenants(): Promise<PlatformTenantsClientResult> {
+export async function getPlatformAdminTenants(
+  cursor?: string,
+): Promise<PlatformTenantsClientResult> {
   let response: Response;
 
   try {
     response = await fetch(
-      joinUrl(getApiBaseUrl(), "/platform-admin/tenants"),
+      joinUrl(
+        getApiBaseUrl(),
+        cursor === undefined
+          ? "/platform-admin/tenants"
+          : "/platform-admin/tenants?cursor=" + encodeURIComponent(cursor),
+      ),
       {
         method: "GET",
         credentials: "include",

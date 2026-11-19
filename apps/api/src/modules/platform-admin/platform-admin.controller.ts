@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
@@ -203,6 +204,7 @@ export class PlatformAdminController {
   async listTenants(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
+    @Query('cursor') cursor?: string,
   ): Promise<PlatformTenantList> {
     res.setHeader('Cache-Control', 'no-store');
 
@@ -235,6 +237,7 @@ export class PlatformAdminController {
     try {
       result = await this.tenantsService.listForPlatformAdministrator(
         authenticated.user.id,
+        cursor,
       );
     } catch (error) {
       if (error instanceof ForbiddenException) {

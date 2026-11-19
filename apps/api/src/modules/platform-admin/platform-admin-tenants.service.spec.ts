@@ -150,6 +150,67 @@ describe('PlatformAdminTenantsService', () => {
     });
   });
 
+  it('uses a stable bounded cursor for subsequent pages', async () => {
+    const { service, findMany } = setup(true);
+
+    const rows = Array.from({ length: 26 }, (_, index) => ({
+      id: '00000000-0000-4000-8000-' + String(index + 1).padStart(12, '0'),
+      slug: 'tenant-' + index,
+      displayName: 'Tenant ' + index,
+      status: 'active',
+      createdAt: new Date('2026-01-01T10:00:00.000Z'),
+    }));
+
+    findMany.mockResolvedValueOnce(rows).mockResolvedValueOnce([rows[25]]);
+
+    const first = await service.listForPlatformAdministrator('platform-user');
+
+    expect(first.items).toHaveLength(25);
+    expect(first.hasMore).toBe(true);
+    expect(first.nextCursor).toBeTruthy();
+
+    const second = await service.listForPlatformAdministrator(
+      'platform-user',
+      first.nextCursor,
+    );
+
+    expect(second.items).toHaveLength(1);
+    expect(second.hasMore).toBe(false);
+
+    expect(findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        take: 26,
+        where: {
+          OR: [
+            {
+              createdAt: {
+                lt: new Date('2026-01-01T10:00:00.000Z'),
+              },
+            },
+            {
+              createdAt: new Date('2026-01-01T10:00:00.000Z'),
+              id: { lt: rows[24]!.id },
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it('rejects malformed cursors without reading customer data', async () => {
+    const { service, findMany } = setup(true);
+
+    await expect(
+      service.listForPlatformAdministrator(
+        'platform-user',
+        'not-a-valid-cursor',
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
   it('does not read tenants when authorization fails unexpectedly', async () => {
     const { service, findMany, hasActivePlatformGrant } = setup(true);
 
