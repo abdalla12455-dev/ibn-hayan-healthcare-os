@@ -12,6 +12,7 @@ import { ProviderSchedulesModule } from './modules/provider-schedules/index.js';
 import { EncountersModule } from './modules/encounters/index.js';
 import { ClinicalNotesModule } from './modules/clinical-notes/index.js';
 import { PatientsModule } from './modules/patients/index.js';
+import { PlatformAdminModule } from './modules/platform-admin/platform-admin.module.js';
 
 /**
  * Root application module.
@@ -87,6 +88,7 @@ import { PatientsModule } from './modules/patients/index.js';
     EncountersModule,
     ClinicalNotesModule,
     PatientsModule,
+    PlatformAdminModule,
   ],
 })
 export class AppModule implements NestModule {

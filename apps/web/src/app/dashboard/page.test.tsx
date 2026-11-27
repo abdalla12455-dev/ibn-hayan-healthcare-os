@@ -75,7 +75,10 @@ const validSession = {
         tenantDisplayName: 'Tenant Alpha',
         status: 'active' as const,
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
       {
@@ -86,7 +89,10 @@ const validSession = {
         status: 'active' as const,
         roles: [
           { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
     ],
@@ -105,7 +111,10 @@ const contextWithNoActive = {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
       {
@@ -115,7 +124,10 @@ const contextWithNoActive = {
         tenantDisplayName: 'Tenant Beta',
         roles: [
           { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
     ],
@@ -137,7 +149,10 @@ const contextWithActiveA = {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
       {
@@ -147,7 +162,10 @@ const contextWithActiveA = {
         tenantDisplayName: 'Tenant Beta',
         roles: [
           { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
     ],
@@ -157,7 +175,10 @@ const contextWithActiveA = {
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+          displayName: 'مسؤول النظام',
+        },
       ],
     },
     organisationOptions: [],
@@ -189,6 +210,46 @@ function renderDashboard() {
 }
 
 describe('DashboardPage', () => {
+  it('shows platform navigation for verified multi-role users', async () => {
+    mockGetSession.mockResolvedValue({
+      ...validSession,
+      data: {
+        ...validSession.data,
+        hasPlatformAdminAccess: true,
+      },
+    });
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    const entry = await screen.findByRole('button', {
+      name: 'الدخول إلى إدارة المنصة',
+    });
+
+    await userEvent.setup().click(entry);
+
+    expect(mockReplace).toHaveBeenCalledWith('/platform-admin');
+  });
+
+  it('does not infer platform access from R13 tenant roles', async () => {
+    mockGetSession.mockResolvedValue(validSession);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByRole('button', {
+        name: 'الدخول إلى إدارة المنصة',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders exactly one H1', async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
@@ -230,7 +291,11 @@ describe('DashboardPage', () => {
   it('redirects to /login when unauthenticated', async () => {
     mockGetSession.mockResolvedValue({
       ok: false,
-      error: { statusCode: 401, category: 'HTTP_ERROR', message: 'Unauthorized' },
+      error: {
+        statusCode: 401,
+        category: 'HTTP_ERROR',
+        message: 'Unauthorized',
+      },
     });
 
     await act(async () => {
@@ -255,7 +320,8 @@ describe('DashboardPage', () => {
       expect(screen.getByText('Operator Alpha')).toBeInTheDocument();
     });
 
-    const authKeyPattern = /session|token|csrf|password|auth|credential|context/i;
+    const authKeyPattern =
+      /session|token|csrf|password|auth|credential|context/i;
     const authLocal = localStorageSpy.mock.calls.filter(
       ([key]) => typeof key === 'string' && authKeyPattern.test(key),
     );
@@ -281,9 +347,7 @@ describe('DashboardPage', () => {
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: 'تسجيل الخروج' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'تسجيل الخروج' }));
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
@@ -356,9 +420,7 @@ describe('DashboardPage', () => {
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole('button', { name: /اختيار|Select/i }));
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
@@ -414,9 +476,7 @@ describe('DashboardPage', () => {
       expect(screen.getByText('لم يتم اختيار بيئة عمل')).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole('button', { name: /اختيار|Select/i }));
 
     await waitFor(() => {
       expect(screen.queryByText('لم يتم اختيار بيئة عمل')).toBeNull();
@@ -446,9 +506,7 @@ describe('DashboardPage', () => {
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole('button', { name: /اختيار|Select/i }));
 
     await waitFor(() => {
       const alert = screen.getByRole('alert');
@@ -745,7 +803,10 @@ const contextWithOrgOptions = {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
     ],
@@ -755,7 +816,10 @@ const contextWithOrgOptions = {
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+          displayName: 'مسؤول النظام',
+        },
       ],
     },
     organisationOptions: [
@@ -782,7 +846,10 @@ const contextWithActiveOrgAndFacilityOptions = {
         tenantSlug: 'tenant-alpha.invalid',
         tenantDisplayName: 'Tenant Alpha',
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+            displayName: 'مسؤول النظام',
+          },
         ],
       },
     ],
@@ -792,7 +859,10 @@ const contextWithActiveOrgAndFacilityOptions = {
       tenantSlug: 'tenant-alpha.invalid',
       tenantDisplayName: 'Tenant Alpha',
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+          displayName: 'مسؤول النظام',
+        },
       ],
     },
     organisationOptions: [
@@ -1114,7 +1184,10 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
           {
             ...r09Session.data.memberships[0]!,
             roles: [
-              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+              {
+                code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+                displayName: 'مسؤول النظام',
+              },
             ],
           },
         ],
@@ -1127,14 +1200,20 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
         active: {
           ...r09FullContext.data.active!,
           roles: [
-            { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+            {
+              code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+              displayName: 'مسؤول النظام',
+            },
           ],
         },
         options: [
           {
             ...r09FullContext.data.options[0]!,
             roles: [
-              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+              {
+                code: 'R13_SYSTEM_ADMINISTRATOR' as const,
+                displayName: 'مسؤول النظام',
+              },
             ],
           },
         ],

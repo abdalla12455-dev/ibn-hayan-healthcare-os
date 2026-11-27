@@ -8,11 +8,7 @@ import {
   type ReactElement,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  getSession,
-  getCsrfToken,
-  logout,
-} from '@/lib/api/auth/auth.client';
+import { getSession, getCsrfToken, logout } from '@/lib/api/auth/auth.client';
 import {
   getContext,
   selectTenantContext,
@@ -133,8 +129,7 @@ const DASHBOARD_COPY = {
     facilityNoActiveBody: 'اختر منشأة من القائمة أدناه للبدء.',
     facilityClearButton: 'مسح المنشأة',
     facilitySelectButton: 'اختيار المنشأة',
-    facilityRequiresOrganisation:
-      'يجب اختيار مؤسسة قبل اختيار منشأة.',
+    facilityRequiresOrganisation: 'يجب اختيار مؤسسة قبل اختيار منشأة.',
     activeOrganisationChip: 'المؤسسة الحالية',
     activeFacilityChip: 'المنشأة الحالية',
     // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1).
@@ -143,6 +138,7 @@ const DASHBOARD_COPY = {
       'لديك بيئة عمل ومؤسسة ومنشأة نشطة. ادخل إلى تطبيق إدارة المنشأة لإدارة منشأتك.',
     clinicAdminEntryButton: 'الدخول إلى إدارة المنشأة',
     clinicAdminEntryRoleHint: 'مدير المنشأة',
+    platformAdminEntryButton: 'الدخول إلى إدارة المنصة',
   },
   en: {
     pageTitle: 'Workspace',
@@ -185,7 +181,8 @@ const DASHBOARD_COPY = {
     organisationNoOptionsBody:
       'No organisations are associated with your role in the current workspace.',
     organisationNoActiveTitle: 'No organisation selected',
-    organisationNoActiveBody: 'Choose an organisation from the list below to begin.',
+    organisationNoActiveBody:
+      'Choose an organisation from the list below to begin.',
     organisationClearButton: 'Clear organisation',
     organisationSelectButton: 'Select organisation',
     facilityTitle: 'Active facility',
@@ -207,6 +204,7 @@ const DASHBOARD_COPY = {
       'You have an active workspace, organisation, and facility. Enter the Clinic Admin application to manage your facility.',
     clinicAdminEntryButton: 'Enter Clinic Admin',
     clinicAdminEntryRoleHint: 'Clinic Administrator',
+    platformAdminEntryButton: 'Open Platform Administration',
   },
 } as const;
 
@@ -407,10 +405,7 @@ export default function DashboardPage() {
     const reloaded = await getContext();
     if (reloaded.ok) {
       setContext(reloaded.data);
-      if (
-        reloaded.data.active === null &&
-        reloaded.data.options.length > 0
-      ) {
+      if (reloaded.data.active === null && reloaded.data.options.length > 0) {
         setSelectedMembershipId(reloaded.data.options[0]!.membershipId);
       }
     } else {
@@ -648,9 +643,7 @@ export default function DashboardPage() {
               aria-hidden="true"
             />
             <span className="ih-app__header-context-label">
-              {active !== null
-                ? active.tenantDisplayName
-                : copy.idleChip}
+              {active !== null ? active.tenantDisplayName : copy.idleChip}
             </span>
             {activeOrganisation !== null && (
               <span
@@ -680,13 +673,18 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="ih-app__header-actions">
+            {session.hasPlatformAdminAccess === true && (
+              <button
+                type="button"
+                onClick={() => router.push('/platform-admin')}
+                className="rounded-lg border border-border px-3 py-2 text-sm font-medium"
+              >
+                {copy.platformAdminEntryButton}
+              </button>
+            )}
             <LanguageSwitch />
             <form onSubmit={handleLogout}>
-              <Button
-                type="submit"
-                variant="ghost"
-                loading={loggingOut}
-              >
+              <Button type="submit" variant="ghost" loading={loggingOut}>
                 {loggingOut ? copy.loggingOut : copy.logoutButton}
               </Button>
             </form>
@@ -812,7 +810,9 @@ export default function DashboardPage() {
           noRoles={copy.noRoles}
         />
 
-        {active !== null && activeOrganisation !== null && activeFacility !== null && (
+        {active !== null &&
+          activeOrganisation !== null &&
+          activeFacility !== null &&
           (() => {
             const hasR09 = active.roles.some(
               (role) => role.code === 'R09_ADMINISTRATOR',
@@ -827,8 +827,7 @@ export default function DashboardPage() {
                 onEnter={() => router.push('/clinic-admin')}
               />
             );
-          })()
-        )}
+          })()}
 
         {error !== null && (
           <StatusMessage variant="error">{error}</StatusMessage>
@@ -1066,16 +1065,18 @@ function WorkspaceCard({
             <legend className="ih-context-current__label">
               {selectLegend}
             </legend>
-            <div className="ih-options" role="radiogroup" aria-label={selectLegend}>
+            <div
+              className="ih-options"
+              role="radiogroup"
+              aria-label={selectLegend}
+            >
               {options.map((option) => {
-                const selected =
-                  selectedMembershipId === option.membershipId;
+                const selected = selectedMembershipId === option.membershipId;
                 return (
                   <label
                     key={option.membershipId}
                     className={
-                      'ih-option' +
-                      (selected ? ' ih-option--selected' : '')
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input
@@ -1411,8 +1412,7 @@ function OrganisationCard({
                   <label
                     key={option.organisationId}
                     className={
-                      'ih-option' +
-                      (selected ? ' ih-option--selected' : '')
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input
@@ -1572,14 +1572,12 @@ function FacilityCard({
               aria-label={selectLegend}
             >
               {options.map((option) => {
-                const selected =
-                  selectedFacilityId === option.facilityId;
+                const selected = selectedFacilityId === option.facilityId;
                 return (
                   <label
                     key={option.facilityId}
                     className={
-                      'ih-option' +
-                      (selected ? ' ih-option--selected' : '')
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input

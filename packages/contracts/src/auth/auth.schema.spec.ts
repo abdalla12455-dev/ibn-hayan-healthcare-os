@@ -158,7 +158,10 @@ describe('TenantMembershipSummarySchema', () => {
       tenantDisplayName: 'Tenant Alpha',
       status: 'active',
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+        {
+          code: 'R13_SYSTEM_ADMINISTRATOR',
+          displayName: 'System Administrator',
+        },
       ],
     });
     expect(result.success).toBe(true);
@@ -173,7 +176,10 @@ describe('TenantMembershipSummarySchema', () => {
       status: 'active',
       roles: [
         { code: 'R01_PHYSICIAN', displayName: 'Physician' },
-        { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+        {
+          code: 'R13_SYSTEM_ADMINISTRATOR',
+          displayName: 'System Administrator',
+        },
       ],
     });
     expect(result.success).toBe(true);
@@ -244,7 +250,10 @@ describe('SessionResponseSchema', () => {
         tenantDisplayName: 'Tenant Alpha',
         status: 'active',
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR', displayName: 'System Administrator' },
+          {
+            code: 'R13_SYSTEM_ADMINISTRATOR',
+            displayName: 'System Administrator',
+          },
         ],
       },
     ],
@@ -255,6 +264,24 @@ describe('SessionResponseSchema', () => {
   it('accepts a canonical valid session response', () => {
     const result = SessionResponseSchema.safeParse(validSession);
     expect(result.success).toBe(true);
+  });
+
+  it('accepts verified platform access', () => {
+    expect(
+      SessionResponseSchema.safeParse({
+        ...validSession,
+        hasPlatformAdminAccess: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects forged platform access values', () => {
+    expect(
+      SessionResponseSchema.safeParse({
+        ...validSession,
+        hasPlatformAdminAccess: 'R13_SYSTEM_ADMINISTRATOR',
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts an empty memberships array', () => {

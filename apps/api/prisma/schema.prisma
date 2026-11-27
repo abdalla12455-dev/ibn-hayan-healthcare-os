@@ -333,6 +333,7 @@ model User {
   memberships          TenantMembership[]
   sessions             AuthSession[]
   userProviderBindings UserProviderBinding[]
+  platformAdministrator PlatformAdministrator?
 
   @@index([status], map: "users_status_idx")
   @@map("users")
@@ -1524,4 +1525,31 @@ model ClinicalNoteRevision {
   @@index([clinicalNoteId], map: "clinical_note_revisions_clinical_note_id_idx")
   @@index([clinicalNoteId, revisionNumber], map: "clinical_note_revisions_note_id_revision_number_idx")
   @@map("clinical_note_revisions")
+}
+
+/// An explicitly provisioned platform-administration grant.
+///
+/// This identity is independent of tenant memberships and
+/// tenant-scoped role assignments.
+///
+/// A tenant administrator cannot acquire platform authority
+/// merely by holding R09 or R13 inside a tenant.
+///
+/// A grant must be provisioned through an independently
+/// authorized and audited administrative process.
+///
+/// Revocation must be checked against the authoritative
+/// database when authorizing platform operations.
+model PlatformAdministrator {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @unique @map("user_id") @db.Uuid
+  grantedAt       DateTime  @default(now()) @map("granted_at") @db.Timestamptz
+  grantedByUserId String?   @map("granted_by_user_id") @db.Uuid
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz
+  revokedByUserId String?   @map("revoked_by_user_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([revokedAt], map: "platform_administrators_revoked_at_idx")
+  @@map("platform_administrators")
 }

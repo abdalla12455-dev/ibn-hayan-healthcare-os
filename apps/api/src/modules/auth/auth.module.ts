@@ -5,6 +5,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { DatabaseModule } from '../../infrastructure/database/index.js';
 import { AuditModule } from '../audit/index.js';
 import { AuthService } from './auth.service.js';
+import { PlatformAdminAccessService } from '../platform-admin/platform-admin-access.service.js';
 import { AuthController } from './auth.controller.js';
 import { PasswordService } from './password.service.js';
 import { SessionTokenService } from './session-token.service.js';
@@ -62,6 +63,7 @@ import { AuditedThrottlerGuard } from './audited-throttler.guard.js';
   controllers: [AuthController],
   providers: [
     AuthService,
+    PlatformAdminAccessService,
     PasswordService,
     SessionTokenService,
     CsrfService,

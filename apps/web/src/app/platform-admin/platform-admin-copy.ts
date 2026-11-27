@@ -1,0 +1,48 @@
+export const PLATFORM_ADMIN_COPY = {
+  ar: {
+    title: "إدارة منصة ابن حيان",
+    overview: "نظرة عامة",
+    organisations: "المؤسسات",
+    users: "إدارة المستخدمين",
+    billing: "الاشتراكات والفوترة",
+    analytics: "تحليلات النظام",
+    settings: "الإعدادات العامة",
+    welcome: "مرحباً بك،",
+    description: "لوحة الإدارة الرئيسية لمنصة ابن حيان.",
+    loading: "جارٍ التحقق من صلاحية الوصول…",
+    denied: "ليس لديك تصريح للوصول إلى إدارة المنصة.",
+    error: "تعذّر تحميل لوحة الإدارة حالياً.",
+    retry: "إعادة المحاولة",
+    back: "العودة إلى مساحة العمل",
+    logout: "تسجيل الخروج",
+    signingOut: "جارٍ تسجيل الخروج…",
+    unavailable: "غير متاح حالياً",
+    sectionDescription:
+      "هذا القسم قيد التطوير. لن تظهر بيانات أو إجراءات إدارية قبل ربطها بالخدمة الفعلية.",
+    overviewDescription:
+      "تم التحقق من هويتك الإدارية عبر الخادم. يجري تجهيز وظائف إدارة المؤسسات والاشتراكات والإعدادات العامة.",
+  },
+  en: {
+    title: "Ibn Hayan Platform Administration",
+    overview: "Overview",
+    organisations: "Organisations",
+    users: "User Management",
+    billing: "Billing & Subscriptions",
+    analytics: "System Analytics",
+    settings: "Global Settings",
+    welcome: "Welcome,",
+    description: "The main Ibn Hayan administration workspace.",
+    loading: "Verifying access…",
+    denied: "You are not authorized to access platform administration.",
+    error: "The administration workspace could not be loaded.",
+    retry: "Try again",
+    back: "Back to workspace",
+    logout: "Sign out",
+    signingOut: "Signing out…",
+    unavailable: "Not yet available",
+    sectionDescription:
+      "This section is under development. Administrative data and actions will appear only after their backend integration is complete.",
+    overviewDescription:
+      "Your platform access has been verified by the server. Organisation, subscription, and global configuration management are being prepared.",
+  },
+} as const;

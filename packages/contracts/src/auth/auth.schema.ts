@@ -180,6 +180,7 @@ export const SessionResponseSchema = z
     memberships: z.array(TenantMembershipSummarySchema),
     activeTenantContext: ActiveTenantContextSchema.nullable(),
     expiresAt: z.string().datetime(),
+    hasPlatformAdminAccess: z.literal(true).optional(),
   })
   .strict();
 

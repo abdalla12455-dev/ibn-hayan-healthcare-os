@@ -1,6 +1,6 @@
 # PROJECT_CONTINUITY.md — Ibn Hayan Healthcare OS
 
-> **This document captures the canonical state of the Ibn Hayan project for cross-session continuity. Any AI agent resuming work on this project must read this file first, then `AGENTS.md`, then `docs/AI_AGENT_SAFETY_SKILL.md`.**
+> **Engineering continuity record. Before continuing development, review AGENTS.md, ENGINEERING_STANDARDS.md, this document, and the relevant architecture and module documentation. Verify the live Git state independently.**
 
 ## Repository
 
@@ -8781,3 +8781,1227 @@ complete security integration has been implemented
 and validated.
 
 ---
+
+---
+
+## Engineering Standards Migration (2026-09-22)
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch: feature/configuration-service-foundation-v1
+
+Verified starting commit:
+ddc1343f3c043e2b0ce799dac5a94d86d0314c10
+
+### Completed work
+
+Established ENGINEERING_STANDARDS.md as the primary
+engineering and repository-safety document.
+
+Preserved AGENTS.md as a compatibility entry point
+for existing repository references.
+
+Updated the engineering standards to document the
+terminal-based development workflow.
+
+Routine Git operations are authorized within requested
+development tasks, subject to repository safety,
+validation, file-scope review, and SHA verification.
+
+Destructive operations and production changes continue
+to require separate explicit approval.
+
+Existing historical records remain preserved.
+
+No application code, database schema, authentication,
+authorization, or UI implementation was changed.
+
+### Files
+
+Created:
+- ENGINEERING_STANDARDS.md
+
+Modified:
+- AGENTS.md
+- PROJECT_CONTINUITY.md
+
+Deleted: none.
+
+### Recovery
+
+The original AGENTS.md content was preserved in
+ENGINEERING_STANDARDS.md before the standards update.
+
+A protective local backup was created outside the
+repository.
+
+The current changes remain uncommitted at the time
+of this continuity update.
+
+The latest verified committed base is:
+ddc1343f3c043e2b0ce799dac5a94d86d0314c10
+
+Before resuming, verify the repository, remote,
+branch, Git status, recent commits, and local/remote
+divergence.
+
+### Immediate next step
+
+Review the documentation changes and verify that
+the updated engineering standards are internally
+consistent.
+
+Complete the normal validated Git backup workflow.
+
+Then continue the Platform Super Admin identity,
+backend authorization, and frontend implementation.
+
+---
+
+---
+
+## Platform Administrator Authentication Foundation — 2026-09-22
+
+### Repository
+
+Branch: feature/configuration-service-foundation-v1
+
+Starting commit:
+51a993bbe67e6ad3c55b82d8ddab01871fb5bbc0
+
+### Completed work
+
+- Added the PlatformAdministrator Prisma model.
+- Created the platform administrator database migration.
+- Added server-side active platform grant verification.
+- Added seven platform access regression tests.
+- Extended login and session validation to support
+  platform administrators without tenant memberships.
+- Added three platform authentication integration tests.
+- Added the authentication test suite to GitHub CI.
+
+### Security boundaries
+
+Tenant-scoped R09 and R13 assignments do not
+independently grant platform administration authority.
+
+The new platform grant is checked against the database.
+
+No platform administrator account was provisioned.
+
+No database migration was applied to production.
+
+No platform administration endpoint or UI is exposed yet.
+
+### Validation
+
+Prisma schema validation: passed.
+API typecheck: passed.
+API lint: passed.
+Platform access unit tests: seven passed.
+
+Full local validation is required before committing.
+
+PostgreSQL 17 authentication integration tests remain
+pending execution through the GitHub CI workflow.
+
+The new migration must be validated against an isolated
+PostgreSQL 17 database before deployment.
+
+### Changed files
+
+Modified:
+- .github/workflows/main-ci.yml
+- apps/api/prisma/schema.prisma
+- apps/api/src/modules/auth/auth.module.ts
+- apps/api/src/modules/auth/auth.service.ts
+- apps/api/test/auth/auth.e2e.auth-spec.ts
+- PROJECT_CONTINUITY.md
+
+Created:
+- apps/api/prisma/migrations/
+  20260922120000_platform_administrator_foundation/migration.sql
+- apps/api/src/modules/platform-admin/
+  platform-admin-access.service.ts
+- apps/api/src/modules/platform-admin/
+  platform-admin-access.service.spec.ts
+
+Deleted: none.
+
+### Recovery
+
+Starting verified commit:
+51a993bbe67e6ad3c55b82d8ddab01871fb5bbc0
+
+Before resuming, inspect repository state, current
+branch, remote commits, engineering standards,
+continuity documentation, and pending work.
+
+### Immediate next step
+
+Run GitHub CI authentication tests against PostgreSQL 17.
+
+Resolve any integration failures before implementing
+the protected Platform Super Admin backend endpoint
+and its corresponding frontend interface.
+
+Do not merge or deploy until the integrated
+authorization and UI workflow has been validated.
+
+---
+
+## Platform Administrator Protected Endpoint V1
+
+### Repository and branch
+
+Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch: feature/configuration-service-foundation-v1
+
+Starting commit:
+78542b2d9b21d082bca8c88b73a5346337085a4d
+
+### Completed work
+
+- Added the PlatformAdminController.
+- Added the PlatformAdminModule.
+- Registered the module in AppModule.
+- Added three HTTP integration tests for platform access.
+- Preserved existing Clinic Admin routes and permissions.
+
+### Security
+
+The endpoint uses the existing authenticated session
+and an independent server-side platform grant check.
+
+Tenant roles alone do not authorize platform access.
+
+No platform administrator account has been provisioned.
+
+No platform configuration mutation endpoint exists yet.
+
+The endpoint currently returns the authenticated
+administrator display name only.
+
+Platform-specific authorization auditing and
+additional mixed-role regression coverage remain
+to be completed before production deployment.
+
+### Validation
+
+Local typecheck, lint, unit tests, and build
+must pass before committing this milestone.
+
+The new HTTP integration tests require PostgreSQL 17
+validation through GitHub Actions.
+
+### Files
+
+Modified:
+- apps/api/src/app.module.ts
+- apps/api/test/auth/auth.e2e.auth-spec.ts
+- PROJECT_CONTINUITY.md
+
+Created:
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin.module.ts
+
+Deleted: none.
+
+### Recovery
+
+Starting verified commit:
+78542b2d9b21d082bca8c88b73a5346337085a4d
+
+Verify the repository, branch, remote state, Git status,
+engineering standards, and continuity before resuming.
+
+### Immediate next step
+
+Verify GitHub PostgreSQL 17 integration results.
+
+Complete the platform authorization and audit boundary,
+then build the corresponding Platform Super Admin UI
+using the approved Arabic and English designs.
+
+Keep PR 39 in draft until the integrated frontend,
+backend, and security workflow is validated.
+
+---
+
+---
+
+## Platform Super Admin UI Foundation V1
+
+### Repository
+
+Branch: feature/configuration-service-foundation-v1
+
+Starting verified commit:
+aa6b5c98d66abca8b1e7ba616d9c9e460549e9e5
+
+### Completed work
+
+- Added the initial Platform Super Admin web route.
+- Added the platform administration API client.
+- Added the shared Zod response contract.
+- Added platform administration UI and API client tests.
+- Updated login routing for platform-only accounts.
+- Preserved the existing tenant-user login destination.
+- Added Arabic RTL and English LTR interface support.
+- Kept unavailable administrative functions non-interactive.
+
+### Security boundaries
+
+The frontend consumes the protected platform overview API.
+
+The backend remains responsible for authentication
+and authoritative platform grant verification.
+
+Tenant roles alone do not grant platform administration.
+
+No platform administrator account has been provisioned.
+
+No production database migration has been applied.
+
+No production deployment has been performed.
+
+### Validation
+
+Local project typecheck: passed.
+Local project lint: passed.
+Local project tests: passed.
+Web production build: passed.
+
+GitHub CI must be rerun against the new frontend commit.
+
+Visual comparison with the approved Platform Super Admin
+design references remains pending.
+
+Browser verification of login, logout, authorization
+failures, and responsive RTL/LTR layouts remains pending.
+
+The current interface is a functional foundation.
+It is not yet verified as visually canonical.
+
+### Files
+
+Modified:
+- apps/web/src/app/login/page.test.tsx
+- apps/web/src/components/marketing/login-panel.tsx
+- packages/contracts/src/index.ts
+- PROJECT_CONTINUITY.md
+
+Created:
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- apps/web/src/lib/api/platform-admin/platform-admin.client.ts
+- apps/web/src/lib/api/platform-admin/platform-admin.client.spec.ts
+- packages/contracts/src/platform-admin/index.ts
+- packages/contracts/src/platform-admin/platform-admin.schema.ts
+- packages/contracts/src/platform-admin/platform-admin.schema.spec.ts
+
+Deleted: none.
+
+### Recovery
+
+The last verified baseline before this UI task is:
+aa6b5c98d66abca8b1e7ba616d9c9e460549e9e5
+
+The protective continuity backup is outside the repository.
+
+Before resuming, verify the repository, current branch,
+remote SHAs, Git status, engineering standards,
+and project continuity.
+
+### Immediate next step
+
+Verify GitHub CI for the updated PR 39.
+
+Review the current Platform Super Admin UI against
+the approved Arabic RTL and English LTR references.
+
+Complete browser, authorization, and responsive testing
+before merging or deploying the platform administration
+milestone.
+
+---
+
+---
+
+## Platform Super Admin Visual Design V1
+
+### Repository and branch
+
+Repository:
+abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch:
+feature/configuration-service-foundation-v1
+
+Starting verified commit:
+7f28d7b8ebee389ddbcf2095f53fe024a4e2a928
+
+Pull request: 39 (Draft).
+
+### Completed work
+
+- Extracted the existing Platform Super Admin
+  presentation into a shared component.
+- Preserved the authenticated page and its protected
+  backend overview request.
+- Added a development-only visual preview.
+- Expanded the existing interface with the platform
+  sidebar, top bar, metric placeholders, organisations
+  table, system alerts, and quick-action sections.
+- Preserved Arabic RTL and English LTR support.
+- Updated affected interface regression tests.
+- Kept unavailable administrative actions disabled.
+- Did not introduce fake organisation or metric data.
+
+### Files modified
+
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Files created
+
+- apps/web/src/app/platform-admin/platform-admin-copy.ts
+- apps/web/src/app/platform-admin/platform-admin-overview-view.tsx
+- apps/web/src/app/platform-admin/visual-preview/page.tsx
+- apps/web/src/app/platform-admin/visual-preview/platform-admin-visual-preview.tsx
+
+Files deleted: none.
+
+### Security
+
+The real administration page retains its existing
+authenticated backend authorization requirement.
+
+The development preview uses shared presentation only.
+
+The preview does not provide administrative authority,
+modify database records, or expose real tenant data.
+
+The preview route is restricted to development mode.
+
+No production database migration or deployment was
+performed in this milestone.
+
+### Validation
+
+The project typecheck, lint, tests, and web build
+passed locally before this checkpoint.
+
+The affected platform UI tests and formatting
+are rechecked before committing.
+
+GitHub CI for this new design commit remains pending.
+
+The current design is not yet a fully verified match
+for the approved canonical visual references.
+
+Browser, responsive, RTL/LTR, accessibility,
+and production-preview isolation checks remain
+required before production deployment.
+
+### Recovery
+
+Verify the repository, branch, working tree,
+remote branch SHA, engineering standards, and
+project continuity before resuming.
+
+The starting verified commit is:
+7f28d7b8ebee389ddbcf2095f53fe024a4e2a928
+
+### Immediate next step
+
+Verify GitHub CI for PR 39.
+
+Complete visual and browser validation, including
+the development-only preview restriction.
+
+Then continue the Platform Super Admin functionality
+using real backend data and independently authorized
+platform administration operations.
+
+Keep Clinic Admin and Platform Super Admin
+authorization boundaries separate.
+
+---
+
+---
+
+## Platform Administrator Tenant Read API V1
+
+### Repository and branch
+
+Repository:
+abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch:
+feature/configuration-service-foundation-v1
+
+Starting verified commit:
+2315cacfeed35043af64cd90ea1773234242532a
+
+Pull request: 39 (Draft).
+
+### Completed work
+
+- Implemented the read-only platform tenant service.
+- Added GET /api/v1/platform-admin/tenants.
+- Registered the service in the existing platform module.
+- Reused the existing authenticated session.
+- Required an independent active platform grant.
+- Limited the response to 25 customer records.
+- Returned only the approved tenant fields.
+- Added eight service regression tests.
+- Added four HTTP authorization and response tests.
+- Preserved the existing platform overview.
+- Preserved Clinic Admin authorization and workflows.
+
+### Security
+
+The authenticated user ID originates from the
+verified server-side session.
+
+Tenant roles do not independently grant platform access.
+
+Unauthorized requests must not return tenant data.
+
+The endpoint is read-only and uses no-store caching.
+
+No clinical, patient, credential, or membership
+records are returned.
+
+No tenant creation, modification, or deletion
+operations were introduced.
+
+### Files modified
+
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin.module.ts
+- apps/api/test/auth/auth.e2e.auth-spec.ts
+- PROJECT_CONTINUITY.md
+
+### Files created
+
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.ts
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.spec.ts
+
+Files deleted: none.
+
+### Validation
+
+Local typecheck: passed.
+Local lint: passed.
+Local project tests: passed.
+Local API build: passed.
+Tenant service regression tests: 8 passed.
+
+The HTTP integration tests require PostgreSQL 17
+validation through GitHub Actions.
+
+The new tenant endpoint is not yet connected
+to the Platform Super Admin frontend.
+
+### Recovery
+
+Starting verified commit:
+2315cacfeed35043af64cd90ea1773234242532a
+
+Before resuming, verify Git status, Git remote,
+the current branch, local and remote SHAs,
+AGENTS.md, ENGINEERING_STANDARDS.md,
+and PROJECT_CONTINUITY.md.
+
+The completed commit and push must be verified
+against the remote branch before claiming backup.
+
+### Immediate next step
+
+Verify the GitHub Actions PostgreSQL 17
+authentication and authorization tests.
+
+Then introduce the shared tenant-list API contract
+and connect the existing Platform Super Admin
+frontend to the real read-only endpoint.
+
+Preserve tenant isolation and the independent
+Platform Super Admin authorization boundary.
+
+Do not merge PR 39 or deploy to production
+before the integration is fully validated.
+
+---
+
+---
+
+## Platform Tenant Frontend Integration V1
+
+### Repository and branch
+
+Repository:
+abdalla12455-dev/ibn-hayan-healthcare-os
+
+Branch:
+feature/configuration-service-foundation-v1
+
+Starting verified commit:
+c9b4303e7deb5fcc84c7dec185ef50e21ad70ce1
+
+Pull request: 39 (Draft).
+
+### Completed work
+
+- Added the shared platform tenant-list data contract.
+- Added strict response validation with Zod.
+- Added the authenticated read-only tenant API client.
+- Connected the existing Platform Super Admin page
+  to the protected tenant-list endpoint.
+- Added actual customer names, identifiers, status,
+  and registration dates to the existing table.
+- Preserved Arabic RTL and English LTR support.
+- Implemented loading, empty, error, and retry states.
+- Preserved the development preview without real data.
+- Added contract, API client, and UI regression tests.
+- Corrected the unstable router test mock.
+- Corrected the React effect state-update issue.
+
+### Files modified
+
+- packages/contracts/src/platform-admin/index.ts
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- apps/web/src/app/platform-admin/platform-admin-overview-view.tsx
+- apps/web/src/app/platform-admin/visual-preview/platform-admin-visual-preview.tsx
+- PROJECT_CONTINUITY.md
+
+### Files created
+
+- packages/contracts/src/platform-admin/platform-tenants.schema.ts
+- packages/contracts/src/platform-admin/platform-tenants.schema.spec.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.spec.ts
+
+Files deleted: none.
+
+### Security and architecture
+
+The backend remains the authoritative platform
+authorization boundary.
+
+The frontend requests tenant data only after
+the authenticated platform overview succeeds.
+
+HTTP 401 and 403 responses prevent continued
+display of the protected administration workspace.
+
+The visual preview does not call the protected
+tenant-list API.
+
+No tenant creation, modification, or deletion
+operations were introduced.
+
+Clinic Admin permissions and workflows remain unchanged.
+
+Database schema and production data were not modified.
+
+### Validation
+
+Local project typecheck, lint, tests, and web build
+passed before this checkpoint.
+
+GitHub CI for the new commit remains pending.
+
+A structural security review and unit tests do not
+replace authenticated browser integration testing.
+
+The first 25 customers are displayed.
+The API indicates whether additional customers exist,
+but pagination is not yet implemented.
+
+Subscription, billing, patient, and booking statistics
+remain unconnected and must not be represented as
+real platform-wide metrics.
+
+### Recovery
+
+Verify Git status, remote, current branch,
+local and remote commit SHAs, AGENTS.md,
+ENGINEERING_STANDARDS.md, and PROJECT_CONTINUITY.md.
+
+Starting verified commit:
+c9b4303e7deb5fcc84c7dec185ef50e21ad70ce1
+
+The new commit SHA must be retrieved and compared
+with the remote branch SHA after pushing.
+
+### Immediate next step
+
+Verify GitHub CI for the new frontend integration.
+
+Test the authenticated platform workflow in a
+controlled development or isolated test environment.
+
+Verify tenant-list rendering, loading, retry,
+session expiry, authorization revocation,
+Arabic RTL, English LTR, and responsive layout.
+
+Then continue the platform customer-management workflow.
+
+Do not merge or deploy this milestone to production
+before the remaining integration checks are complete.
+
+---
+
+---
+
+## Local Platform Administrator Bootstrap and Audit Recovery (2026-11-14)
+
+### Verified repository baseline
+
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os
+- Development branch: feature/configuration-service-foundation-v1
+- Last verified pre-milestone commit: 11b6a8ad19b514cee8f0fea39c3bdd4b3c54e0fa
+- The local and remote branch matched before these changes.
+- This record does not claim a new Git commit or remote backup.
+
+### Completed work
+
+- Restored the isolated local PostgreSQL 17 development environment.
+- Verified connectivity to the application and audit databases.
+- Started the backend API and frontend successfully.
+- Created one local Platform Super Administrator identity with an
+  Argon2id password credential and an independent platform grant.
+- Created no Tenant, TenantMembership, or tenant role.
+- Added a development-only administrator bootstrap command.
+- Added a platform-specific audit action and bootstrap safety policy.
+- Recorded the initial platform grant in the transactional audit outbox.
+- Delivered three platform audit events: grant, successful login,
+  and session rotation.
+- Verified the three-event audit integrity chain successfully.
+- Verified the Arabic RTL and English LTR desktop admin layouts
+  through authenticated browser screenshots.
+- Confirmed that the empty customer list matches the empty tenant database.
+
+### Source files created
+
+- apps/api/src/scripts/platform-admin-bootstrap-dev.ts
+- apps/api/src/modules/platform-admin/platform-admin-bootstrap-policy.ts
+- apps/api/src/modules/platform-admin/platform-admin-bootstrap-policy.spec.ts
+- packages/observability/src/audit/platform-admin-action-code.spec.ts
+
+### Source files modified
+
+- apps/api/package.json
+- packages/observability/src/audit/action-codes.ts
+
+### Documentation
+
+- PROJECT_CONTINUITY.md updated in this milestone.
+
+Files deleted: none.
+
+### Validation
+
+- Platform administrator backend regression tests: passed.
+- New audit action tests: passed.
+- Typecheck, lint, and selected frontend tests: run during
+  this milestone's final validation.
+- Authenticated desktop layouts inspected in Arabic and English.
+- Audit recovery: 3 delivered, 0 pending, 0 delivery failures
+  at the time of the verified recovery check.
+- Platform audit integrity verification: passed, 3 events checked.
+- No production deployment or schema migration performed.
+
+### Known limitations and next checks
+
+- Mobile responsiveness has not been inspected in this milestone.
+- Browser console and network inspection are not yet recorded.
+- Session expiry, explicit revocation, and negative authorization
+  browser cases require additional integration checks.
+- The platform administrator overview contains placeholder metrics.
+- Customer listing currently has no registered tenants.
+- Pagination and customer-management operations are not implemented.
+- UI terminology must distinguish platform customer Tenants from
+  Organisations belonging to a Tenant.
+- Pending audit events may accumulate after future authenticated
+  operations until the dispatcher runs again.
+- No GitHub CI result is claimed for the uncommitted changes.
+
+### Recovery
+
+- Preserve the local Git working tree until committed and pushed.
+- Fetch the remote development branch before resuming work.
+- Restore only through a separately reviewed recovery procedure.
+- Post-bootstrap database backup: /Users/mike/.local/state/ibn-hayan/db-backups/20261114-232255-post-admin
+- Audit integrity keys are preserved separately outside Git.
+- Do not commit or expose local database dumps, HMAC keys, or passwords.
+- Local services: API port 3001 and web port 3000.
+
+### Immediate next step
+
+Review the complete source diff and all untracked files, check for
+secrets and accidental changes, commit only reviewed project files,
+push the current development branch to the correct origin, retrieve
+complete local and remote commit SHAs, and verify an exact match.
+
+Then complete remaining browser security, responsive, and
+authorization tests before proceeding with customer management.
+
+## 2026-11-19 — Platform Administration Security Regression
+
+### Repository and state
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting verified local and remote SHA: e14d0faf2ffed6e0abe5f5b30221df00d73d95b6.
+- Current task: establish permanent HTTP-level Platform Administration authorization regression tests.
+- The real local Platform Super Admin account and development databases were not used for test fixtures.
+
+### Completed work
+- Added nine Platform Admin HTTP security regression tests.
+- Verified that authenticated tenant R09 and tenant R13 identities without independent platform grants receive HTTP 403.
+- Verified active platform-grant access and denial after grant revocation, user disabling, session expiry, and session revocation.
+- Added an isolated-database environment-variable guard for the test suite.
+- Added root and API package commands to run the suite.
+- Wired the suite into the PostgreSQL 17 validation job in the existing main CI workflow.
+- Kept Platform Super Admin independent from tenant-scoped roles.
+
+### Created files
+- apps/api/test/security.platform-admin-spec.ts
+- apps/api/vitest.security-extra.config.ts
+
+### Modified files
+- apps/api/package.json
+- package.json
+- .github/workflows/main-ci.yml
+- PROJECT_CONTINUITY.md
+
+### Deleted files
+- None.
+
+### Validation
+- Existing isolated Clinic Admin suite: 24 tests passed.
+- New isolated Platform Admin suite: 9 tests passed.
+- TypeScript checks: passed after correcting test response typing.
+- ESLint and Prettier checks: passed for the security test files.
+- Full workspace typecheck, lint, unit tests, and audit configuration suite: passed in isolated Docker.
+- Production build: passed inside Docker with network access to fetch Google Fonts.
+- The first offline production-build attempt failed solely because Google Fonts could not be fetched with networking disabled.
+- Security integration tests used disposable PostgreSQL 17 inside a network-isolated container.
+- The official project security test command was revalidated before checkpoint creation.
+- GitHub CI for this new commit remains unverified until a PR triggers it and the run finishes.
+
+### Decisions and remaining risks
+- Preserve the separate Platform Super Admin grant; do not infer platform authority from R09 or R13.
+- Run security tests during development, not only at release time.
+- Test-database identity protection should be hardened beyond environment-variable presence checks in a future task.
+- Further security reviews must cover tenant isolation, sensitive-data exposure, authentication, dependencies, and audit integrity.
+- This successful regression suite does not constitute a full penetration test or a production security certification.
+- The current main CI workflow runs on main pushes and pull requests targeting main, not routine feature-branch pushes.
+
+### Recovery and next step
+- Protective configuration and test backups remain outside Git under ~/.local/state/ibn-hayan/security-lab/.
+- Latest verified pre-task GitHub commit: e14d0faf2ffed6e0abe5f5b30221df00d73d95b6.
+- Immediate next step: create and push a reviewed security-regression commit, verify complete local and remote SHAs, then open a PR targeting main to run GitHub CI.
+- Do not modify the real administrator account, audit database, or production environment during the pending CI verification.
+
+## 2026-11-19 — Platform Admin Authorization Audit Hardening
+
+### Repository and verified starting point
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting local and remote commit: cd2e7bb6b856d1cf06d545403ac3fb6db1c55d42.
+- Main branch was not modified or merged.
+
+### Completed work
+- Integrated Platform Admin authorization-decision auditing with the existing AuditHelperService and AuditModule.
+- Both platform administration endpoints now emit allowed or denied authorization decisions after authenticated platform-grant evaluation.
+- Preserved independent Platform Super Admin grants, session validation, and separation from Clinic Admin and tenant roles.
+- Added two isolated HTTP integration tests checking successful and denied audit events and absence of sensitive credentials in recorded event payloads.
+- No database schema changes or migrations.
+
+### Files modified
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin.module.ts
+- apps/api/test/security.platform-admin-spec.ts
+- PROJECT_CONTINUITY.md
+
+### Files created or deleted
+- Created: none.
+- Deleted: none.
+
+### Validation results
+- Platform administration HTTP security suite: 11/11 passed.
+- Clinic Admin integration suite: 24/24 passed.
+- Workspace TypeScript: passed.
+- Workspace ESLint: passed.
+- Workspace unit tests: passed.
+- Audit configuration tests: passed.
+- Production build: passed with network access for build-time Google Fonts.
+- PostgreSQL integration tests ran in disposable network-isolated Docker PostgreSQL environments.
+- Real local development databases and production databases were not used for these tests.
+- The preceding commit cd2e7bb passed GitHub Main CI run 145.
+- GitHub CI verification of this new checkpoint is pending until the new commit's workflow completes.
+
+### Decisions, known risks and remaining work
+- Continue using existing authorization.decision.allowed and authorization.decision.denied action codes.
+- Platform authorization audit events use platform scope with tenantId null.
+- Audit emission follows the existing best-effort read-only authorization convention; successful event delivery to the dedicated audit store has not been demonstrated by these tests.
+- Keep the existing generic 401 and 403 responses without disclosing grant details.
+- Verify audit dispatcher and audit-store persistence separately before claiming end-to-end audit durability.
+- Continue security review of PR #39 before any merge into main.
+- Do not run destructive database operations or production deployments without explicit approval.
+
+### Recovery and immediate next step
+- Source backup: ~/.local/state/ibn-hayan/security-lab/audit-hardening.Q7Tny2/.
+- Continuity backup: stored under ~/.local/state/ibn-hayan/security-lab/audit-checkpoint.*.
+- Latest verified pre-task Git commit: cd2e7bb6b856d1cf06d545403ac3fb6db1c55d42.
+- Next: commit these four files, push the feature branch, compare full local and remote SHAs, and verify the resulting GitHub CI run.
+
+## 2026-11-19 — Engineering Documentation Consolidation
+
+### Repository and baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting commit: 9f9c3199ccdb269c9fd67b5bd5325da75c00199c.
+- GitHub Main CI run 146 passed for the starting commit.
+
+### Completed documentation changes
+- Consolidated specialized development, Git recovery, database,
+  tenant isolation, UI, RTL/LTR, and verification requirements into
+  ENGINEERING_STANDARDS.md.
+- Retained AGENTS.md as the lightweight engineering entrypoint.
+- Preserved the existing historical continuity records.
+- Created a professional repository README.md describing project
+  scope, verified foundations, architecture, and development status.
+- Retired five redundant, tool-specific documentation files after
+  creating verified external copies.
+- Historical file contents remain recoverable from Git history.
+
+### Created files
+- README.md
+
+### Modified files
+- ENGINEERING_STANDARDS.md
+- PROJECT_CONTINUITY.md
+
+### Retired files
+- docs/AI_AGENT_SAFETY_SKILL.md
+- .agents/skills/ibn-hayan-completion-git-proof/SKILL.md
+- .agents/skills/ibn-hayan-database-tenancy/SKILL.md
+- .agents/skills/ibn-hayan-implementation-guardian/SKILL.md
+- .agents/skills/ibn-hayan-ui-role-rtl/SKILL.md
+
+### Validation and scope
+- Documentation reference and backup checks required.
+- No runtime code, schema, migration, permission, or CI changes.
+- No application or audit database operations.
+- Historic continuity citations to retired paths describe their
+  previous existence and must remain unchanged.
+- CI for the new documentation commit remains to be verified.
+
+### Remaining risks and next step
+- Historical handover copies and captured tool outputs remain in
+  the repository; assess them separately before any archive cleanup.
+- Archived historical material is not a current feature inventory.
+- Review documentation diff, verify retained engineering controls,
+  commit and push the development branch, and compare exact SHAs.
+- Keep PR 39 unmerged until the separate full change review ends.
+
+## 2026-11-19 — Platform and Clinic Role Isolation Regression
+
+### Repository and baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting local and remote commit: 165ccea6088273eadf37933ff0780bbd146eaf8c.
+- GitHub CI #147 passed on the starting commit.
+- PR #39 remains subject to security review before merging into main.
+
+### Completed work
+- Extended the existing Platform Admin HTTP security test to verify that a platform-only administrator cannot access tenant context or Clinic Admin Overview.
+- Confirmed the platform-only session can access its authorized Platform Admin Overview.
+- Verified attempts to forge tenant roles and tenant identity through request headers do not bypass server-side authorization.
+- Reused an existing authenticated test session so the suite does not exhaust the production login rate limiter.
+- Preserved the existing 10-login-attempts-per-60-seconds security control.
+- No application source code, API contracts, database schemas, or migrations changed.
+
+### Files
+- Modified: apps/api/test/security.platform-admin-spec.ts.
+- Modified: PROJECT_CONTINUITY.md.
+- Created: none.
+- Deleted: none.
+
+### Validation
+- Platform Admin HTTP security suite: 11/11 tests passed.
+- TypeScript check: passed.
+- ESLint check: passed.
+- PostgreSQL tests used a disposable isolated test environment.
+- No real development or production databases were modified.
+- A first attempt with an additional login reached HTTP 429; the test was corrected to reuse the existing session.
+- The comprehensive workspace and Clinic Admin tests passed at the preceding application checkpoint; they have not been rerun for this test-only change.
+- GitHub CI for the new commit requires separate verification after push.
+
+### Risks and next steps
+- Passing authorization tests does not constitute complete security certification.
+- Verify the new commit's GitHub CI.
+- Continue the remaining security review of PR #39, including audit durability and tenant isolation, before any merge.
+- Preserve independent Platform Super Admin and tenant-scoped Clinic Admin authority.
+- Do not merge into main, deploy to production, or modify production data without completing the relevant review.
+
+### Recovery
+- Verified pre-task commit: 165ccea6088273eadf37933ff0780bbd146eaf8c.
+- Protective copies stored outside the repository under ~/.local/state/ibn-hayan/security-lab/.
+- Retrieve the new full local and remote commit SHAs from the completion report after the push.
+
+## 2026-11-19 — Platform Authorization Audit Delivery Regression
+
+### Repository and verified baseline
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Starting local and remote SHA: faec3578069337b1673650690c4584b73679bda0.
+- GitHub Main CI run 148 succeeded on the starting commit.
+- PR #39 remains open and in draft state.
+
+### Completed work
+- Extended the existing Platform Admin HTTP security regression suite.
+- Verified that authorized and denied platform access events are emitted to the transactional audit outbox.
+- Invoked the existing audit dispatcher against isolated PostgreSQL test databases.
+- Verified corresponding events reach the dedicated audit store.
+- Checked event identity, actor, action, outcome, endpoint, method, session, and platform scope.
+- Verified outbox delivered-at acknowledgement and absence of duplicate persisted events after a repeat dispatch.
+- Checked persisted events do not contain the test password, cookie, or actor email.
+- Reused existing authenticated sessions without increasing login attempts.
+- Preserved Platform Super Admin and Clinic Admin authorization separation.
+- No application source code, database schema, or migration changes.
+
+### Files
+- Modified: apps/api/test/security.platform-admin-spec.ts.
+- Modified: PROJECT_CONTINUITY.md.
+- Created: none.
+- Deleted: none.
+
+### Validation
+- Platform Admin HTTP security suite: 11 of 11 passed.
+- TypeScript: passed.
+- ESLint: passed.
+- Audit delivery tests ran in disposable isolated PostgreSQL environments.
+- Initial test-only TypeScript definition error was corrected before successful validation.
+- No operational development or production databases were modified.
+- GitHub CI for this new checkpoint remains pending until the new commit is pushed and checked.
+
+### Remaining risks
+- This verifies event delivery in isolated tests, not production dispatcher availability.
+- Further review of audit failure recovery, tenant isolation, and operational security remains necessary.
+- PR #39 must not be merged solely on the basis of these test results.
+
+### Recovery and next step
+- Verified starting commit: faec3578069337b1673650690c4584b73679bda0.
+- Protective copies are stored outside the repository under ~/.local/state/ibn-hayan/security-lab/.
+- Commit and push the reviewed test and continuity updates.
+- Verify complete local and remote branch SHAs and the new GitHub CI result.
+- Continue PR #39 review before merging or advancing platform administration features.
+
+## 2026-11-20 — Platform Tenant Cursor Pagination
+
+### Repository and state
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting local and remote SHA: be9ed71d5f2441174d7658eb6bbc8703d925263c.
+- GitHub CI #149 passed on the starting commit.
+- PR #39 remains in draft pending review.
+
+### Completed
+- Implemented cursor-based pagination for the Platform Super Admin tenant/customer listing.
+- Kept the existing 25-customer API page limit.
+- Preserved independent server-side platform authorization.
+- Used deterministic createdAt and ID ordering.
+- Added cursor parsing and validation.
+- Added an optional nextCursor response field.
+- Implemented bilingual Load More controls and additional-page handling.
+- Added backend, contract, and frontend regression tests.
+- Fixed a strict TypeScript array-index diagnostic in the pagination test.
+
+### Files modified
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.ts
+- apps/api/src/modules/platform-admin/platform-admin.controller.ts
+- apps/api/src/modules/platform-admin/platform-admin-tenants.service.spec.ts
+- packages/contracts/src/platform-admin/platform-tenants.schema.ts
+- packages/contracts/src/platform-admin/platform-tenants.schema.spec.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.ts
+- apps/web/src/lib/api/platform-admin/platform-tenants.client.spec.ts
+- apps/web/src/app/platform-admin/platform-admin-overview-view.tsx
+- apps/web/src/app/platform-admin/page.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Contracts, API, and web TypeScript validation passed.
+- Relevant API and web ESLint checks passed.
+- Focused backend, contract, and frontend regression tests passed.
+- No database schema or migration changes were made.
+- No real database modification or production deployment occurred.
+- GitHub CI for the new commit must be checked after push.
+
+### Decisions and remaining risks
+- Tenant means subscribing customer, not Organisation or Facility.
+- Browser-provided cursors do not establish identity or authorization.
+- Load More remains read-only and uses the existing authenticated API.
+- Broader integration, responsive RTL/LTR behavior, and concurrency edge cases remain subject to CI and review.
+- Multi-role login routing remains a separate unfinished UX task.
+- PR #39 must not be merged without reviewing its complete changes.
+
+### Recovery and next action
+- Starting commit: be9ed71d5f2441174d7658eb6bbc8703d925263c.
+- Protective backup stored outside the repository under ~/.local/state/ibn-hayan/pagination/.
+- New local and remote SHAs will appear in the completion report.
+- Verify the new CI result and continue PR #39 review.
+
+## 2026-11-28 — Verified Multi-Role Navigation Checkpoint
+
+### Repository and state
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting SHA: bc03ece6b6fcc0eba13ee562e6a011f6ab569cbe.
+- GitHub CI #150 passed on the previous checkpoint.
+- PR #39 remains open and draft.
+
+### Completed
+- Added an optional platform-access indicator to authenticated session responses.
+- Indicator is derived from the independent active Platform Administrator grant.
+- Added bilingual Platform Administration navigation for verified multi-role users.
+- Preserved ordinary login routing.
+- Kept Platform Super Admin separate from tenant-scoped R09 and R13.
+- Added contract, dashboard, and HTTP security regression assertions.
+- Recovered the existing Colima environment.
+- Corrected Docker validation by mounting the existing Vitest security configuration.
+
+### Files modified
+- packages/contracts/src/auth/auth.schema.ts
+- packages/contracts/src/auth/auth.schema.spec.ts
+- apps/api/src/modules/auth/auth.service.ts
+- apps/api/test/security.platform-admin-spec.ts
+- apps/web/src/app/dashboard/page.tsx
+- apps/web/src/app/dashboard/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Contract, API, and web TypeScript checks passed.
+- Relevant ESLint checks passed.
+- Focused contract and web regression tests passed.
+- Isolated Platform Admin HTTP security suite passed.
+- API and web production builds passed.
+- No database migration or real database modification.
+- No production deployment.
+- GitHub CI for the new commit requires subsequent verification.
+
+### Decisions
+- Client-side navigation is informational, never proof of authorization.
+- Protected platform endpoints independently recheck the platform grant.
+- Tenant-scoped R09 and R13 cannot establish platform authority.
+- Login throttling, CSRF, and session-cookie controls remain unchanged.
+
+### Known risks and unfinished work
+- UI may briefly display a previously authorized link after grant revocation.
+- Protected API access still fails closed after grant revocation.
+- Full PR #39 review and new CI verification remain outstanding.
+- Existing frontend tests can emit non-fatal React act warnings.
+- Formatting of affected files should be reviewed for unrelated changes before PR merge.
+
+### Recovery
+- Verified pre-task SHA: bc03ece6b6fcc0eba13ee562e6a011f6ab569cbe.
+- Protective backups and the original uncommitted patch are stored under ~/.local/state/ibn-hayan/multirole/.
+- The resulting commit SHA is available in Git history and the final execution report.
+
+### Immediate next step
+- Verify the new GitHub CI run.
+- Review PR #39 before any merge.
+
+## 2026-11-28 — Multi-Role Formatting Cleanup
+
+### Repository
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Previous verified commit: 6b5e0d9d69c59db038eff13a28f1adfd81dcec75.
+- PR #39 remains open and draft.
+
+### Completed
+- Reduced unrelated Prettier formatting changes introduced during multi-role navigation implementation.
+- Restored the existing single-quote formatting convention in affected contract and dashboard files.
+- Preserved the verified platform-access session indicator and dashboard navigation.
+- Made no intentional functional or database changes.
+
+### Files modified
+- packages/contracts/src/auth/auth.schema.ts
+- packages/contracts/src/auth/auth.schema.spec.ts
+- apps/web/src/app/dashboard/page.tsx
+- apps/web/src/app/dashboard/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Formatting churn reduction verified against the preceding commit's parent.
+- Contract, API, and web type checks passed.
+- Targeted lint checks passed.
+- Contract and web regression tests passed.
+- API and web production builds passed.
+- Previous security integration tests passed on the preceding feature commit.
+- New GitHub CI must be verified after push.
+
+### Risks and decisions
+- Platform authorization continues to rely on independently verified server-side grants.
+- Tenant R09 and R13 roles do not grant platform authority.
+- No production deployment, database changes, or PR merge.
+- PR #39 remains subject to final review.
+
+### Recovery and immediate next step
+- Previous verified commit: 6b5e0d9d69c59db038eff13a28f1adfd81dcec75.
+- Backup stored under ~/.local/state/ibn-hayan/multirole/.
+- Verify GitHub CI and review PR #39.
+
+## 2026-11-28 — Platform Tenant Pagination Security Hardening
+
+### Repository
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting SHA: 676c7dfe1928e64a30ee4617c59fab45b197e759.
+- PR #39 remains in draft status.
+
+### Completed
+- Hid protected customer information before redirecting to login when a Load More request returns HTTP 401.
+- Verified loading an additional customer page preserves already loaded records.
+- Verified pagination failure displays an error without removing existing records.
+- Verified retry uses the same continuation cursor.
+- Added session-expiry regression coverage for the additional-page workflow.
+
+### Files modified
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Web TypeScript and targeted ESLint checks passed.
+- Platform pagination page and API client tests passed.
+- Web production build passed.
+- No API authorization changes.
+- No database schema or operational database changes.
+- No production deployment.
+- Latest GitHub CI requires verification after push.
+
+### Security decisions
+- Server-side Platform Super Admin authorization remains authoritative.
+- Tenant-scoped R09 and R13 permissions remain separate.
+- Expired sessions must not leave customer records visible while redirecting.
+
+### Remaining work
+- Verify the resulting GitHub CI run.
+- Review PR #39 before any merge.
+- Browser and integration checks remain necessary before production release.
+
+### Recovery
+- Starting SHA: 676c7dfe1928e64a30ee4617c59fab45b197e759.
+- Protective files stored under ~/.local/state/ibn-hayan/pagination/.
+- Use the final execution report for the new local and remote SHAs.
