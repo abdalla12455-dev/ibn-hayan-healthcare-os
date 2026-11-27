@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import {
   useState,
@@ -6,9 +6,9 @@ import {
   useRef,
   type FormEvent,
   type ReactElement,
-} from "react";
-import { useRouter } from "next/navigation";
-import { getSession, getCsrfToken, logout } from "@/lib/api/auth/auth.client";
+} from 'react';
+import { useRouter } from 'next/navigation';
+import { getSession, getCsrfToken, logout } from '@/lib/api/auth/auth.client';
 import {
   getContext,
   selectTenantContext,
@@ -17,7 +17,7 @@ import {
   clearOrganisationContext,
   selectFacilityContext,
   clearFacilityContext,
-} from "@/lib/api/context";
+} from '@/lib/api/context';
 import type {
   SessionResponse,
   ContextResponse,
@@ -28,12 +28,12 @@ import type {
   ActiveOrganisationContext,
   FacilityContextOption,
   ActiveFacilityContext,
-} from "@ibn-hayan/contracts";
-import { useLanguage } from "@/components/i18n/language-context";
-import { BrandMark } from "@/components/marketing/brand-mark";
-import { LanguageSwitch } from "@/components/marketing/language-switch";
-import { Button } from "@/components/ui/button";
-import { StatusMessage } from "@/components/ui/status-message";
+} from '@ibn-hayan/contracts';
+import { useLanguage } from '@/components/i18n/language-context';
+import { BrandMark } from '@/components/marketing/brand-mark';
+import { LanguageSwitch } from '@/components/marketing/language-switch';
+import { Button } from '@/components/ui/button';
+import { StatusMessage } from '@/components/ui/status-message';
 
 /**
  * Premium authenticated dashboard shell.
@@ -78,138 +78,138 @@ import { StatusMessage } from "@/components/ui/status-message";
 
 const DASHBOARD_COPY = {
   ar: {
-    pageTitle: "مساحة العمل",
-    pageSubtitle: "اختر بيئة عملك وابدأ العمل بثقة.",
-    workspaceTitle: "بيئة العمل النشطة",
-    workspaceEyebrow: "السياق الحالي",
-    currentLabel: "الحالي",
-    noContextTitle: "لم يتم اختيار بيئة عمل",
-    noContextBody: "اختر بيئة عمل من القائمة أدناه للبدء.",
-    selectLegend: "اختر بيئة عمل",
-    selectButton: "اختيار / تغيير",
-    selecting: "جارٍ الاختيار…",
-    clearButton: "مسح الاختيار",
-    clearing: "جارٍ المسح…",
-    noOptionsTitle: "لا توجد بيئات عمل متاحة",
-    noOptionsBody: "لا توجد عضويات نشطة مرتبطة بحسابك.",
-    accountTitle: "حسابك",
-    nameLabel: "الاسم",
-    emailLabel: "البريد الإلكتروني",
-    sessionLabel: "الجلسة",
-    sessionActive: "نشطة",
-    membershipsTitle: "بيئات العمل المتاحة",
-    noMemberships: "لا توجد عضويات نشطة.",
-    statusActive: "نشط",
-    statusSuspended: "موقوف",
-    rolesLabel: "الأدوار",
-    noRoles: "لا توجد أدوار مسندة.",
-    logoutButton: "تسجيل الخروج",
-    loggingOut: "جارٍ تسجيل الخروج…",
-    errorContextGeneric: "تعذّر تحديث بيئة العمل. حاول مرة أخرى.",
-    errorLogoutGeneric: "تعذّر تسجيل الخروج. حاول مرة أخرى.",
-    errorContextLoad: "تعذّر تحميل بيئة العمل.",
-    activeChip: "بيئة العمل الحالية",
-    idleChip: "بدون بيئة عمل",
+    pageTitle: 'مساحة العمل',
+    pageSubtitle: 'اختر بيئة عملك وابدأ العمل بثقة.',
+    workspaceTitle: 'بيئة العمل النشطة',
+    workspaceEyebrow: 'السياق الحالي',
+    currentLabel: 'الحالي',
+    noContextTitle: 'لم يتم اختيار بيئة عمل',
+    noContextBody: 'اختر بيئة عمل من القائمة أدناه للبدء.',
+    selectLegend: 'اختر بيئة عمل',
+    selectButton: 'اختيار / تغيير',
+    selecting: 'جارٍ الاختيار…',
+    clearButton: 'مسح الاختيار',
+    clearing: 'جارٍ المسح…',
+    noOptionsTitle: 'لا توجد بيئات عمل متاحة',
+    noOptionsBody: 'لا توجد عضويات نشطة مرتبطة بحسابك.',
+    accountTitle: 'حسابك',
+    nameLabel: 'الاسم',
+    emailLabel: 'البريد الإلكتروني',
+    sessionLabel: 'الجلسة',
+    sessionActive: 'نشطة',
+    membershipsTitle: 'بيئات العمل المتاحة',
+    noMemberships: 'لا توجد عضويات نشطة.',
+    statusActive: 'نشط',
+    statusSuspended: 'موقوف',
+    rolesLabel: 'الأدوار',
+    noRoles: 'لا توجد أدوار مسندة.',
+    logoutButton: 'تسجيل الخروج',
+    loggingOut: 'جارٍ تسجيل الخروج…',
+    errorContextGeneric: 'تعذّر تحديث بيئة العمل. حاول مرة أخرى.',
+    errorLogoutGeneric: 'تعذّر تسجيل الخروج. حاول مرة أخرى.',
+    errorContextLoad: 'تعذّر تحميل بيئة العمل.',
+    activeChip: 'بيئة العمل الحالية',
+    idleChip: 'بدون بيئة عمل',
     sessionRemaining: (ms: number) => formatRemainingAr(ms),
     // ADR-015: organisation and facility context labels.
-    organisationTitle: "المؤسسة النشطة",
-    organisationSelectLegend: "اختر مؤسسة",
-    organisationNoOptionsTitle: "لا توجد مؤسسات متاحة",
+    organisationTitle: 'المؤسسة النشطة',
+    organisationSelectLegend: 'اختر مؤسسة',
+    organisationNoOptionsTitle: 'لا توجد مؤسسات متاحة',
     organisationNoOptionsBody:
-      "لا توجد مؤسسات مرتبطة بدورك في بيئة العمل الحالية.",
-    organisationNoActiveTitle: "لم يتم اختيار مؤسسة",
-    organisationNoActiveBody: "اختر مؤسسة من القائمة أدناه للبدء.",
-    organisationClearButton: "مسح المؤسسة",
-    organisationSelectButton: "اختيار المؤسسة",
-    facilityTitle: "المنشأة النشطة",
-    facilitySelectLegend: "اختر منشأة",
-    facilityNoOptionsTitle: "لا توجد منشآت متاحة",
-    facilityNoOptionsBody: "لا توجد منشآت مرتبطة بدورك في المؤسسة الحالية.",
-    facilityNoActiveTitle: "لم يتم اختيار منشأة",
-    facilityNoActiveBody: "اختر منشأة من القائمة أدناه للبدء.",
-    facilityClearButton: "مسح المنشأة",
-    facilitySelectButton: "اختيار المنشأة",
-    facilityRequiresOrganisation: "يجب اختيار مؤسسة قبل اختيار منشأة.",
-    activeOrganisationChip: "المؤسسة الحالية",
-    activeFacilityChip: "المنشأة الحالية",
+      'لا توجد مؤسسات مرتبطة بدورك في بيئة العمل الحالية.',
+    organisationNoActiveTitle: 'لم يتم اختيار مؤسسة',
+    organisationNoActiveBody: 'اختر مؤسسة من القائمة أدناه للبدء.',
+    organisationClearButton: 'مسح المؤسسة',
+    organisationSelectButton: 'اختيار المؤسسة',
+    facilityTitle: 'المنشأة النشطة',
+    facilitySelectLegend: 'اختر منشأة',
+    facilityNoOptionsTitle: 'لا توجد منشآت متاحة',
+    facilityNoOptionsBody: 'لا توجد منشآت مرتبطة بدورك في المؤسسة الحالية.',
+    facilityNoActiveTitle: 'لم يتم اختيار منشأة',
+    facilityNoActiveBody: 'اختر منشأة من القائمة أدناه للبدء.',
+    facilityClearButton: 'مسح المنشأة',
+    facilitySelectButton: 'اختيار المنشأة',
+    facilityRequiresOrganisation: 'يجب اختيار مؤسسة قبل اختيار منشأة.',
+    activeOrganisationChip: 'المؤسسة الحالية',
+    activeFacilityChip: 'المنشأة الحالية',
     // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1).
-    clinicAdminEntryTitle: "إدارة المنشأة",
+    clinicAdminEntryTitle: 'إدارة المنشأة',
     clinicAdminEntryBody:
-      "لديك بيئة عمل ومؤسسة ومنشأة نشطة. ادخل إلى تطبيق إدارة المنشأة لإدارة منشأتك.",
-    clinicAdminEntryButton: "الدخول إلى إدارة المنشأة",
-    clinicAdminEntryRoleHint: "مدير المنشأة",
-    platformAdminEntryButton: "الدخول إلى إدارة المنصة",
+      'لديك بيئة عمل ومؤسسة ومنشأة نشطة. ادخل إلى تطبيق إدارة المنشأة لإدارة منشأتك.',
+    clinicAdminEntryButton: 'الدخول إلى إدارة المنشأة',
+    clinicAdminEntryRoleHint: 'مدير المنشأة',
+    platformAdminEntryButton: 'الدخول إلى إدارة المنصة',
   },
   en: {
-    pageTitle: "Workspace",
-    pageSubtitle: "Choose your workspace and begin work with confidence.",
-    workspaceTitle: "Active workspace",
-    workspaceEyebrow: "Current context",
-    currentLabel: "Current",
-    noContextTitle: "No workspace selected",
-    noContextBody: "Choose a workspace from the list below to begin.",
-    selectLegend: "Select a workspace",
-    selectButton: "Select / Change",
-    selecting: "Selecting…",
-    clearButton: "Clear selection",
-    clearing: "Clearing…",
-    noOptionsTitle: "No workspaces available",
-    noOptionsBody: "No active memberships are associated with your account.",
-    accountTitle: "Your account",
-    nameLabel: "Name",
-    emailLabel: "Email",
-    sessionLabel: "Session",
-    sessionActive: "Active",
-    membershipsTitle: "Available workspaces",
-    noMemberships: "No active memberships.",
-    statusActive: "active",
-    statusSuspended: "suspended",
-    rolesLabel: "Roles",
-    noRoles: "No roles assigned.",
-    logoutButton: "Sign out",
-    loggingOut: "Signing out…",
-    errorContextGeneric: "Unable to update the workspace. Please try again.",
-    errorLogoutGeneric: "Unable to sign out. Please try again.",
-    errorContextLoad: "Unable to load the workspace.",
-    activeChip: "Active workspace",
-    idleChip: "No workspace",
+    pageTitle: 'Workspace',
+    pageSubtitle: 'Choose your workspace and begin work with confidence.',
+    workspaceTitle: 'Active workspace',
+    workspaceEyebrow: 'Current context',
+    currentLabel: 'Current',
+    noContextTitle: 'No workspace selected',
+    noContextBody: 'Choose a workspace from the list below to begin.',
+    selectLegend: 'Select a workspace',
+    selectButton: 'Select / Change',
+    selecting: 'Selecting…',
+    clearButton: 'Clear selection',
+    clearing: 'Clearing…',
+    noOptionsTitle: 'No workspaces available',
+    noOptionsBody: 'No active memberships are associated with your account.',
+    accountTitle: 'Your account',
+    nameLabel: 'Name',
+    emailLabel: 'Email',
+    sessionLabel: 'Session',
+    sessionActive: 'Active',
+    membershipsTitle: 'Available workspaces',
+    noMemberships: 'No active memberships.',
+    statusActive: 'active',
+    statusSuspended: 'suspended',
+    rolesLabel: 'Roles',
+    noRoles: 'No roles assigned.',
+    logoutButton: 'Sign out',
+    loggingOut: 'Signing out…',
+    errorContextGeneric: 'Unable to update the workspace. Please try again.',
+    errorLogoutGeneric: 'Unable to sign out. Please try again.',
+    errorContextLoad: 'Unable to load the workspace.',
+    activeChip: 'Active workspace',
+    idleChip: 'No workspace',
     sessionRemaining: (ms: number) => formatRemainingEn(ms),
     // ADR-015: organisation and facility context labels.
-    organisationTitle: "Active organisation",
-    organisationSelectLegend: "Select an organisation",
-    organisationNoOptionsTitle: "No organisations available",
+    organisationTitle: 'Active organisation',
+    organisationSelectLegend: 'Select an organisation',
+    organisationNoOptionsTitle: 'No organisations available',
     organisationNoOptionsBody:
-      "No organisations are associated with your role in the current workspace.",
-    organisationNoActiveTitle: "No organisation selected",
+      'No organisations are associated with your role in the current workspace.',
+    organisationNoActiveTitle: 'No organisation selected',
     organisationNoActiveBody:
-      "Choose an organisation from the list below to begin.",
-    organisationClearButton: "Clear organisation",
-    organisationSelectButton: "Select organisation",
-    facilityTitle: "Active facility",
-    facilitySelectLegend: "Select a facility",
-    facilityNoOptionsTitle: "No facilities available",
+      'Choose an organisation from the list below to begin.',
+    organisationClearButton: 'Clear organisation',
+    organisationSelectButton: 'Select organisation',
+    facilityTitle: 'Active facility',
+    facilitySelectLegend: 'Select a facility',
+    facilityNoOptionsTitle: 'No facilities available',
     facilityNoOptionsBody:
-      "No facilities are associated with your role in the current organisation.",
-    facilityNoActiveTitle: "No facility selected",
-    facilityNoActiveBody: "Choose a facility from the list below to begin.",
-    facilityClearButton: "Clear facility",
-    facilitySelectButton: "Select facility",
+      'No facilities are associated with your role in the current organisation.',
+    facilityNoActiveTitle: 'No facility selected',
+    facilityNoActiveBody: 'Choose a facility from the list below to begin.',
+    facilityClearButton: 'Clear facility',
+    facilitySelectButton: 'Select facility',
     facilityRequiresOrganisation:
-      "Select an organisation before selecting a facility.",
-    activeOrganisationChip: "Active organisation",
-    activeFacilityChip: "Active facility",
+      'Select an organisation before selecting a facility.',
+    activeOrganisationChip: 'Active organisation',
+    activeFacilityChip: 'Active facility',
     // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1).
-    clinicAdminEntryTitle: "Clinic Admin",
+    clinicAdminEntryTitle: 'Clinic Admin',
     clinicAdminEntryBody:
-      "You have an active workspace, organisation, and facility. Enter the Clinic Admin application to manage your facility.",
-    clinicAdminEntryButton: "Enter Clinic Admin",
-    clinicAdminEntryRoleHint: "Clinic Administrator",
-    platformAdminEntryButton: "Open Platform Administration",
+      'You have an active workspace, organisation, and facility. Enter the Clinic Admin application to manage your facility.',
+    clinicAdminEntryButton: 'Enter Clinic Admin',
+    clinicAdminEntryRoleHint: 'Clinic Administrator',
+    platformAdminEntryButton: 'Open Platform Administration',
   },
 } as const;
 
 function formatRemainingEn(ms: number): string {
-  if (ms <= 0) return "expired";
+  if (ms <= 0) return 'expired';
   const totalMinutes = Math.floor(ms / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -220,7 +220,7 @@ function formatRemainingEn(ms: number): string {
 }
 
 function formatRemainingAr(ms: number): string {
-  if (ms <= 0) return "منتهية";
+  if (ms <= 0) return 'منتهية';
   const totalMinutes = Math.floor(ms / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -243,18 +243,18 @@ export default function DashboardPage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [selectedMembershipId, setSelectedMembershipId] = useState<string>("");
+  const [selectedMembershipId, setSelectedMembershipId] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [contextError, setContextError] = useState<string | null>(null);
   // ADR-015: organisation and facility selector state.
   const [selectedOrganisationId, setSelectedOrganisationId] =
-    useState<string>("");
+    useState<string>('');
   const [selectingOrganisation, setSelectingOrganisation] = useState(false);
   const [clearingOrganisation, setClearingOrganisation] = useState(false);
   const [organisationError, setOrganisationError] = useState<string | null>(
     null,
   );
-  const [selectedFacilityId, setSelectedFacilityId] = useState<string>("");
+  const [selectedFacilityId, setSelectedFacilityId] = useState<string>('');
   const [selectingFacility, setSelectingFacility] = useState(false);
   const [clearingFacility, setClearingFacility] = useState(false);
   const [facilityError, setFacilityError] = useState<string | null>(null);
@@ -270,7 +270,7 @@ export default function DashboardPage() {
         setSession(result.data);
         setLoading(false);
       } else {
-        router.replace("/login");
+        router.replace('/login');
       }
     })();
     return () => {
@@ -304,14 +304,14 @@ export default function DashboardPage() {
             result.data.organisationOptions[0]!.organisationId,
           );
         } else {
-          setSelectedOrganisationId("");
+          setSelectedOrganisationId('');
         }
         if (result.data.activeFacility !== null) {
           setSelectedFacilityId(result.data.activeFacility.facilityId);
         } else if (result.data.facilityOptions.length > 0) {
           setSelectedFacilityId(result.data.facilityOptions[0]!.facilityId);
         } else {
-          setSelectedFacilityId("");
+          setSelectedFacilityId('');
         }
       } else {
         setContextError(copy.errorContextLoad);
@@ -345,7 +345,7 @@ export default function DashboardPage() {
       return;
     }
 
-    router.replace("/login");
+    router.replace('/login');
   }
 
   async function handleSelectContext(
@@ -471,7 +471,7 @@ export default function DashboardPage() {
     } else if (result.data.facilityOptions.length > 0) {
       setSelectedFacilityId(result.data.facilityOptions[0]!.facilityId);
     } else {
-      setSelectedFacilityId("");
+      setSelectedFacilityId('');
     }
     setSelectingOrganisation(false);
   }
@@ -508,11 +508,11 @@ export default function DashboardPage() {
           reloaded.data.organisationOptions[0]!.organisationId,
         );
       } else {
-        setSelectedOrganisationId("");
+        setSelectedOrganisationId('');
       }
       // Per ADR-015, clearing the organisation also clears the
       // facility (cascade).
-      setSelectedFacilityId("");
+      setSelectedFacilityId('');
     } else {
       setContext((prev) =>
         prev === null
@@ -524,7 +524,7 @@ export default function DashboardPage() {
               facilityOptions: [],
             },
       );
-      setSelectedFacilityId("");
+      setSelectedFacilityId('');
     }
     setClearingOrganisation(false);
   }
@@ -637,8 +637,8 @@ export default function DashboardPage() {
           >
             <span
               className={
-                "ih-app__header-context-dot" +
-                (active === null ? " ih-app__header-context-dot--none" : "")
+                'ih-app__header-context-dot' +
+                (active === null ? ' ih-app__header-context-dot--none' : '')
               }
               aria-hidden="true"
             />
@@ -650,7 +650,7 @@ export default function DashboardPage() {
                 className="ih-app__header-context-segment"
                 aria-hidden="true"
               >
-                {"·"}
+                {'·'}
               </span>
             )}
             {activeOrganisation !== null && (
@@ -663,7 +663,7 @@ export default function DashboardPage() {
                 className="ih-app__header-context-segment"
                 aria-hidden="true"
               >
-                {"·"}
+                {'·'}
               </span>
             )}
             {activeFacility !== null && (
@@ -676,7 +676,7 @@ export default function DashboardPage() {
             {session.hasPlatformAdminAccess === true && (
               <button
                 type="button"
-                onClick={() => router.push("/platform-admin")}
+                onClick={() => router.push('/platform-admin')}
                 className="rounded-lg border border-border px-3 py-2 text-sm font-medium"
               >
                 {copy.platformAdminEntryButton}
@@ -783,9 +783,9 @@ export default function DashboardPage() {
           <p
             className="ih-context-current__label"
             style={{
-              marginTop: "0.5rem",
-              color: "var(--text-secondary)",
-              fontSize: "0.875rem",
+              marginTop: '0.5rem',
+              color: 'var(--text-secondary)',
+              fontSize: '0.875rem',
             }}
           >
             {copy.facilityRequiresOrganisation}
@@ -815,7 +815,7 @@ export default function DashboardPage() {
           activeFacility !== null &&
           (() => {
             const hasR09 = active.roles.some(
-              (role) => role.code === "R09_ADMINISTRATOR",
+              (role) => role.code === 'R09_ADMINISTRATOR',
             );
             if (!hasR09) return null;
             return (
@@ -824,7 +824,7 @@ export default function DashboardPage() {
                 body={copy.clinicAdminEntryBody}
                 buttonLabel={copy.clinicAdminEntryButton}
                 roleHint={copy.clinicAdminEntryRoleHint}
-                onEnter={() => router.push("/clinic-admin")}
+                onEnter={() => router.push('/clinic-admin')}
               />
             );
           })()}
@@ -949,7 +949,7 @@ function RoleChips({
     return (
       <span
         className="ih-account-item__value"
-        style={{ color: "var(--text-secondary)", fontSize: "0.8125rem" }}
+        style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}
       >
         {noRoles}
       </span>
@@ -959,10 +959,10 @@ function RoleChips({
     <span
       className="ih-role-chips"
       style={{
-        display: "inline-flex",
-        flexWrap: "wrap",
-        gap: "0.25rem",
-        alignItems: "center",
+        display: 'inline-flex',
+        flexWrap: 'wrap',
+        gap: '0.25rem',
+        alignItems: 'center',
       }}
     >
       {roles.map((role) => (
@@ -970,15 +970,15 @@ function RoleChips({
           key={role.code}
           className="ih-role-chip"
           style={{
-            display: "inline-block",
-            padding: "0.125rem 0.5rem",
-            borderRadius: "9999px",
-            background: "var(--accent-soft, rgba(99, 102, 241, 0.08))",
-            color: "var(--accent, #4f46e5)",
-            fontSize: "0.75rem",
+            display: 'inline-block',
+            padding: '0.125rem 0.5rem',
+            borderRadius: '9999px',
+            background: 'var(--accent-soft, rgba(99, 102, 241, 0.08))',
+            color: 'var(--accent, #4f46e5)',
+            fontSize: '0.75rem',
             fontWeight: 500,
             lineHeight: 1.4,
-            border: "1px solid var(--accent-border, rgba(99, 102, 241, 0.2))",
+            border: '1px solid var(--accent-border, rgba(99, 102, 241, 0.2))',
           }}
         >
           {role.displayName}
@@ -1041,10 +1041,10 @@ function WorkspaceCard({
               {active.tenantDisplayName}
             </p>
             <p className="ih-context-current__meta">{active.tenantSlug}</p>
-            <div style={{ marginTop: "0.5rem" }}>
+            <div style={{ marginTop: '0.5rem' }}>
               <p
                 className="ih-context-current__label"
-                style={{ marginBottom: "0.25rem" }}
+                style={{ marginBottom: '0.25rem' }}
               >
                 {rolesLabel}
               </p>
@@ -1076,7 +1076,7 @@ function WorkspaceCard({
                   <label
                     key={option.membershipId}
                     className={
-                      "ih-option" + (selected ? " ih-option--selected" : "")
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input
@@ -1097,8 +1097,8 @@ function WorkspaceCard({
                       <span
                         className="ih-option__roles"
                         style={{
-                          display: "block",
-                          marginTop: "0.25rem",
+                          display: 'block',
+                          marginTop: '0.25rem',
                         }}
                       >
                         <RoleChips roles={option.roles} noRoles={noRoles} />
@@ -1201,9 +1201,9 @@ function AccountCard({
                 style={{
                   width: 6,
                   height: 6,
-                  borderRadius: "50%",
-                  background: "currentColor",
-                  display: "inline-block",
+                  borderRadius: '50%',
+                  background: 'currentColor',
+                  display: 'inline-block',
                 }}
               />
               {sessionActive}
@@ -1211,7 +1211,7 @@ function AccountCard({
           </p>
           <p
             className="ih-account-item__value"
-            style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}
+            style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}
           >
             {sessionRemaining}
           </p>
@@ -1219,13 +1219,13 @@ function AccountCard({
       </ul>
 
       <div>
-        <p className="ih-card__eyebrow" style={{ marginTop: "0.5rem" }}>
+        <p className="ih-card__eyebrow" style={{ marginTop: '0.5rem' }}>
           {membershipsTitle}
         </p>
         {memberships.length === 0 ? (
           <p
             className="ih-account-item__value"
-            style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}
+            style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}
           >
             {noMemberships}
           </p>
@@ -1241,30 +1241,30 @@ function AccountCard({
                 </span>
                 <span
                   className={
-                    "ih-status-chip" +
-                    (membership.status === "suspended"
-                      ? ""
-                      : " ih-status-chip--idle")
+                    'ih-status-chip' +
+                    (membership.status === 'suspended'
+                      ? ''
+                      : ' ih-status-chip--idle')
                   }
                 >
-                  {membership.status === "active"
+                  {membership.status === 'active'
                     ? statusActive
                     : statusSuspended}
                 </span>
                 <span
                   className="ih-membership__roles"
                   style={{
-                    display: "block",
-                    marginTop: "0.25rem",
-                    width: "100%",
+                    display: 'block',
+                    marginTop: '0.25rem',
+                    width: '100%',
                   }}
                 >
                   <span
                     className="ih-account-item__label"
                     style={{
-                      display: "block",
-                      fontSize: "0.75rem",
-                      marginBottom: "0.25rem",
+                      display: 'block',
+                      fontSize: '0.75rem',
+                      marginBottom: '0.25rem',
                     }}
                   >
                     {rolesLabel}
@@ -1359,7 +1359,7 @@ function OrganisationCard({
     <section
       className="ih-card ih-card--elevated"
       aria-labelledby="ih-organisation-title"
-      style={{ marginTop: "1rem" }}
+      style={{ marginTop: '1rem' }}
     >
       <header className="ih-card__header">
         <div>
@@ -1412,7 +1412,7 @@ function OrganisationCard({
                   <label
                     key={option.organisationId}
                     className={
-                      "ih-option" + (selected ? " ih-option--selected" : "")
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input
@@ -1527,7 +1527,7 @@ function FacilityCard({
     <section
       className="ih-card ih-card--elevated"
       aria-labelledby="ih-facility-title"
-      style={{ marginTop: "1rem" }}
+      style={{ marginTop: '1rem' }}
     >
       <header className="ih-card__header">
         <div>
@@ -1577,7 +1577,7 @@ function FacilityCard({
                   <label
                     key={option.facilityId}
                     className={
-                      "ih-option" + (selected ? " ih-option--selected" : "")
+                      'ih-option' + (selected ? ' ih-option--selected' : '')
                     }
                   >
                     <input

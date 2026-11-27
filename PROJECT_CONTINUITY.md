@@ -9920,3 +9920,44 @@ authorization tests before proceeding with customer management.
 ### Immediate next step
 - Verify the new GitHub CI run.
 - Review PR #39 before any merge.
+
+## 2026-11-28 — Multi-Role Formatting Cleanup
+
+### Repository
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Previous verified commit: 6b5e0d9d69c59db038eff13a28f1adfd81dcec75.
+- PR #39 remains open and draft.
+
+### Completed
+- Reduced unrelated Prettier formatting changes introduced during multi-role navigation implementation.
+- Restored the existing single-quote formatting convention in affected contract and dashboard files.
+- Preserved the verified platform-access session indicator and dashboard navigation.
+- Made no intentional functional or database changes.
+
+### Files modified
+- packages/contracts/src/auth/auth.schema.ts
+- packages/contracts/src/auth/auth.schema.spec.ts
+- apps/web/src/app/dashboard/page.tsx
+- apps/web/src/app/dashboard/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Formatting churn reduction verified against the preceding commit's parent.
+- Contract, API, and web type checks passed.
+- Targeted lint checks passed.
+- Contract and web regression tests passed.
+- API and web production builds passed.
+- Previous security integration tests passed on the preceding feature commit.
+- New GitHub CI must be verified after push.
+
+### Risks and decisions
+- Platform authorization continues to rely on independently verified server-side grants.
+- Tenant R09 and R13 roles do not grant platform authority.
+- No production deployment, database changes, or PR merge.
+- PR #39 remains subject to final review.
+
+### Recovery and immediate next step
+- Previous verified commit: 6b5e0d9d69c59db038eff13a28f1adfd81dcec75.
+- Backup stored under ~/.local/state/ibn-hayan/multirole/.
+- Verify GitHub CI and review PR #39.
