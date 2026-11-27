@@ -60,6 +60,164 @@ function renderPage() {
 }
 
 describe("Platform administration page", () => {
+
+  it("loads the next customer page without losing existing rows", async () => {
+    mockTenants
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{
+            id: "11111111-1111-4111-8111-111111111111",
+            slug: "customer-one",
+            displayName: "Customer One",
+            status: "active",
+            createdAt: "2026-01-02T10:00:00.000Z",
+          }],
+          hasMore: true,
+          nextCursor: "cursor-one",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{
+            id: "22222222-2222-4222-8222-222222222222",
+            slug: "customer-two",
+            displayName: "Customer Two",
+            status: "active",
+            createdAt: "2026-01-01T10:00:00.000Z",
+          }],
+          hasMore: false,
+        },
+      });
+
+    renderPage();
+
+    const loadMore = await screen.findByRole("button", {
+      name: "عرض المزيد",
+    });
+
+    expect(screen.getByText("Customer One")).toBeInTheDocument();
+
+    await userEvent.setup().click(loadMore);
+
+    expect(
+      await screen.findByText("Customer Two"),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("Customer One")).toBeInTheDocument();
+    expect(mockTenants).toHaveBeenNthCalledWith(2, "cursor-one");
+    expect(
+      screen.queryByRole("button", { name: "عرض المزيد" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("retains the loaded customers and allows retry after a page failure", async () => {
+    mockTenants
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{
+            id: "11111111-1111-4111-8111-111111111111",
+            slug: "customer-one",
+            displayName: "Customer One",
+            status: "active",
+            createdAt: "2026-01-02T10:00:00.000Z",
+          }],
+          hasMore: true,
+          nextCursor: "cursor-retry",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          category: "NETWORK_ERROR",
+          message: "Connection unavailable",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{
+            id: "22222222-2222-4222-8222-222222222222",
+            slug: "customer-two",
+            displayName: "Customer Two",
+            status: "active",
+            createdAt: "2026-01-01T10:00:00.000Z",
+          }],
+          hasMore: false,
+        },
+      });
+
+    renderPage();
+
+    const loadMore = await screen.findByRole("button", {
+      name: "عرض المزيد",
+    });
+
+    const user = userEvent.setup();
+    await user.click(loadMore);
+
+    expect(
+      await screen.findByText(
+        "تعذّر تحميل المزيد. حاول مجدداً.",
+      ),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("Customer One")).toBeInTheDocument();
+
+    await user.click(loadMore);
+
+    expect(
+      await screen.findByText("Customer Two"),
+    ).toBeInTheDocument();
+
+    expect(screen.getByText("Customer One")).toBeInTheDocument();
+    expect(mockTenants).toHaveBeenCalledTimes(3);
+    expect(mockTenants).toHaveBeenNthCalledWith(3, "cursor-retry");
+  });
+
+  it("hides customer data before redirecting after session expiry on load more", async () => {
+    mockTenants
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          items: [{
+            id: "11111111-1111-4111-8111-111111111111",
+            slug: "customer-one",
+            displayName: "Customer One",
+            status: "active",
+            createdAt: "2026-01-02T10:00:00.000Z",
+          }],
+          hasMore: true,
+          nextCursor: "cursor-expired",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          category: "HTTP_ERROR",
+          statusCode: 401,
+          message: "Unauthorized",
+        },
+      });
+
+    renderPage();
+
+    const loadMore = await screen.findByRole("button", {
+      name: "عرض المزيد",
+    });
+
+    await userEvent.setup().click(loadMore);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith("/login");
+      expect(
+        screen.queryByText("Customer One"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("loads real customers only after platform authorization", async () => {
     let resolveOverview: ((value: unknown) => void) | undefined;
 

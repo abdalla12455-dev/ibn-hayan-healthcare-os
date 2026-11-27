@@ -9961,3 +9961,47 @@ authorization tests before proceeding with customer management.
 - Previous verified commit: 6b5e0d9d69c59db038eff13a28f1adfd81dcec75.
 - Backup stored under ~/.local/state/ibn-hayan/multirole/.
 - Verify GitHub CI and review PR #39.
+
+## 2026-11-28 — Platform Tenant Pagination Security Hardening
+
+### Repository
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting SHA: 676c7dfe1928e64a30ee4617c59fab45b197e759.
+- PR #39 remains in draft status.
+
+### Completed
+- Hid protected customer information before redirecting to login when a Load More request returns HTTP 401.
+- Verified loading an additional customer page preserves already loaded records.
+- Verified pagination failure displays an error without removing existing records.
+- Verified retry uses the same continuation cursor.
+- Added session-expiry regression coverage for the additional-page workflow.
+
+### Files modified
+- apps/web/src/app/platform-admin/page.tsx
+- apps/web/src/app/platform-admin/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Web TypeScript and targeted ESLint checks passed.
+- Platform pagination page and API client tests passed.
+- Web production build passed.
+- No API authorization changes.
+- No database schema or operational database changes.
+- No production deployment.
+- Latest GitHub CI requires verification after push.
+
+### Security decisions
+- Server-side Platform Super Admin authorization remains authoritative.
+- Tenant-scoped R09 and R13 permissions remain separate.
+- Expired sessions must not leave customer records visible while redirecting.
+
+### Remaining work
+- Verify the resulting GitHub CI run.
+- Review PR #39 before any merge.
+- Browser and integration checks remain necessary before production release.
+
+### Recovery
+- Starting SHA: 676c7dfe1928e64a30ee4617c59fab45b197e759.
+- Protective files stored under ~/.local/state/ibn-hayan/pagination/.
+- Use the final execution report for the new local and remote SHAs.

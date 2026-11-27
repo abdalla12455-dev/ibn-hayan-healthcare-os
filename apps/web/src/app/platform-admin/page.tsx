@@ -195,6 +195,8 @@ export default function PlatformAdminPage(): ReactElement {
           };
         });
       } else if (result.error.statusCode === 401) {
+        // Remove protected customer data before navigation.
+        setState({ kind: "loading" });
         router.replace("/login");
       } else if (result.error.statusCode === 403) {
         setState({ kind: "denied" });
