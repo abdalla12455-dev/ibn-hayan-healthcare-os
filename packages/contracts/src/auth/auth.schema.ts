@@ -1,6 +1,6 @@
-import { z } from 'zod';
-import { ActiveTenantContextSchema } from '../context/context.schema.js';
-import { RoleSummarySchema } from '../authorization/authorization.schema.js';
+import { z } from "zod";
+import { ActiveTenantContextSchema } from "../context/context.schema.js";
+import { RoleSummarySchema } from "../authorization/authorization.schema.js";
 
 /**
  * Shared authentication contracts for the Ibn Hayan Healthcare
@@ -91,7 +91,7 @@ export const AuthenticatedUserSchema = z
     id: z.string().uuid(),
     email: z.string().email().max(320),
     displayName: z.string().max(200),
-    status: z.enum(['active', 'disabled']),
+    status: z.enum(["active", "disabled"]),
   })
   .strict();
 
@@ -122,7 +122,7 @@ export const TenantMembershipSummarySchema = z
     tenantId: z.string().uuid(),
     tenantSlug: z.string().max(80),
     tenantDisplayName: z.string().max(200),
-    status: z.enum(['active', 'suspended']),
+    status: z.enum(["active", "suspended"]),
     roles: z.array(RoleSummarySchema),
   })
   .strict();
@@ -180,6 +180,7 @@ export const SessionResponseSchema = z
     memberships: z.array(TenantMembershipSummarySchema),
     activeTenantContext: ActiveTenantContextSchema.nullable(),
     expiresAt: z.string().datetime(),
+    hasPlatformAdminAccess: z.literal(true).optional(),
   })
   .strict();
 
@@ -273,13 +274,13 @@ export const AuthErrorResponseSchema = z
     error: z
       .object({
         code: z.enum([
-          'AUTH_INVALID_CREDENTIALS',
-          'AUTH_SESSION_REQUIRED',
-          'AUTH_CSRF_INVALID',
-          'AUTH_ORIGIN_DISALLOWED',
-          'CONTEXT_SELECTION_FORBIDDEN',
-          'CONTEXT_REQUEST_INVALID',
-          'AUTHORIZATION_FORBIDDEN',
+          "AUTH_INVALID_CREDENTIALS",
+          "AUTH_SESSION_REQUIRED",
+          "AUTH_CSRF_INVALID",
+          "AUTH_ORIGIN_DISALLOWED",
+          "CONTEXT_SELECTION_FORBIDDEN",
+          "CONTEXT_REQUEST_INVALID",
+          "AUTHORIZATION_FORBIDDEN",
         ]),
         message: z.string(),
       })

@@ -919,11 +919,19 @@ export class AuthService {
       status: input.user.status,
     };
 
+    // Platform authority is independent from tenant roles.
+    // Protected platform endpoints recheck the active grant.
+    const hasPlatformAdminAccess =
+      await this.platformAdminAccess.hasActivePlatformGrant(input.user.id);
+
     return {
       user: authenticatedUser,
       memberships: summaries,
       activeTenantContext,
       expiresAt: input.expiresAt.toISOString(),
+      ...(hasPlatformAdminAccess
+        ? { hasPlatformAdminAccess: true as const }
+        : {}),
     };
   }
 

@@ -9860,3 +9860,63 @@ authorization tests before proceeding with customer management.
 - Protective backup stored outside the repository under ~/.local/state/ibn-hayan/pagination/.
 - New local and remote SHAs will appear in the completion report.
 - Verify the new CI result and continue PR #39 review.
+
+## 2026-11-28 — Verified Multi-Role Navigation Checkpoint
+
+### Repository and state
+- Repository: abdalla12455-dev/ibn-hayan-healthcare-os.
+- Branch: feature/configuration-service-foundation-v1.
+- Verified starting SHA: bc03ece6b6fcc0eba13ee562e6a011f6ab569cbe.
+- GitHub CI #150 passed on the previous checkpoint.
+- PR #39 remains open and draft.
+
+### Completed
+- Added an optional platform-access indicator to authenticated session responses.
+- Indicator is derived from the independent active Platform Administrator grant.
+- Added bilingual Platform Administration navigation for verified multi-role users.
+- Preserved ordinary login routing.
+- Kept Platform Super Admin separate from tenant-scoped R09 and R13.
+- Added contract, dashboard, and HTTP security regression assertions.
+- Recovered the existing Colima environment.
+- Corrected Docker validation by mounting the existing Vitest security configuration.
+
+### Files modified
+- packages/contracts/src/auth/auth.schema.ts
+- packages/contracts/src/auth/auth.schema.spec.ts
+- apps/api/src/modules/auth/auth.service.ts
+- apps/api/test/security.platform-admin-spec.ts
+- apps/web/src/app/dashboard/page.tsx
+- apps/web/src/app/dashboard/page.test.tsx
+- PROJECT_CONTINUITY.md
+
+### Validation
+- Contract, API, and web TypeScript checks passed.
+- Relevant ESLint checks passed.
+- Focused contract and web regression tests passed.
+- Isolated Platform Admin HTTP security suite passed.
+- API and web production builds passed.
+- No database migration or real database modification.
+- No production deployment.
+- GitHub CI for the new commit requires subsequent verification.
+
+### Decisions
+- Client-side navigation is informational, never proof of authorization.
+- Protected platform endpoints independently recheck the platform grant.
+- Tenant-scoped R09 and R13 cannot establish platform authority.
+- Login throttling, CSRF, and session-cookie controls remain unchanged.
+
+### Known risks and unfinished work
+- UI may briefly display a previously authorized link after grant revocation.
+- Protected API access still fails closed after grant revocation.
+- Full PR #39 review and new CI verification remain outstanding.
+- Existing frontend tests can emit non-fatal React act warnings.
+- Formatting of affected files should be reviewed for unrelated changes before PR merge.
+
+### Recovery
+- Verified pre-task SHA: bc03ece6b6fcc0eba13ee562e6a011f6ab569cbe.
+- Protective backups and the original uncommitted patch are stored under ~/.local/state/ibn-hayan/multirole/.
+- The resulting commit SHA is available in Git history and the final execution report.
+
+### Immediate next step
+- Verify the new GitHub CI run.
+- Review PR #39 before any merge.

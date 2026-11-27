@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import DashboardPage from './page';
-import { LanguageProvider } from '@/components/i18n/language-context';
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import DashboardPage from "./page";
+import { LanguageProvider } from "@/components/i18n/language-context";
 
 /**
  * Tests for the premium authenticated dashboard shell (sixth canonical batch).
@@ -31,14 +31,14 @@ import { LanguageProvider } from '@/components/i18n/language-context';
  */
 
 const mockReplace = vi.fn();
-vi.mock('next/navigation', () => ({
+vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mockReplace, push: mockReplace }),
 }));
 
 const mockGetSession = vi.fn();
 const mockGetCsrfToken = vi.fn();
 const mockLogout = vi.fn();
-vi.mock('@/lib/api/auth/auth.client', () => ({
+vi.mock("@/lib/api/auth/auth.client", () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
   getCsrfToken: (...args: unknown[]) => mockGetCsrfToken(...args),
   logout: (...args: unknown[]) => mockLogout(...args),
@@ -47,51 +47,57 @@ vi.mock('@/lib/api/auth/auth.client', () => ({
 const mockGetContext = vi.fn();
 const mockSelectTenantContext = vi.fn();
 const mockClearTenantContext = vi.fn();
-vi.mock('@/lib/api/context', () => ({
+vi.mock("@/lib/api/context", () => ({
   getContext: (...args: unknown[]) => mockGetContext(...args),
   selectTenantContext: (...args: unknown[]) => mockSelectTenantContext(...args),
   clearTenantContext: (...args: unknown[]) => mockClearTenantContext(...args),
 }));
 
-const MEMBERSHIP_ID_A = '11111111-1111-1111-1111-111111111111';
-const MEMBERSHIP_ID_B = '22222222-2222-2222-2222-222222222222';
-const TENANT_ID_A = '33333333-3333-3333-3333-333333333333';
-const TENANT_ID_B = '44444444-4444-4444-4444-444444444444';
+const MEMBERSHIP_ID_A = "11111111-1111-1111-1111-111111111111";
+const MEMBERSHIP_ID_B = "22222222-2222-2222-2222-222222222222";
+const TENANT_ID_A = "33333333-3333-3333-3333-333333333333";
+const TENANT_ID_B = "44444444-4444-4444-4444-444444444444";
 
 const validSession = {
   ok: true,
   data: {
     user: {
-      id: '12345678-1234-1234-1234-123456789012',
-      email: 'operator@example.invalid',
-      displayName: 'Operator Alpha',
-      status: 'active' as const,
+      id: "12345678-1234-1234-1234-123456789012",
+      email: "operator@example.invalid",
+      displayName: "Operator Alpha",
+      status: "active" as const,
     },
     memberships: [
       {
         id: MEMBERSHIP_ID_A,
         tenantId: TENANT_ID_A,
-        tenantSlug: 'tenant-alpha.invalid',
-        tenantDisplayName: 'Tenant Alpha',
-        status: 'active' as const,
+        tenantSlug: "tenant-alpha.invalid",
+        tenantDisplayName: "Tenant Alpha",
+        status: "active" as const,
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
       {
         id: MEMBERSHIP_ID_B,
         tenantId: TENANT_ID_B,
-        tenantSlug: 'tenant-beta.invalid',
-        tenantDisplayName: 'Tenant Beta',
-        status: 'active' as const,
+        tenantSlug: "tenant-beta.invalid",
+        tenantDisplayName: "Tenant Beta",
+        status: "active" as const,
         roles: [
-          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          { code: "R01_PHYSICIAN" as const, displayName: "طبيب" },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
     ],
     activeTenantContext: null,
-    expiresAt: '2026-01-01T12:00:00.000Z',
+    expiresAt: "2026-01-01T12:00:00.000Z",
   },
 };
 
@@ -102,20 +108,26 @@ const contextWithNoActive = {
       {
         membershipId: MEMBERSHIP_ID_A,
         tenantId: TENANT_ID_A,
-        tenantSlug: 'tenant-alpha.invalid',
-        tenantDisplayName: 'Tenant Alpha',
+        tenantSlug: "tenant-alpha.invalid",
+        tenantDisplayName: "Tenant Alpha",
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
       {
         membershipId: MEMBERSHIP_ID_B,
         tenantId: TENANT_ID_B,
-        tenantSlug: 'tenant-beta.invalid',
-        tenantDisplayName: 'Tenant Beta',
+        tenantSlug: "tenant-beta.invalid",
+        tenantDisplayName: "Tenant Beta",
         roles: [
-          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          { code: "R01_PHYSICIAN" as const, displayName: "طبيب" },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
     ],
@@ -134,30 +146,39 @@ const contextWithActiveA = {
       {
         membershipId: MEMBERSHIP_ID_A,
         tenantId: TENANT_ID_A,
-        tenantSlug: 'tenant-alpha.invalid',
-        tenantDisplayName: 'Tenant Alpha',
+        tenantSlug: "tenant-alpha.invalid",
+        tenantDisplayName: "Tenant Alpha",
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
       {
         membershipId: MEMBERSHIP_ID_B,
         tenantId: TENANT_ID_B,
-        tenantSlug: 'tenant-beta.invalid',
-        tenantDisplayName: 'Tenant Beta',
+        tenantSlug: "tenant-beta.invalid",
+        tenantDisplayName: "Tenant Beta",
         roles: [
-          { code: 'R01_PHYSICIAN' as const, displayName: 'طبيب' },
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          { code: "R01_PHYSICIAN" as const, displayName: "طبيب" },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
     ],
     active: {
       membershipId: MEMBERSHIP_ID_A,
       tenantId: TENANT_ID_A,
-      tenantSlug: 'tenant-alpha.invalid',
-      tenantDisplayName: 'Tenant Alpha',
+      tenantSlug: "tenant-alpha.invalid",
+      tenantDisplayName: "Tenant Alpha",
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: "R13_SYSTEM_ADMINISTRATOR" as const,
+          displayName: "مسؤول النظام",
+        },
       ],
     },
     organisationOptions: [],
@@ -172,7 +193,7 @@ beforeEach(() => {
   mockGetContext.mockResolvedValue(contextWithNoActive);
   mockGetCsrfToken.mockResolvedValue({
     ok: true,
-    data: { token: 'csrf-token-value' },
+    data: { token: "csrf-token-value" },
   });
 });
 
@@ -188,30 +209,70 @@ function renderDashboard() {
   );
 }
 
-describe('DashboardPage', () => {
-  it('renders exactly one H1', async () => {
+describe("DashboardPage", () => {
+  it("shows platform navigation for verified multi-role users", async () => {
+    mockGetSession.mockResolvedValue({
+      ...validSession,
+      data: {
+        ...validSession.data,
+        hasPlatformAdminAccess: true,
+      },
+    });
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    const entry = await screen.findByRole("button", {
+      name: "الدخول إلى إدارة المنصة",
+    });
+
+    await userEvent.setup().click(entry);
+
+    expect(mockReplace).toHaveBeenCalledWith("/platform-admin");
+  });
+
+  it("does not infer platform access from R13 tenant roles", async () => {
+    mockGetSession.mockResolvedValue(validSession);
+
+    await act(async () => {
+      renderDashboard();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
+    });
+
+    expect(
+      screen.queryByRole("button", {
+        name: "الدخول إلى إدارة المنصة",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders exactly one H1", async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
       renderDashboard();
     });
     await waitFor(() => {
-      const h1s = document.querySelectorAll('h1');
+      const h1s = document.querySelectorAll("h1");
       expect(h1s.length).toBe(1);
     });
   });
 
-  it('displays the authenticated user info', async () => {
+  it("displays the authenticated user info", async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
       renderDashboard();
     });
     await waitFor(() => {
-      expect(screen.getByText('Operator Alpha')).toBeInTheDocument();
-      expect(screen.getByText('operator@example.invalid')).toBeInTheDocument();
+      expect(screen.getByText("Operator Alpha")).toBeInTheDocument();
+      expect(screen.getByText("operator@example.invalid")).toBeInTheDocument();
     });
   });
 
-  it('displays the available workspaces (memberships)', async () => {
+  it("displays the available workspaces (memberships)", async () => {
     mockGetSession.mockResolvedValue(validSession);
     await act(async () => {
       renderDashboard();
@@ -219,18 +280,22 @@ describe('DashboardPage', () => {
     await waitFor(() => {
       // The memberships are rendered as "Available workspaces" in English
       // or "بيئات العمل المتاحة" in Arabic (default).
-      const membershipHeading = screen.getByText('بيئات العمل المتاحة');
+      const membershipHeading = screen.getByText("بيئات العمل المتاحة");
       expect(membershipHeading).toBeInTheDocument();
-      const accountSection = membershipHeading.closest('section');
-      expect(accountSection?.textContent).toContain('tenant-alpha.invalid');
-      expect(accountSection?.textContent).toContain('tenant-beta.invalid');
+      const accountSection = membershipHeading.closest("section");
+      expect(accountSection?.textContent).toContain("tenant-alpha.invalid");
+      expect(accountSection?.textContent).toContain("tenant-beta.invalid");
     });
   });
 
-  it('redirects to /login when unauthenticated', async () => {
+  it("redirects to /login when unauthenticated", async () => {
     mockGetSession.mockResolvedValue({
       ok: false,
-      error: { statusCode: 401, category: 'HTTP_ERROR', message: 'Unauthorized' },
+      error: {
+        statusCode: 401,
+        category: "HTTP_ERROR",
+        message: "Unauthorized",
+      },
     });
 
     await act(async () => {
@@ -238,36 +303,37 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(mockReplace).toHaveBeenCalledWith('/login');
+      expect(mockReplace).toHaveBeenCalledWith("/login");
     });
   });
 
-  it('does not write auth-related values to localStorage, sessionStorage, or cookies', async () => {
+  it("does not write auth-related values to localStorage, sessionStorage, or cookies", async () => {
     mockGetSession.mockResolvedValue(validSession);
-    const localStorageSpy = vi.spyOn(Storage.prototype, 'setItem');
-    const sessionStorageSpy = vi.spyOn(Storage.prototype, 'setItem');
-    const cookieSpy = vi.spyOn(document, 'cookie', 'set');
+    const localStorageSpy = vi.spyOn(Storage.prototype, "setItem");
+    const sessionStorageSpy = vi.spyOn(Storage.prototype, "setItem");
+    const cookieSpy = vi.spyOn(document, "cookie", "set");
 
     await act(async () => {
       renderDashboard();
     });
     await waitFor(() => {
-      expect(screen.getByText('Operator Alpha')).toBeInTheDocument();
+      expect(screen.getByText("Operator Alpha")).toBeInTheDocument();
     });
 
-    const authKeyPattern = /session|token|csrf|password|auth|credential|context/i;
+    const authKeyPattern =
+      /session|token|csrf|password|auth|credential|context/i;
     const authLocal = localStorageSpy.mock.calls.filter(
-      ([key]) => typeof key === 'string' && authKeyPattern.test(key),
+      ([key]) => typeof key === "string" && authKeyPattern.test(key),
     );
     expect(authLocal).toHaveLength(0);
     const authSession = sessionStorageSpy.mock.calls.filter(
-      ([key]) => typeof key === 'string' && authKeyPattern.test(key),
+      ([key]) => typeof key === "string" && authKeyPattern.test(key),
     );
     expect(authSession).toHaveLength(0);
     expect(cookieSpy).not.toHaveBeenCalled();
   });
 
-  it('logout obtains a CSRF token and calls logout, then redirects', async () => {
+  it("logout obtains a CSRF token and calls logout, then redirects", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockLogout.mockResolvedValue({ ok: true, data: { ok: true } });
 
@@ -277,22 +343,20 @@ describe('DashboardPage', () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: 'تسجيل الخروج' }),
+        screen.getByRole("button", { name: "تسجيل الخروج" }),
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: 'تسجيل الخروج' }),
-    );
+    await user.click(screen.getByRole("button", { name: "تسجيل الخروج" }));
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
-      expect(mockLogout).toHaveBeenCalledWith('csrf-token-value');
-      expect(mockReplace).toHaveBeenCalledWith('/login');
+      expect(mockLogout).toHaveBeenCalledWith("csrf-token-value");
+      expect(mockReplace).toHaveBeenCalledWith("/login");
     });
   });
 
-  it('renders available workspace options in the context section', async () => {
+  it("renders available workspace options in the context section", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -302,15 +366,15 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       // The workspace card title is rendered in Arabic by default.
-      const workspaceHeading = screen.getByText('بيئة العمل النشطة');
+      const workspaceHeading = screen.getByText("بيئة العمل النشطة");
       expect(workspaceHeading).toBeInTheDocument();
-      const workspaceSection = workspaceHeading.closest('section');
-      expect(workspaceSection?.textContent).toContain('Tenant Alpha');
-      expect(workspaceSection?.textContent).toContain('Tenant Beta');
+      const workspaceSection = workspaceHeading.closest("section");
+      expect(workspaceSection?.textContent).toContain("Tenant Alpha");
+      expect(workspaceSection?.textContent).toContain("Tenant Beta");
     });
   });
 
-  it('displays the active workspace when a context is selected', async () => {
+  it("displays the active workspace when a context is selected", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveA);
 
@@ -321,13 +385,13 @@ describe('DashboardPage', () => {
     await waitFor(() => {
       // The active workspace is shown in the "Current" area.
       const workspaceSection = screen
-        .getByText('بيئة العمل النشطة')
-        .closest('section');
-      expect(workspaceSection?.textContent).toContain('Tenant Alpha');
+        .getByText("بيئة العمل النشطة")
+        .closest("section");
+      expect(workspaceSection?.textContent).toContain("Tenant Alpha");
     });
   });
 
-  it('handles no active context with a user-facing empty-state message', async () => {
+  it("handles no active context with a user-facing empty-state message", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -336,11 +400,11 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('لم يتم اختيار بيئة عمل')).toBeInTheDocument();
+      expect(screen.getByText("لم يتم اختيار بيئة عمل")).toBeInTheDocument();
     });
   });
 
-  it('selecting a workspace obtains CSRF first and calls the context API with membershipId', async () => {
+  it("selecting a workspace obtains CSRF first and calls the context API with membershipId", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue(contextWithActiveA);
@@ -352,24 +416,22 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /اختيار|Select/i }),
+        screen.getByRole("button", { name: /اختيار|Select/i }),
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /اختيار|Select/i }));
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
       expect(mockSelectTenantContext).toHaveBeenCalledWith(
         MEMBERSHIP_ID_A,
-        'csrf-token-value',
+        "csrf-token-value",
       );
     });
   });
 
-  it('clearing obtains CSRF first and calls clearTenantContext', async () => {
+  it("clearing obtains CSRF first and calls clearTenantContext", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext
       .mockResolvedValueOnce(contextWithActiveA)
@@ -386,21 +448,21 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /مسح الاختيار|Clear selection/i }),
+        screen.getByRole("button", { name: /مسح الاختيار|Clear selection/i }),
       ).toBeInTheDocument();
     });
 
     await user.click(
-      screen.getByRole('button', { name: /مسح الاختيار|Clear selection/i }),
+      screen.getByRole("button", { name: /مسح الاختيار|Clear selection/i }),
     );
 
     await waitFor(() => {
       expect(mockGetCsrfToken).toHaveBeenCalled();
-      expect(mockClearTenantContext).toHaveBeenCalledWith('csrf-token-value');
+      expect(mockClearTenantContext).toHaveBeenCalledWith("csrf-token-value");
     });
   });
 
-  it('updates the workspace section without a full page reload after selection', async () => {
+  it("updates the workspace section without a full page reload after selection", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue(contextWithActiveA);
@@ -411,27 +473,25 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('لم يتم اختيار بيئة عمل')).toBeInTheDocument();
+      expect(screen.getByText("لم يتم اختيار بيئة عمل")).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /اختيار|Select/i }));
 
     await waitFor(() => {
-      expect(screen.queryByText('لم يتم اختيار بيئة عمل')).toBeNull();
+      expect(screen.queryByText("لم يتم اختيار بيئة عمل")).toBeNull();
     });
   });
 
-  it('displays a generic failure message without infrastructure details when selection fails', async () => {
+  it("displays a generic failure message without infrastructure details when selection fails", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValueOnce(contextWithNoActive);
     mockSelectTenantContext.mockResolvedValue({
       ok: false,
       error: {
         statusCode: 403,
-        category: 'HTTP_ERROR',
-        message: 'Forbidden: membership does not belong to user',
+        category: "HTTP_ERROR",
+        message: "Forbidden: membership does not belong to user",
       },
     });
 
@@ -442,29 +502,27 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: /اختيار|Select/i }),
+        screen.getByRole("button", { name: /اختيار|Select/i }),
       ).toBeInTheDocument();
     });
 
-    await user.click(
-      screen.getByRole('button', { name: /اختيار|Select/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /اختيار|Select/i }));
 
     await waitFor(() => {
-      const alert = screen.getByRole('alert');
+      const alert = screen.getByRole("alert");
       expect(alert).toBeInTheDocument();
-      expect(alert.textContent).toContain('تعذّر تحديث بيئة العمل');
+      expect(alert.textContent).toContain("تعذّر تحديث بيئة العمل");
     });
 
     // No raw infrastructure details are exposed.
-    const body = document.body.textContent ?? '';
+    const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/Forbidden/i);
     expect(body).not.toMatch(/membership does not belong/i);
     expect(body).not.toMatch(/403/i);
     expect(body).not.toMatch(/HTTP_ERROR/i);
   });
 
-  it('does not render an Organisation or Facility selector', async () => {
+  it("does not render an Organisation or Facility selector", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -473,17 +531,17 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
     });
 
-    const body = document.body.textContent ?? '';
+    const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/Organisation context/i);
     expect(body).not.toMatch(/Facility context/i);
     expect(body).not.toMatch(/Select an organisation/i);
     expect(body).not.toMatch(/Select a facility/i);
   });
 
-  it('does not render inactive navigation links for future modules', async () => {
+  it("does not render inactive navigation links for future modules", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -492,10 +550,10 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
     });
 
-    const body = document.body.textContent ?? '';
+    const body = document.body.textContent ?? "";
     expect(body).not.toMatch(/Patients/i);
     expect(body).not.toMatch(/Appointments/i);
     expect(body).not.toMatch(/Billing/i);
@@ -508,7 +566,7 @@ describe('DashboardPage', () => {
     expect(body).not.toMatch(/الفواتير/i);
   });
 
-  it('does not display raw technical IDs in the user-facing surface', async () => {
+  it("does not display raw technical IDs in the user-facing surface", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveA);
 
@@ -517,10 +575,10 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
     });
 
-    const body = document.body.textContent ?? '';
+    const body = document.body.textContent ?? "";
     // The raw membership ID, tenant ID, and session ID must not appear
     // in the user-facing surface. UUIDs are long and distinctive; we
     // check that none of the test UUIDs leak.
@@ -528,7 +586,7 @@ describe('DashboardPage', () => {
     expect(body).not.toContain(MEMBERSHIP_ID_B);
     expect(body).not.toContain(TENANT_ID_A);
     expect(body).not.toContain(TENANT_ID_B);
-    expect(body).not.toContain('12345678-1234-1234-1234-123456789012');
+    expect(body).not.toContain("12345678-1234-1234-1234-123456789012");
     // "Membership ID" and "Tenant ID" labels must not appear.
     expect(body).not.toMatch(/Membership ID/i);
     expect(body).not.toMatch(/Tenant ID/i);
@@ -537,7 +595,7 @@ describe('DashboardPage', () => {
     expect(body).not.toMatch(/API response/i);
   });
 
-  it('uses the same visual tokens as the landing page (project-owned CSS classes)', async () => {
+  it("uses the same visual tokens as the landing page (project-owned CSS classes)", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -546,26 +604,26 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
     });
 
     // The dashboard root uses the project-owned `ih-app` class which
     // consumes the same design tokens defined in globals.css as the
     // landing page.
-    const appRoot = document.querySelector('.ih-app');
+    const appRoot = document.querySelector(".ih-app");
     expect(appRoot).not.toBeNull();
     // The cards use the project-owned `ih-card` class.
-    const cards = document.querySelectorAll('.ih-card');
+    const cards = document.querySelectorAll(".ih-card");
     expect(cards.length).toBeGreaterThanOrEqual(2);
     // The header is sticky and uses the project-owned class.
-    const header = document.querySelector('.ih-app__header');
+    const header = document.querySelector(".ih-app__header");
     expect(header).not.toBeNull();
     // The brand mark is rendered in the header.
-    const brandMark = header?.querySelector('.ih-brand');
+    const brandMark = header?.querySelector(".ih-brand");
     expect(brandMark).not.toBeNull();
   });
 
-  it('still has exactly one H1 with the workspace section present', async () => {
+  it("still has exactly one H1 with the workspace section present", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -574,21 +632,21 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      const h1s = document.querySelectorAll('h1');
+      const h1s = document.querySelectorAll("h1");
       expect(h1s.length).toBe(1);
     });
 
     // The workspace section exists with an h2 heading.
-    const h2s = document.querySelectorAll('h2');
-    const h2Texts = Array.from(h2s).map((h) => h.textContent ?? '');
-    expect(h2Texts.some((t) => t.includes('بيئة العمل النشطة'))).toBe(true);
+    const h2s = document.querySelectorAll("h2");
+    const h2Texts = Array.from(h2s).map((h) => h.textContent ?? "");
+    expect(h2Texts.some((t) => t.includes("بيئة العمل النشطة"))).toBe(true);
   });
 
   // -------------------------------------------------------------------------
   // Batch 8 — RBAC role chips
   // -------------------------------------------------------------------------
 
-  it('renders Arabic role labels for memberships (default locale)', async () => {
+  it("renders Arabic role labels for memberships (default locale)", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -599,12 +657,12 @@ describe('DashboardPage', () => {
     await waitFor(() => {
       // The memberships have role "مسؤول النظام" (R13 in Arabic).
       // Multiple memberships carry this role, so use getAllByText.
-      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      const sysAdminChips = screen.getAllByText("مسؤول النظام");
       expect(sysAdminChips.length).toBeGreaterThanOrEqual(1);
     });
   });
 
-  it('renders multiple role chips for a membership with multiple roles', async () => {
+  it("renders multiple role chips for a membership with multiple roles", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -614,14 +672,14 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       // The second membership has both "طبيب" (R01) and "مسؤول النظام" (R13).
-      const physicianChips = screen.getAllByText('طبيب');
+      const physicianChips = screen.getAllByText("طبيب");
       expect(physicianChips.length).toBeGreaterThanOrEqual(1);
-      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      const sysAdminChips = screen.getAllByText("مسؤول النظام");
       expect(sysAdminChips.length).toBeGreaterThanOrEqual(2);
     });
   });
 
-  it('does not display raw enum values such as R13_SYSTEM_ADMINISTRATOR', async () => {
+  it("does not display raw enum values such as R13_SYSTEM_ADMINISTRATOR", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveA);
 
@@ -630,14 +688,14 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('بيئة العمل النشطة')).toBeInTheDocument();
+      expect(screen.getByText("بيئة العمل النشطة")).toBeInTheDocument();
     });
 
-    const body = document.body.textContent ?? '';
+    const body = document.body.textContent ?? "";
     // Raw enum codes must never appear in the user-facing surface.
-    expect(body).not.toContain('R13_SYSTEM_ADMINISTRATOR');
-    expect(body).not.toContain('R01_PHYSICIAN');
-    expect(body).not.toContain('R14_INTEGRATION_ACCOUNT');
+    expect(body).not.toContain("R13_SYSTEM_ADMINISTRATOR");
+    expect(body).not.toContain("R01_PHYSICIAN");
+    expect(body).not.toContain("R14_INTEGRATION_ACCOUNT");
   });
 
   it('displays R13 as "مسؤول النظام" in Arabic (default locale)', async () => {
@@ -650,12 +708,12 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       // The active workspace has R13 assigned, displayed in Arabic.
-      const sysAdminChips = screen.getAllByText('مسؤول النظام');
+      const sysAdminChips = screen.getAllByText("مسؤول النظام");
       expect(sysAdminChips.length).toBeGreaterThanOrEqual(1);
     });
   });
 
-  it('renders role chips in the active workspace section', async () => {
+  it("renders role chips in the active workspace section", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveA);
 
@@ -665,15 +723,15 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       const workspaceSection = screen
-        .getByText('بيئة العمل النشطة')
-        .closest('section');
-      expect(workspaceSection?.textContent).toContain('مسؤول النظام');
+        .getByText("بيئة العمل النشطة")
+        .closest("section");
+      expect(workspaceSection?.textContent).toContain("مسؤول النظام");
       // The roles label appears in the workspace section.
-      expect(workspaceSection?.textContent).toContain('الأدوار');
+      expect(workspaceSection?.textContent).toContain("الأدوار");
     });
   });
 
-  it('renders role chips for each available workspace option', async () => {
+  it("renders role chips for each available workspace option", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -683,15 +741,15 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       const workspaceSection = screen
-        .getByText('بيئة العمل النشطة')
-        .closest('section');
+        .getByText("بيئة العمل النشطة")
+        .closest("section");
       // Both options' roles are rendered.
-      expect(workspaceSection?.textContent).toContain('طبيب');
-      expect(workspaceSection?.textContent).toContain('مسؤول النظام');
+      expect(workspaceSection?.textContent).toContain("طبيب");
+      expect(workspaceSection?.textContent).toContain("مسؤول النظام");
     });
   });
 
-  it('renders role chips in the account section for each membership', async () => {
+  it("renders role chips in the account section for each membership", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -700,10 +758,10 @@ describe('DashboardPage', () => {
     });
 
     await waitFor(() => {
-      const accountHeading = screen.getByText('بيئات العمل المتاحة');
-      const accountSection = accountHeading.closest('section');
-      expect(accountSection?.textContent).toContain('طبيب');
-      expect(accountSection?.textContent).toContain('مسؤول النظام');
+      const accountHeading = screen.getByText("بيئات العمل المتاحة");
+      const accountSection = accountHeading.closest("section");
+      expect(accountSection?.textContent).toContain("طبيب");
+      expect(accountSection?.textContent).toContain("مسؤول النظام");
     });
   });
 });
@@ -712,8 +770,8 @@ describe('DashboardPage', () => {
 // ADR-015: dashboard organisation and facility selector tests
 // ---------------------------------------------------------------------------
 
-const ORG_ID = '55555555-5555-5555-5555-555555555555';
-const FACILITY_ID = '66666666-6666-6666-6666-666666666666';
+const ORG_ID = "55555555-5555-5555-5555-555555555555";
+const FACILITY_ID = "66666666-6666-6666-6666-666666666666";
 
 const mockSelectOrganisationContext = vi.fn();
 const mockClearOrganisationContext = vi.fn();
@@ -721,7 +779,7 @@ const mockSelectFacilityContext = vi.fn();
 const mockClearFacilityContext = vi.fn();
 
 // Re-mock the context module to include the new ADR-015 functions.
-vi.mock('@/lib/api/context', () => ({
+vi.mock("@/lib/api/context", () => ({
   getContext: (...args: unknown[]) => mockGetContext(...args),
   selectTenantContext: (...args: unknown[]) => mockSelectTenantContext(...args),
   clearTenantContext: (...args: unknown[]) => mockClearTenantContext(...args),
@@ -742,28 +800,34 @@ const contextWithOrgOptions = {
       {
         membershipId: MEMBERSHIP_ID_A,
         tenantId: TENANT_ID_A,
-        tenantSlug: 'tenant-alpha.invalid',
-        tenantDisplayName: 'Tenant Alpha',
+        tenantSlug: "tenant-alpha.invalid",
+        tenantDisplayName: "Tenant Alpha",
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
     ],
     active: {
       membershipId: MEMBERSHIP_ID_A,
       tenantId: TENANT_ID_A,
-      tenantSlug: 'tenant-alpha.invalid',
-      tenantDisplayName: 'Tenant Alpha',
+      tenantSlug: "tenant-alpha.invalid",
+      tenantDisplayName: "Tenant Alpha",
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: "R13_SYSTEM_ADMINISTRATOR" as const,
+          displayName: "مسؤول النظام",
+        },
       ],
     },
     organisationOptions: [
       {
         organisationId: ORG_ID,
-        code: 'ORG-1',
-        displayName: 'Organisation Alpha',
-        status: 'active' as const,
+        code: "ORG-1",
+        displayName: "Organisation Alpha",
+        status: "active" as const,
       },
     ],
     activeOrganisation: null,
@@ -779,55 +843,61 @@ const contextWithActiveOrgAndFacilityOptions = {
       {
         membershipId: MEMBERSHIP_ID_A,
         tenantId: TENANT_ID_A,
-        tenantSlug: 'tenant-alpha.invalid',
-        tenantDisplayName: 'Tenant Alpha',
+        tenantSlug: "tenant-alpha.invalid",
+        tenantDisplayName: "Tenant Alpha",
         roles: [
-          { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+          {
+            code: "R13_SYSTEM_ADMINISTRATOR" as const,
+            displayName: "مسؤول النظام",
+          },
         ],
       },
     ],
     active: {
       membershipId: MEMBERSHIP_ID_A,
       tenantId: TENANT_ID_A,
-      tenantSlug: 'tenant-alpha.invalid',
-      tenantDisplayName: 'Tenant Alpha',
+      tenantSlug: "tenant-alpha.invalid",
+      tenantDisplayName: "Tenant Alpha",
       roles: [
-        { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+        {
+          code: "R13_SYSTEM_ADMINISTRATOR" as const,
+          displayName: "مسؤول النظام",
+        },
       ],
     },
     organisationOptions: [
       {
         organisationId: ORG_ID,
-        code: 'ORG-1',
-        displayName: 'Organisation Alpha',
-        status: 'active' as const,
+        code: "ORG-1",
+        displayName: "Organisation Alpha",
+        status: "active" as const,
       },
     ],
     activeOrganisation: {
       organisationId: ORG_ID,
-      code: 'ORG-1',
-      displayName: 'Organisation Alpha',
+      code: "ORG-1",
+      displayName: "Organisation Alpha",
     },
     facilityOptions: [
       {
         facilityId: FACILITY_ID,
         organisationId: ORG_ID,
-        code: 'FAC-1',
-        displayName: 'Facility Alpha',
-        status: 'active' as const,
+        code: "FAC-1",
+        displayName: "Facility Alpha",
+        status: "active" as const,
       },
     ],
     activeFacility: null,
   },
 };
 
-describe('DashboardPage ADR-015 organisation and facility selectors', () => {
+describe("DashboardPage ADR-015 organisation and facility selectors", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetContext.mockResolvedValue(contextWithOrgOptions);
     mockGetCsrfToken.mockResolvedValue({
       ok: true,
-      data: { token: 'csrf-token-value' },
+      data: { token: "csrf-token-value" },
     });
   });
 
@@ -835,7 +905,7 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the organisation selector when a tenant is active', async () => {
+  it("renders the organisation selector when a tenant is active", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithOrgOptions);
 
@@ -845,13 +915,13 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
 
     await waitFor(() => {
       // The Arabic label "اختر مؤسسة" is the organisation select legend.
-      expect(screen.getByText('اختر مؤسسة')).toBeInTheDocument();
+      expect(screen.getByText("اختر مؤسسة")).toBeInTheDocument();
       // The organisation option should be visible.
-      expect(screen.getByText('Organisation Alpha')).toBeInTheDocument();
+      expect(screen.getByText("Organisation Alpha")).toBeInTheDocument();
     });
   });
 
-  it('does not render the organisation selector when no tenant is active', async () => {
+  it("does not render the organisation selector when no tenant is active", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithNoActive);
 
@@ -860,11 +930,11 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('اختر مؤسسة')).not.toBeInTheDocument();
+      expect(screen.queryByText("اختر مؤسسة")).not.toBeInTheDocument();
     });
   });
 
-  it('renders the facility selector when both tenant and organisation are active', async () => {
+  it("renders the facility selector when both tenant and organisation are active", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
 
@@ -874,12 +944,12 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
 
     await waitFor(() => {
       // The Arabic label "اختر منشأة" is the facility select legend.
-      expect(screen.getByText('اختر منشأة')).toBeInTheDocument();
-      expect(screen.getByText('Facility Alpha')).toBeInTheDocument();
+      expect(screen.getByText("اختر منشأة")).toBeInTheDocument();
+      expect(screen.getByText("Facility Alpha")).toBeInTheDocument();
     });
   });
 
-  it('shows a hint to select an organisation before selecting a facility when no organisation is active', async () => {
+  it("shows a hint to select an organisation before selecting a facility when no organisation is active", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithOrgOptions);
 
@@ -891,12 +961,12 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
       // The Arabic hint "يجب اختيار مؤسسة قبل اختيار منشأة." appears
       // when the tenant is active but no organisation is active.
       expect(
-        screen.getByText('يجب اختيار مؤسسة قبل اختيار منشأة.'),
+        screen.getByText("يجب اختيار مؤسسة قبل اختيار منشأة."),
       ).toBeInTheDocument();
     });
   });
 
-  it('calls selectOrganisationContext with the selected organisationId and CSRF token', async () => {
+  it("calls selectOrganisationContext with the selected organisationId and CSRF token", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithOrgOptions);
     mockSelectOrganisationContext.mockResolvedValue(contextWithOrgOptions);
@@ -906,11 +976,11 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Organisation Alpha')).toBeInTheDocument();
+      expect(screen.getByText("Organisation Alpha")).toBeInTheDocument();
     });
 
-    const selectButton = screen.getByRole('button', {
-      name: 'اختيار المؤسسة',
+    const selectButton = screen.getByRole("button", {
+      name: "اختيار المؤسسة",
     });
     await act(async () => {
       await userEvent.click(selectButton);
@@ -919,12 +989,12 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     await waitFor(() => {
       expect(mockSelectOrganisationContext).toHaveBeenCalledWith(
         ORG_ID,
-        'csrf-token-value',
+        "csrf-token-value",
       );
     });
   });
 
-  it('calls selectFacilityContext with the selected facilityId and CSRF token', async () => {
+  it("calls selectFacilityContext with the selected facilityId and CSRF token", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
     mockSelectFacilityContext.mockResolvedValue(
@@ -936,11 +1006,11 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Facility Alpha')).toBeInTheDocument();
+      expect(screen.getByText("Facility Alpha")).toBeInTheDocument();
     });
 
-    const selectButton = screen.getByRole('button', {
-      name: 'اختيار المنشأة',
+    const selectButton = screen.getByRole("button", {
+      name: "اختيار المنشأة",
     });
     await act(async () => {
       await userEvent.click(selectButton);
@@ -949,12 +1019,12 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
     await waitFor(() => {
       expect(mockSelectFacilityContext).toHaveBeenCalledWith(
         FACILITY_ID,
-        'csrf-token-value',
+        "csrf-token-value",
       );
     });
   });
 
-  it('renders the active organisation indicator in the header when set', async () => {
+  it("renders the active organisation indicator in the header when set", async () => {
     mockGetSession.mockResolvedValue(validSession);
     mockGetContext.mockResolvedValue(contextWithActiveOrgAndFacilityOptions);
 
@@ -964,8 +1034,8 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
 
     await waitFor(() => {
       // The active organisation display name appears in the header.
-      const headerContext = document.querySelector('.ih-app__header-context');
-      expect(headerContext?.textContent).toContain('Organisation Alpha');
+      const headerContext = document.querySelector(".ih-app__header-context");
+      expect(headerContext?.textContent).toContain("Organisation Alpha");
     });
   });
 });
@@ -974,34 +1044,34 @@ describe('DashboardPage ADR-015 organisation and facility selectors', () => {
 // Clinic Admin shell v1 entry affordance (DESIGN_BIBLE.md §17.1)
 // ---------------------------------------------------------------------------
 
-const R09_MEMBERSHIP_ID = '77777777-7777-7777-7777-777777777777';
-const R09_TENANT_ID = '88888888-8888-8888-8888-888888888888';
-const R09_ORG_ID = '99999999-9999-9999-9999-999999999999';
-const R09_FACILITY_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const R09_MEMBERSHIP_ID = "77777777-7777-7777-7777-777777777777";
+const R09_TENANT_ID = "88888888-8888-8888-8888-888888888888";
+const R09_ORG_ID = "99999999-9999-9999-9999-999999999999";
+const R09_FACILITY_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
 const r09Session = {
   ok: true,
   data: {
     user: {
-      id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-      email: 'clinic-admin@example.invalid',
-      displayName: 'Clinic Admin Operator',
-      status: 'active' as const,
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      email: "clinic-admin@example.invalid",
+      displayName: "Clinic Admin Operator",
+      status: "active" as const,
     },
     memberships: [
       {
         id: R09_MEMBERSHIP_ID,
         tenantId: R09_TENANT_ID,
-        tenantSlug: 'tenant-r09.invalid',
-        tenantDisplayName: 'Tenant R09',
-        status: 'active' as const,
+        tenantSlug: "tenant-r09.invalid",
+        tenantDisplayName: "Tenant R09",
+        status: "active" as const,
         roles: [
-          { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+          { code: "R09_ADMINISTRATOR" as const, displayName: "مدير المنشأة" },
         ],
       },
     ],
     activeTenantContext: null,
-    expiresAt: '2026-01-01T12:00:00.000Z',
+    expiresAt: "2026-01-01T12:00:00.000Z",
   },
 };
 
@@ -1012,45 +1082,45 @@ const r09FullContext = {
       {
         membershipId: R09_MEMBERSHIP_ID,
         tenantId: R09_TENANT_ID,
-        tenantSlug: 'tenant-r09.invalid',
-        tenantDisplayName: 'Tenant R09',
+        tenantSlug: "tenant-r09.invalid",
+        tenantDisplayName: "Tenant R09",
         roles: [
-          { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+          { code: "R09_ADMINISTRATOR" as const, displayName: "مدير المنشأة" },
         ],
       },
     ],
     active: {
       membershipId: R09_MEMBERSHIP_ID,
       tenantId: R09_TENANT_ID,
-      tenantSlug: 'tenant-r09.invalid',
-      tenantDisplayName: 'Tenant R09',
+      tenantSlug: "tenant-r09.invalid",
+      tenantDisplayName: "Tenant R09",
       roles: [
-        { code: 'R09_ADMINISTRATOR' as const, displayName: 'مدير المنشأة' },
+        { code: "R09_ADMINISTRATOR" as const, displayName: "مدير المنشأة" },
       ],
     },
     organisationOptions: [],
     activeOrganisation: {
       organisationId: R09_ORG_ID,
-      code: 'R09-ORG',
-      displayName: 'R09 Organisation',
+      code: "R09-ORG",
+      displayName: "R09 Organisation",
     },
     facilityOptions: [],
     activeFacility: {
       facilityId: R09_FACILITY_ID,
       organisationId: R09_ORG_ID,
-      code: 'R09-FAC',
-      displayName: 'R09 Facility',
+      code: "R09-FAC",
+      displayName: "R09 Facility",
     },
   },
 };
 
-describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
+describe("DashboardPage Clinic Admin entry affordance (shell v1)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetContext.mockResolvedValue(r09FullContext);
     mockGetCsrfToken.mockResolvedValue({
       ok: true,
-      data: { token: 'csrf-token-value' },
+      data: { token: "csrf-token-value" },
     });
   });
 
@@ -1058,7 +1128,7 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the Clinic Admin entry card when R09 has full context', async () => {
+  it("renders the Clinic Admin entry card when R09 has full context", async () => {
     mockGetSession.mockResolvedValue(r09Session);
     mockGetContext.mockResolvedValue(r09FullContext);
 
@@ -1069,19 +1139,19 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
     await waitFor(() => {
       // The Arabic entry button label "الدخول إلى إدارة المنشأة".
       expect(
-        screen.getByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+        screen.getByRole("button", { name: "الدخول إلى إدارة المنشأة" }),
       ).toBeInTheDocument();
     });
 
     // The entry card section is identifiable by its labelled heading.
-    const entryTitle = screen.getByText('إدارة المنشأة');
-    const entrySection = entryTitle.closest('section');
+    const entryTitle = screen.getByText("إدارة المنشأة");
+    const entrySection = entryTitle.closest("section");
     expect(entrySection).not.toBeNull();
     // The eyebrow carries the canonical role label.
-    expect(entrySection?.textContent).toContain('مدير المنشأة');
+    expect(entrySection?.textContent).toContain("مدير المنشأة");
   });
 
-  it('navigates to /clinic-admin when the entry button is clicked', async () => {
+  it("navigates to /clinic-admin when the entry button is clicked", async () => {
     mockGetSession.mockResolvedValue(r09Session);
     mockGetContext.mockResolvedValue(r09FullContext);
 
@@ -1091,21 +1161,21 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+        screen.getByRole("button", { name: "الدخول إلى إدارة المنشأة" }),
       ).toBeInTheDocument();
     });
 
-    const button = screen.getByRole('button', {
-      name: 'الدخول إلى إدارة المنشأة',
+    const button = screen.getByRole("button", {
+      name: "الدخول إلى إدارة المنشأة",
     });
     await act(async () => {
       await userEvent.click(button);
     });
 
-    expect(mockReplace).toHaveBeenCalledWith('/clinic-admin');
+    expect(mockReplace).toHaveBeenCalledWith("/clinic-admin");
   });
 
-  it('does not render the entry card when the principal lacks R09', async () => {
+  it("does not render the entry card when the principal lacks R09", async () => {
     const nonR09Session = {
       ...r09Session,
       data: {
@@ -1114,7 +1184,10 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
           {
             ...r09Session.data.memberships[0]!,
             roles: [
-              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+              {
+                code: "R13_SYSTEM_ADMINISTRATOR" as const,
+                displayName: "مسؤول النظام",
+              },
             ],
           },
         ],
@@ -1127,14 +1200,20 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
         active: {
           ...r09FullContext.data.active!,
           roles: [
-            { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+            {
+              code: "R13_SYSTEM_ADMINISTRATOR" as const,
+              displayName: "مسؤول النظام",
+            },
           ],
         },
         options: [
           {
             ...r09FullContext.data.options[0]!,
             roles: [
-              { code: 'R13_SYSTEM_ADMINISTRATOR' as const, displayName: 'مسؤول النظام' },
+              {
+                code: "R13_SYSTEM_ADMINISTRATOR" as const,
+                displayName: "مسؤول النظام",
+              },
             ],
           },
         ],
@@ -1149,12 +1228,12 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+        screen.queryByRole("button", { name: "الدخول إلى إدارة المنشأة" }),
       ).not.toBeInTheDocument();
     });
   });
 
-  it('does not render the entry card when facility context is missing', async () => {
+  it("does not render the entry card when facility context is missing", async () => {
     const partialContext = {
       ...r09FullContext,
       data: {
@@ -1171,7 +1250,7 @@ describe('DashboardPage Clinic Admin entry affordance (shell v1)', () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByRole('button', { name: 'الدخول إلى إدارة المنشأة' }),
+        screen.queryByRole("button", { name: "الدخول إلى إدارة المنشأة" }),
       ).not.toBeInTheDocument();
     });
   });

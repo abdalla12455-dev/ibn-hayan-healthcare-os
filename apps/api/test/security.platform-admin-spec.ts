@@ -270,6 +270,13 @@ describe('Platform Admin HTTP security boundaries', () => {
       role: 'R09_ADMINISTRATOR',
     });
 
+    const session = await request(server)
+      .get('/api/v1/auth/session')
+      .set('Cookie', actor.cookie)
+      .expect(200);
+
+    expect(session.body).not.toHaveProperty('hasPlatformAdminAccess');
+
     await expectDenied(actor.cookie, 403);
   });
 
@@ -285,6 +292,13 @@ describe('Platform Admin HTTP security boundaries', () => {
     const actor = await createActor({
       platformGrant: true,
     });
+
+    const session = await request(server)
+      .get('/api/v1/auth/session')
+      .set('Cookie', actor.cookie)
+      .expect(200);
+
+    expect(session.body).toHaveProperty('hasPlatformAdminAccess', true);
 
     const overview = await request(server)
       .get(URLS[0]!)
